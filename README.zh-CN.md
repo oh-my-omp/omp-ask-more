@@ -4,7 +4,7 @@
 
 一个影子替换原生 `ask` 的 OMP 插件。参数是原生参数**加上扩展字段**：原生组件渲染原生部分、忽略其余；ask-more 组件两者都渲染。答案形状、结果渲染器与持久化调用的契约保持原生。
 
-状态：**已实现，v0.1.0**。在 omp 18.13.3 + Tern 0.9.6 上验证：单测、ANSI 对话框端到端、Tern picker 端到端（含指针操作）、无 UI 路径。见[验证](#验证)。
+状态：**已实现，v0.1.0**。在 omp 18.13.3 + Tern 0.9.6 上验证：单测、Tern 面板端到端（键盘、指针、Other、取消、窄窗格）、ANSI 对话框端到端、无 UI 路径。见[验证](#验证)。
 
 ## 为什么
 
@@ -100,17 +100,17 @@ flowchart LR
   v -- 不通过 --> e[结构化错误回给模型]
   v -- 通过 --> u{"hasUI 且 mode 为 tui"}
   u -- 否 --> n["ctx.invokeTool（原生 ask）或直接拒绝"]
-  u -- 是 --> s{"支持 picker 吗"}
-  s -- 支持 --> p["picker 面板（screen、cards、preview side）"]
-  s -- 不支持 --> c["ANSI 对话框（同一组件）"]
+  u -- 是 --> s{"终端说 TSP 吗"}
+  s -- "是（Tern）" --> p["模态面板（overlay lg，窄窗格 full）"]
+  s -- 否 --> c["ANSI 对话框（同一组件）"]
   p --> a[AskToolDetails]
   c --> a
   n --> a
 ```
 
-两个表面是同一个 pi-tui 组件（`src/component.ts`），经 `ui.custom` 挂载（`extension-ui-controller.ts:1283-1360`）：终端说 TSP 时由 Tern 后端调用 `describe()` 而不是 `render()`（`packages/tui/src/tui.ts:264-272,294-305`）。两种情况下键盘都在组件手里，`↑↓`、`enter`、`o`、`esc`、`ctrl+o` 行为一致。
+两个表面是同一个 pi-tui 组件（`src/component.ts`），经 `ui.custom` 挂载（`extension-ui-controller.ts:1283-1360`）：终端说 TSP 时由 Tern 后端调用 `describe()` 而不是 `render()`（`packages/tui/src/tui.ts:264-272,294-305`）。两种情况下键盘都在组件手里，`↑↓`、`enter`、`o`、`esc`、`ctrl+o` 行为一致；在 Tern 里 `PgUp`/`PgDn`/`Home`/`End` 还会滚动面板。
 
-在 Tern 里，组件把 `picker` 作为名为 `picker` 的子节点描述（`dockedPicker` 的形态，`packages/tui/src/native/picker.ts`），由 reconciler 提升进 `layer`（`packages/tui/src/native/reconcile.ts:27-28,426,484`）：`size: "screen"`、`layout: "cards"`、`preview: "side"`，每个选项一张卡，预览里放简报各段、证据 `code` 节点、Mermaid 的 `md`、风险、聚焦选项的取舍，动作条是 `Submit`、`Other`、`Cancel`。
+在 Tern 里，组件仍挂在 composer 的 dock，描述一个 `overlay` 节点（`anchor: "center"`、`size: "lg"`，窄于 `NARROW_SHEET_COLS` 列时为 `"full"`、`modal`），由 reconciler 提升进 `layer`（`packages/tui/src/native/reconcile.ts`）：盖在 transcript 上的不透明面板，标题取 `header`。Tern 把面板正文当作一列整体滚动，并在列表选中项出现或移动时按正文底边把它滚进视野，而面板最后一行 `omp.actions` 若固定在底部会正好盖住它，所以动作条不做那一行。正文依次是：问题与 Where/What/How；然后是决定区——选项列表（单击选中、双击作答、最后一行是 `Other…`）、聚焦选项的取舍卡、Other 输入框和 Cancel/Submit 动作条，动作条在面板打开时把自己滚进视野，因此简报再长，打开时整个决定区也在视野内；最后是证据 `code` 节点（折叠到 12 行，由 Tern 自带的 "more lines" 展开）、Mermaid 的 `md` 和风险。Other 输入框是作为子组件放进去的 pi-tui `Input`：它的值是文本的唯一一份，由面板转交的按键和 Tern 的 edit/undo 事件编辑；`esc` 回到选项。不支持 `overlay` 的终端在 dock 里得到同一列内容。
 
 `ctx.hasUI` 为假或模式不是 `tui` 时，工具用原生子集调 `ctx.invokeTool`（`src/schema.ts#nativeQuestion`），由原生对话框渲染原生字段；没有原生解析器时（例如 print 模式）返回结构化拒绝，而不是挂住。
 
@@ -139,7 +139,7 @@ flowchart LR
 index.ts        插件入口：注册 ask、校验、选择表面、委托
 src/schema.ts   原生字段 + brief/tradeoff、zod 参数、语义校验
 src/brief.ts    按工作目录解析 path:lines，限界读取
-src/nodes.ts    picker/card/section/code/md/kv 组装与预览子节点
+src/nodes.ts    Tern 面板：overlay、简报各段、选项列表、取舍卡、证据代码、动作条
 src/component.ts 单个组件：render() 给 ANSI，describe() 给 Tern
 src/result.ts   AskToolDetails 构造、取消与拒绝结果
 src/i18n.ts     界面标签取自 OMOMP_LANG / LC_*；协议字段保持英文
@@ -149,14 +149,14 @@ test/           校验与原生投影测试（bun test）
 
 ## 验证
 
-2026-10-28 执行，omp 18.13.3、Tern 0.9.6、`opencode-go/deepseek-v4.1-flash`。
+2026-10-29 执行，omp 18.13.3、Tern 0.9.6、`opencode-go/deepseek-v4.1-flash`；无 UI 一行在 2026-10-28 执行（此后该代码路径未改动）。
 
 | 检查 | 命令 | 观察结果 |
 |---|---|---|
 | 类型 | `bun run check` | `tsc --noEmit` 无错误 |
 | 单测 | `bun test` | 10 通过 0 失败：每条拒绝信息、证据上下界、`nativeQuestion` 投影 |
-| ANSI 表面 | PTY 里 `omp --no-extensions -e /tmp/ask-more-verify/index.ts`，提示词「调用 ask 工具…」 | 面板画出简报各段、带单选标记的选项、聚焦选项的取舍；`↓` 移动游标并切换取舍；`o` 输入文本后 `enter` 返回 `User answers: fixture: "…"`；另一次用裸 `enter` 提交返回 `User answers: verify-dir-lifecycle: 一次性脚手架目录` |
-| Tern 表面 | 无头 `tern serve --control …`，`run` 带 `PI_TUI_TSP_RECORD` 的 omp 包装脚本，`ctl tree` 与 `ctl click` | `tree .sf-layer .sf-picker` → 一个 `sf-picker sz-screen lay-cards pv-side` 节点，rect 1268×754；`tree .pk-pv-slot .sf` → 11 个节点，含带 Where/What/How 文本的 `sf-section collapsible`；点 `.pk-row[data-v=o1]` 后预览切到该选项的取舍；点 `.pk-btn.primary` 发出 `{"ev":"action","act":"submit"}`，transcript 出现 `User answers: first_move: 我先给一份改动提案` |
+| Tern 表面 | 无头 `tern serve --control …`，在其窗格里带 `PI_TUI_TSP_RECORD` 运行 omp；`ctl shot`、`tree`、`dump`、`click`、`dblclick`、`key`、`type` | `tree .sf-overlay` → `sf-overlay sz-lg at-center modal`（720 px 宽窗口下为 `sz-full`）；面板在 transcript 上不透明；简报短时打开停在问题处（y 120），选项、取舍与按钮都在视野内；Where/What/How 超过一屏时打开即可见选项、取舍与按钮，`↓↓` 后选中行（y 669）与动作条（y 848–882）仍在正文区（104–882）内，`enter` 返回 `cache-invalidation: 事件驱动主动失效广播`；单击一行发出 `select … option:N` 并切换取舍卡；`↓` + `enter` 返回 `retry-limit: 5 次`；`dblclick` 发出 `activate … option:2` 并返回 `retry-limit: 5 次`；`Other…` 行打开获得焦点的 `sf-input`，键入的文本进入其中，`esc` 移除它后 `↑` 重新移动选中项；Other + Submit 按钮返回 `retry-cap: "seven"`；Cancel 按钮与 `esc` 返回 `(cancelled)` 并停止本轮；每次作答后 `tree .sf-overlay` 为空 |
+| ANSI 表面 | PTY 里 `omp --no-extensions -e …/index.ts`，提示词「立即调用 ask 工具…」 | 面板画出标题、Where/What/How、证据行、带单选标记与 `（推荐）` 的选项、聚焦选项的取舍；`o`、`abc`、Backspace、`d`、`enter` 返回 `User answers: retry-limit: "abd"` |
 | 无 UI 路径 | `omp -p … "调用 ask…"` | 载荷通过校验后得到 `ask rejected: … no native ask is available to delegate to here` |
 
 尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、以及带扩展参数的 `/tree` 重答。

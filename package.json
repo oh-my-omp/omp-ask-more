@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Ask with context: native ask parameters extended with a brief, evidence and per-option tradeoffs, rendered by a Tern picker",
+	"description": "Ask with context: native ask parameters extended with a brief, evidence and per-option tradeoffs, answered in a Tern sheet",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/oh-my-omp/omp-ask-more.git"

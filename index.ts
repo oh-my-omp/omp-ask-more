@@ -1,9 +1,9 @@
 /**
  * ask-more: registers `ask` under the native name with the native parameters extended by a
- * `brief` and per-option tradeoffs. When a Tern-capable TUI is present it answers in a picker
- * sheet; otherwise it delegates to the native built-in, which renders the native fields and
- * ignores the extension ones. The answer and the persisted call keep the native contracts
- * (`AskToolDetails`, `/tree` recovery), so nothing downstream changes.
+ * `brief` and per-option tradeoffs. An interactive TUI session answers in this plugin's component
+ * (an ANSI dialog, or a modal sheet in Tern); any other session delegates to the native built-in,
+ * which renders the native fields and ignores the extension ones. The answer and the persisted call
+ * keep the native contracts (`AskToolDetails`, `/tree` recovery), so nothing downstream changes.
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
@@ -51,7 +51,7 @@ async function ask(
 	try {
 		const evidence = await resolveEvidence(question.brief.evidence, ctx.cwd);
 		const submission = await ui.custom<Submission | undefined>(
-			(_tui, _theme, _keybindings, done) => new AskMoreComponent({ question, evidence, finish: done }),
+			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, question, evidence, finish: done }),
 			{ ...(signal === undefined ? {} : { signal }) },
 		);
 		if (submission === undefined || submission.kind === "cancel") {

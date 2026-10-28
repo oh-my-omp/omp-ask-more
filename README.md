@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 An OMP plugin that shadows the native `ask` tool. Its parameters are the native ones **plus** extension fields: the native component renders the native part and ignores the rest; the ask-more component renders both. The answer shape, the result renderer and the persisted-call contract stay native.
 
-Status: **implemented, v0.1.0**. Verified on omp 18.13.3 with Tern 0.9.6: unit tests, the ANSI dialog end to end, the Tern picker end to end with pointer input, and the no-UI path. See [Verification](#verification).
+Status: **implemented, v0.1.0**. Verified on omp 18.13.3 with Tern 0.9.6: unit tests, the Tern sheet end to end (keyboard, pointer, Other, cancel, narrow pane), the ANSI dialog end to end, and the no-UI path. See [Verification](#verification).
 
 ## Why
 
@@ -100,17 +100,17 @@ flowchart LR
   v -- invalid --> e[structured error back to model]
   v -- ok --> u{"hasUI and mode tui"}
   u -- "no" --> n["ctx.invokeTool(native ask) or a rejection"]
-  u -- "yes" --> s{"Tern picker supported?"}
-  s -- "yes" --> p["picker sheet (screen, cards, preview side)"]
+  u -- "yes" --> s{"terminal speaks TSP?"}
+  s -- "yes (Tern)" --> p["modal sheet (overlay lg, full in narrow panes)"]
   s -- "no" --> c["ANSI dialog (same component)"]
   p --> a[AskToolDetails]
   c --> a
   n --> a
 ```
 
-One pi-tui component (`src/component.ts`) mounted with `ui.custom` (`extension-ui-controller.ts:1283-1360`) draws both surfaces: the Tern backend calls `describe()` instead of `render()` when the terminal speaks TSP (`packages/tui/src/tui.ts:264-272,294-305`). Keys stay with the component in both cases, so `↑↓`, `enter`, `o`, `esc` and `ctrl+o` behave identically.
+One pi-tui component (`src/component.ts`) mounted with `ui.custom` (`extension-ui-controller.ts:1283-1360`) draws both surfaces: the Tern backend calls `describe()` instead of `render()` when the terminal speaks TSP (`packages/tui/src/tui.ts:264-272,294-305`). Keys stay with the component in both cases, so `↑↓`, `enter`, `o`, `esc` and `ctrl+o` behave identically; in Tern, `PgUp`/`PgDn`/`Home`/`End` also scroll the sheet.
 
-In Tern the component describes a `picker` docked as a child named `picker` (`dockedPicker`'s shape, `packages/tui/src/native/picker.ts`), which the reconciler hoists into `layer` (`packages/tui/src/native/reconcile.ts:27-28,426,484`): `size: "screen"`, `layout: "cards"`, `preview: "side"`, one card per option, the preview holding the brief sections, the evidence `code` nodes, the Mermaid `md`, the risks and the focused option's tradeoffs, and an action bar with `Submit`, `Other`, `Cancel`.
+In Tern the component, still mounted in the composer dock, describes an `overlay` node (`anchor: "center"`, `size: "lg"`, `"full"` below `NARROW_SHEET_COLS` columns, `modal`), which the reconciler hoists into `layer` (`packages/tui/src/native/reconcile.ts`): an opaque sheet over the transcript, titled by `header`. Tern scrolls a sheet body as one column and scrolls a list's selection into view against the body's bottom edge, where a sheet's sticky last `omp.actions` row would cover it; so the bar is not that row. The body reads: the question and Where/What/How; then the decision — the options as a list (`click` selects, `dblclick` answers, `Other…` is its last row), the focused option's tradeoff card, the Other field and the Cancel/Submit bar, which reveals itself when the sheet opens so a long brief still opens with the whole decision in view; then the evidence `code` nodes (folded to 12 lines behind Tern's own "more lines" control), the Mermaid `md` and the risks. The Other field is a pi-tui `Input` placed as a child component: its value is the only copy of the text, edited by keys the sheet forwards and by Tern's edit/undo events; `esc` returns to the options. A terminal without `overlay` gets the same column in the dock.
 
 When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with the native subset (`src/schema.ts#nativeQuestion`), so the native dialog renders the native fields; without a native resolver — print mode, for instance — it returns a structured rejection instead of hanging.
 
@@ -139,7 +139,7 @@ When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTo
 index.ts        plugin entry: registers ask, validates, chooses the surface, delegates
 src/schema.ts   native fields + brief/tradeoff, zod parameters, semantic validation
 src/brief.ts    path:lines resolution against the working directory, bounded reads
-src/nodes.ts    picker/card/section/code/md/kv composition, preview children
+src/nodes.ts    the Tern sheet: overlay, brief blocks, options list, tradeoff card, evidence code, actions
 src/component.ts one component: render() for ANSI, describe() for Tern
 src/result.ts   AskToolDetails construction, cancelled and rejected results
 src/i18n.ts     UI labels from OMOMP_LANG / LC_*; protocol fields stay English
@@ -149,14 +149,14 @@ test/           validation and native-projection tests (bun test)
 
 ## Verification
 
-Executed on 2026-10-28 with omp 18.13.3, Tern 0.9.6, `opencode-go/deepseek-v4.1-flash`.
+Executed on 2026-10-29 with omp 18.13.3, Tern 0.9.6, `opencode-go/deepseek-v4.1-flash`; the no-UI row on 2026-10-28 (its code path is unchanged since).
 
 | Check | Command | Observed |
 |---|---|---|
 | Types | `bun run check` | `tsc --noEmit` clean |
 | Unit | `bun test` | 10 pass, 0 fail: every rejection message, evidence bounds, `nativeQuestion` projection |
-| ANSI surface | `omp --no-extensions -e /tmp/ask-more-verify/index.ts` in a PTY, prompt "调用 ask 工具…" | the dialog drew the brief sections, options with radio markers and the focused option's tradeoff; `↓` moved the cursor and swapped the tradeoff; `o` + text + `enter` returned `User answers: fixture: "…"`; a second run submitted with plain `enter` and returned `User answers: verify-dir-lifecycle: 一次性脚手架目录` |
-| Tern surface | headless `tern serve --control …`, `run` an omp wrapper with `PI_TUI_TSP_RECORD`, `ctl tree` and `ctl click` | `tree .sf-layer .sf-picker` → one node `sf-picker sz-screen lay-cards pv-side`, rect 1268×754; `tree .pk-pv-slot .sf` → 11 nodes including `sf-section collapsible` with the Where/What/How text; click on `.pk-row[data-v=o1]` swapped the preview to that option's tradeoff; click on `.pk-btn.primary` emitted `{"ev":"action","act":"submit"}` and the transcript showed `User answers: first_move: 我先给一份改动提案` |
+| Tern surface | headless `tern serve --control …`, omp run in its pane with `PI_TUI_TSP_RECORD`; `ctl shot`, `tree`, `dump`, `click`, `dblclick`, `key`, `type` | `tree .sf-overlay` → `sf-overlay sz-lg at-center modal` (`sz-full` in a 720 px wide window); the sheet is opaque over the transcript; a short brief opens at the question (y 120) with options, tradeoff and buttons in view; a brief whose Where/What/How run past one screen opens with the options, the tradeoff and the buttons in view, and after `↓↓` the selected row (y 669) and the bar (y 848–882) stay inside the body (104–882), `enter` returned `cache-invalidation: 事件驱动主动失效广播`; a row click sent `select … option:N` and switched the tradeoff card; `↓` + `enter` returned `retry-limit: 5 次`; `dblclick` sent `activate … option:2` and returned `retry-limit: 5 次`; the `Other…` row opened a focused `sf-input`, typed text reached it, `esc` removed it and `↑` moved the selection again; Other + the Submit button returned `retry-cap: "seven"`; the Cancel button and `esc` returned `(cancelled)` and stopped the turn; after each answer `tree .sf-overlay` was empty |
+| ANSI surface | `omp --no-extensions -e …/index.ts` in a PTY, prompt "立即调用 ask 工具…" | the dialog drew the title, Where/What/How, the evidence lines, radio options with `（推荐）` and the focused option's tradeoff; `o`, `abc`, Backspace, `d`, `enter` returned `User answers: retry-limit: "abd"` |
 | No-UI path | `omp -p … "调用 ask…"` | `ask rejected: … no native ask is available to delegate to here`, after the payload passed validation |
 
 Not yet exercised at runtime: the native-delegation path itself (needs an environment where `ctx.invokeTool` exists but `ui.custom` does not), collaborator guests, and `/tree` re-answer with an extended call.

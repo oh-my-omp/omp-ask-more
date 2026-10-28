@@ -1,26 +1,34 @@
 // One component, two surfaces: `render()` draws the ANSI dialog for a plain terminal, `describe()`
-// draws the native picker for a Tern pane. Both read the same state, so keys, folding and the
-// focused option stay in sync (the pattern OMP's own ask dialog uses).
+// draws the native sheet for a Tern pane. Both read the same state, so keys, folding and the focused
+// option stay in sync. The Other answer is a pi-tui `Input`: its value is the only copy of the text,
+// edited by raw keys (delegated while the sheet holds focus, or direct once the field is focused) and
+// by the terminal's own edit/undo events, which the reconciler routes to the field component.
+import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import {
 	type Component,
 	type DescribeContext,
+	Input,
 	Markdown,
 	type NativeNode,
 	type NativeUiEvent,
+	type TUI,
 	getMarkdownTheme,
 	matchesKey,
 	theme,
 	truncateToWidth,
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
+import { matchesSelectPageDown, matchesSelectPageUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
+import { leafKey } from "@oh-my-pi/pi-tui/native/node";
 import type { ResolvedEvidence } from "./brief.ts";
 import { tr } from "./i18n.ts";
-import { describeFallback, describePicker, type PickerView } from "./nodes.ts";
+import { CANCEL_ACT, describeSheet, OPTIONS_KEY, OTHER_ITEM, optionIndex, type SheetView, SUBMIT_ACT, sheetTitle } from "./nodes.ts";
 import type { AskQuestion } from "./schema.ts";
 
 export type Submission = { readonly kind: "answer"; readonly index: number } | { readonly kind: "other"; readonly text: string } | { readonly kind: "cancel" };
 
 export interface AskMoreOptions {
+	readonly tui: TUI;
 	readonly question: AskQuestion;
 	readonly evidence: readonly ResolvedEvidence[];
 	readonly finish: (submission: Submission) => void;
@@ -30,23 +38,30 @@ const DOCUMENT_SCROLL = 10;
 
 export class AskMoreComponent implements Component {
 	debugKind = "AskMore";
+	readonly #tui: TUI;
 	readonly #question: AskQuestion;
 	readonly #evidence: readonly ResolvedEvidence[];
 	readonly #finish: (submission: Submission) => void;
-	readonly #view: { otherMode: boolean; cursor: number; other: string; expanded: boolean };
+	readonly #other = new Input();
+	#view: SheetView;
 	#memo: { key: string; lines: readonly string[] } | undefined;
-	#native: { key: string; node: NativeNode } | undefined;
+	#native: { view: SheetView; overlay: boolean; cols: number; node: NativeNode } | undefined;
 	#closed = false;
 
 	constructor(options: AskMoreOptions) {
+		this.#tui = options.tui;
 		this.#question = options.question;
 		this.#evidence = options.evidence;
 		this.#finish = options.finish;
-		this.#view = { otherMode: false, cursor: Math.min(options.question.recommended ?? 0, options.question.options.length - 1), other: "", expanded: false };
-	}
-
-	get view(): PickerView {
-		return this.#view;
+		this.#view = {
+			cursor: Math.min(options.question.recommended ?? 0, options.question.options.length - 1),
+			otherMode: false,
+			expanded: false,
+			scroll: undefined,
+		};
+		this.#other.placeholder = tr("Type your own answer", "自己写一个答案");
+		this.#other.onSubmit = value => this.#submitOther(value);
+		this.#other.onEscape = () => this.#leaveOther();
 	}
 
 	dispose(): void {
@@ -55,7 +70,8 @@ export class AskMoreComponent implements Component {
 
 	render(width: number): readonly string[] {
 		const inner = Math.max(24, width - 4);
-		const key = `${width}|${this.#view.otherMode}|${this.#view.cursor}|${this.#view.other}|${this.#view.expanded}`;
+		const view = this.#view;
+		const key = `${width}|${view.otherMode}|${view.cursor}|${view.expanded}|${this.#other.getValue()}|${this.#other.getCursor()}`;
 		if (this.#memo?.key === key) return this.#memo.lines;
 
 		const rows: string[] = [];
@@ -64,8 +80,8 @@ export class AskMoreComponent implements Component {
 		};
 		const heading = (label: string) => rows.push(theme.fg("accent", label));
 
-		const { brief, header } = this.#question;
-		const title = header?.trim() || tr("Decision", "需要你决定");
+		const { brief } = this.#question;
+		const title = sheetTitle(this.#question);
 		rows.push(theme.fg("accent", title));
 		paragraph(this.#question.question);
 		rows.push("");
@@ -89,7 +105,7 @@ export class AskMoreComponent implements Component {
 				const location = entry.start > 0 ? `${entry.path}:${entry.start}-${entry.end}` : entry.path;
 				rows.push(theme.fg("muted", location));
 				if (entry.start === 0) continue;
-				const visible = this.#view.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
+				const visible = view.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
 				for (const line of visible) rows.push(`  ${line}`);
 				if (visible.length < entry.lines.length) {
 					rows.push(theme.fg("muted", tr(`  … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `  … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
@@ -112,7 +128,7 @@ export class AskMoreComponent implements Component {
 		}
 
 		this.#question.options.forEach((option, index) => {
-			const chosen = index === this.#view.cursor;
+			const chosen = !view.otherMode && index === view.cursor;
 			const marker = chosen ? "●" : "○";
 			const recommended = index === this.#question.recommended ? theme.fg("success", tr(" (recommended)", "（推荐）")) : "";
 			const detail = option.description?.trim() ? theme.fg("muted", `  ${option.description.trim()}`) : "";
@@ -120,8 +136,8 @@ export class AskMoreComponent implements Component {
 		});
 		rows.push("");
 
-		const option = this.#question.options[this.#view.cursor];
-		if (option !== undefined) {
+		const option = this.#question.options[view.cursor];
+		if (!view.otherMode && option !== undefined) {
 			for (const [label, value] of [
 				[tr("Tradeoff", "取舍"), option.tradeoff],
 				[tr("Holds when", "成立条件"), option.holds_when],
@@ -133,9 +149,9 @@ export class AskMoreComponent implements Component {
 			rows.push("");
 		}
 
-		if (this.#view.otherMode) {
+		if (view.otherMode) {
 			rows.push(theme.fg("accent", tr("Your answer", "你的答案")));
-			rows.push(`> ${this.#view.other}${theme.fg("accent", "▌")}`);
+			for (const line of this.#other.render(inner)) rows.push(line);
 			rows.push(theme.fg("muted", tr("enter submit · esc back", "enter 提交 · esc 返回")));
 		} else {
 			rows.push(theme.fg("muted", tr("↑↓ select · enter submit · o other · esc cancel", "↑↓ 选择 · enter 提交 · o 其他 · esc 取消")));
@@ -149,44 +165,38 @@ export class AskMoreComponent implements Component {
 	}
 
 	describe(cx: DescribeContext): NativeNode {
-		const key = `${cx.cols}|${this.#view.otherMode}|${this.#view.cursor}|${this.#view.other}|${this.#view.expanded}|${cx.supports("picker")}`;
-		if (this.#native?.key === key) return this.#native.node;
-		const node = cx.supports("picker")
-			? describePicker(this.#question, this.#evidence, this.#view)
-			: describeFallback(this.#question, this.#evidence, this.#view);
-		this.#native = { key, node };
+		const overlay = cx.supports("overlay");
+		const native = this.#native;
+		if (native !== undefined && native.view === this.#view && native.overlay === overlay && native.cols === cx.cols) return native.node;
+		const node = describeSheet(this.#question, this.#evidence, this.#view, this.#other, { overlay, cols: cx.cols });
+		this.#native = { view: this.#view, overlay, cols: cx.cols, node };
 		return node;
 	}
 
 	handleInput(data: string): void {
 		if (this.#closed) return;
 		if (matchesKey(data, "ctrl+o")) {
-			this.#view.expanded = !this.#view.expanded;
+			this.#update({ expanded: !this.#view.expanded });
 			return;
 		}
 		if (this.#view.otherMode) {
-			if (matchesKey(data, "escape")) {
-				this.#view.otherMode = false;
-				return;
-			}
-			if (isEnter(data)) {
-				const text = this.#view.other.trim();
-				if (text.length > 0) this.#submit({ kind: "other", text });
-				return;
-			}
-			if (matchesKey(data, "backspace")) {
-				this.#view.other = this.#view.other.slice(0, -1);
-				return;
-			}
-			this.#view.other += data.replace(/[\u0000-\u001f\u007f]/g, "");
+			// The field owns Escape (back) and Enter (submit) through its callbacks.
+			this.#other.handleInput(data);
+			this.#memo = undefined;
 			return;
 		}
+		const count = this.#question.options.length;
 		if (matchesKey(data, "up")) {
-			this.#view.cursor = (this.#view.cursor - 1 + this.#question.options.length) % this.#question.options.length;
+			this.#update({ cursor: (this.#view.cursor - 1 + count) % count });
 			return;
 		}
 		if (matchesKey(data, "down")) {
-			this.#view.cursor = (this.#view.cursor + 1) % this.#question.options.length;
+			this.#update({ cursor: (this.#view.cursor + 1) % count });
+			return;
+		}
+		const scroll = scrollKey(data);
+		if (scroll !== undefined) {
+			this.#update({ scroll: { by: scroll, n: (this.#view.scroll?.n ?? 0) + 1 } });
 			return;
 		}
 		if (isEnter(data)) {
@@ -197,36 +207,63 @@ export class AskMoreComponent implements Component {
 			this.#submit({ kind: "cancel" });
 			return;
 		}
-		if (data === "o" || data === "O") this.#view.otherMode = true;
+		if (data === "o" || data === "O") this.#enterOther();
 	}
 
-	/** Pointer routes: the picker's rows select, `activate` and the action bar submit, `other` opens the input. */
+	/** Pointer routes: a row click selects (Other opens the field), a double click answers, the bar submits or cancels. */
 	handleNativeEvent(event: NativeUiEvent): void {
 		if (this.#closed) return;
-		if (event.type === "select" || event.type === "activate") {
-			const index = Number.parseInt(event.item.replace(/^o/, ""), 10);
-			if (!Number.isInteger(index) || index < 0 || index >= this.#question.options.length) return;
-			this.#view.cursor = index;
-			if (event.type === "activate") this.#submit({ kind: "answer", index });
-			return;
-		}
-		if (event.type !== "action") return;
-		if (event.act === "cancel") {
-			this.#submit({ kind: "cancel" });
-			return;
-		}
-		if (event.act === "other") {
-			this.#view.otherMode = true;
-			return;
-		}
-		if (event.act === "submit" || event.act === "submit-other") {
-			if (this.#view.otherMode) {
-				const text = this.#view.other.trim();
-				if (text.length > 0) this.#submit({ kind: "other", text });
+		switch (event.type) {
+			case "select":
+			case "activate": {
+				if (leafKey(event.key) !== OPTIONS_KEY) return;
+				if (event.item === OTHER_ITEM) {
+					this.#enterOther();
+					return;
+				}
+				const index = optionIndex(this.#question, event.item);
+				if (index === undefined) return;
+				if (event.type === "activate") {
+					this.#submit({ kind: "answer", index });
+					return;
+				}
+				this.#update({ cursor: index, otherMode: false });
 				return;
 			}
-			this.#submit({ kind: "answer", index: this.#view.cursor });
+			case "action":
+				if (event.act === CANCEL_ACT) this.#submit({ kind: "cancel" });
+				else if (event.act === SUBMIT_ACT) {
+					if (this.#view.otherMode) this.#submitOther(this.#other.getValue());
+					else this.#submit({ kind: "answer", index: this.#view.cursor });
+				}
+				return;
+			case "toggle":
+			case "change":
+			case "edit":
+			case "undo":
+			case "send":
+				return;
 		}
+	}
+
+	#update(patch: Partial<SheetView>): void {
+		this.#view = { ...this.#view, ...patch };
+	}
+
+	#enterOther(): void {
+		this.#update({ otherMode: true });
+	}
+
+	/** Back to the options; a field focused by pointer hands the keys back to the sheet. */
+	#leaveOther(): void {
+		this.#update({ otherMode: false });
+		this.#tui.setFocus(this);
+		this.#tui.requestRender();
+	}
+
+	#submitOther(value: string): void {
+		const text = value.trim();
+		if (text.length > 0) this.#submit({ kind: "other", text });
 	}
 
 	#submit(submission: Submission): void {
@@ -234,6 +271,14 @@ export class AskMoreComponent implements Component {
 		this.#closed = true;
 		this.#finish(submission);
 	}
+}
+
+function scrollKey(data: string): TspScrollBy | undefined {
+	if (matchesSelectPageUp(data)) return "page-up";
+	if (matchesSelectPageDown(data)) return "page-down";
+	if (matchesKey(data, "home")) return "start";
+	if (matchesKey(data, "end")) return "end";
+	return undefined;
 }
 
 /** Enter arrives as a named key, `\r` or `\n` depending on the terminal. */
