@@ -2,37 +2,40 @@
 
 [English](README.md) | 简体中文
 
-状态：**仅设计**。尚未写代码，本文件不声明任何已实现行为。
+一个影子替换原生 `ask` 的 OMP 插件。参数是原生参数**加上扩展字段**：原生组件渲染原生部分、忽略其余；ask-more 组件两者都渲染。答案形状、结果渲染器与持久化调用的契约保持原生。
 
-`omp-ask-more` 是一个 omp 插件，影子替换原生 `ask`。它的参数是原生参数**加上扩展字段**：原生组件渲染原生部分、忽略其余；ask-more 组件两者都渲染。答案形状、结果渲染器与持久化调用的契约保持原生。
+状态：**已实现，v0.1.0**。在 omp 18.13.3 + Tern 0.9.6 上验证：单测、ANSI 对话框端到端、Tern picker 端到端（含指针操作）、无 UI 路径。见[验证](#验证)。
 
-## 这个设计要解决的问题
+## 为什么
 
-原生 `ask` 已经具备本功能需要的字段：`question` 按 Markdown 渲染（Tern 是 `md` 节点，`packages/tui/src/overlays/ask-dialog.ts:884`；TUI 走带代码高亮的 Markdown，`:298-311`），每个选项都有自由文本 `preview`（Tern 画当前聚焦选项的 `preview`，`:939`；TUI 画在聚焦选项下方，`:501-503`）。
+原生 `ask` 本来就有这些字段：`question` 按 Markdown 渲染（Tern 是 `md` 节点，`packages/tui/src/overlays/ask-dialog.ts:884`；TUI 走带代码高亮的 Markdown，`:298-311`），每个选项都有自由文本 `preview`（`:939`、`:501-503`）。两件事让它用不起来：
 
-这两个字段没被用起来，原因有两层：
+1. 模型被要求不要用。原生工具 prompt 只有七行，写着 "short labels, tradeoffs in `description`"（`packages/coding-agent/src/prompts/tools/ask.md:1-7`）；`preview` 一次都没出现。
+2. 表面太小。对话框挂在 composer 容器里（`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts:887-905`），标题最多四行、整块最多占终端 70%（`packages/tui/src/overlays/ask-dialog.ts:116-123`），在 Tern 里 describe 成 `omp.editor.ask`——dock 里的 `col`：`md` 问题、选项 `list`、以及只有一个选项的 `preview`（`:762-940`）。
 
-1. 模型被要求不要用。工具 prompt 总共七行，写着 "short labels, tradeoffs in `description`"（`packages/coding-agent/src/prompts/tools/ask.md:1-7`）；`preview` 一次都没出现，而 `description` 只是单行。
-2. 表面太小。对话框挂在 composer 容器里（`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts:887-905`），标题最多四行、整块最多占终端 70%（`packages/tui/src/overlays/ask-dialog.ts:116-123`），在 Tern 里 describe 成 `omp.editor.ask`——dock 里的 `col`：`md` 问题、选项的 `list`、以及**只有一个**选项的 `preview`（`:762-940`）。再长的简报也没地方放，于是模型写一行，用户无法据此决定，ask 被丢掉重问。
+本插件改两件事：模型必须往里面写什么，以及作答表面怎么画。它不改"一个问题是什么"。
 
-把简报塞进 `question`、把取舍塞进 `preview` 也治不了：没有任何东西校验简报是否存在，表面照样只给它四行。
+## 安装
 
-## 改什么、不改什么
+```sh
+omp plugin install https://github.com/oh-my-omp/omp-ask-more
+```
 
-参数 schema 是**原生加扩展字段**，与 omp-todo-more 对 `todo` 的做法同构：原生组件画它认识的部分，不认识的就忽略。
+本地开发用 `omp plugin link /path/to/omp-ask-more`。插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明；不需要任何配置节，并必须保留原生 `ask` 开启，供无 UI 路径委托。
 
-| 保持 | 新增 | 替换 |
-|---|---|---|
-| 工具名 `ask`；全部原生字段（`id`、`question`、`header?`、`options[{label, description?, preview?}]`、`multi?`、`recommended?`）及其含义（`packages/coding-agent/src/tools/ask.ts:52-88`） | 顶层：`brief {where, what, how, evidence?, diagram?, risks?}` | 面向模型的工具描述：写清下面的契约，而不是 "short labels" |
-| 答案形状 `AskToolDetails` 与 `askToolRenderer` 结果卡片（渲染器按工具名选取，`packages/tui/src/tools/index.ts:37`） | 每个选项：`tradeoff`、`holds_when?`、`cost?` | 有富 UI 时可用的作答表面 |
-| 持久化调用参数与 `/tree` 恢复：`arktype` 保留未声明键，所以 `recoverAskQuestions` 接受扩展参数并照旧返回 `questions`（`packages/coding-agent/src/tools/ask.ts:94-109`；用仓库自带的 `arktype` 实测：带 `brief` 与 `tradeoff` 的载荷原样返回） | — | — |
-| 没有富 UI 时委托原生内建（`ctx.invokeTool`，`packages/coding-agent/src/extensibility/extensions/types.ts:780-799`），它看见扩展字段并忽略 | — | — |
+## 参数
 
-承载决定本身的扩展字段是**必填**（`brief.where/what/how`、每个选项的 `tradeoff`），因为"礼貌地请求"不会改变模型行为；只做限定的字段（`evidence`、`diagram`、`risks`、`holds_when`、`cost`）可选，对应"必要时要附上代码片段和 mermaid 图"。
+schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字段：
+
+| 保持 | 新增 |
+|---|---|
+| 工具名 `ask`；`id`、`question`、`header?`、`options[{label, description?, preview?}]`、`multi?`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`） | `brief {where, what, how, evidence?, diagram?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?` |
+
+`arktype` 保留未声明键，因此持久化的扩展调用仍能通过 `recoverAskQuestions`（`ask.ts:94-109`），`/tree` 重答会重新打开它；那里原生对话框只渲染原生字段。
 
 ## 契约
 
-`question` 只当问题用：一两句话，不把简报塞进去。简报是独立字段。
+`question` 只当问题用：一两句话。简报是独立字段。
 
 ```
 ask({
@@ -66,25 +69,27 @@ ask({
 })
 ```
 
-- `brief.where/what/how` 是用户在决定前读的正文，画在选项上方，默认不折叠。
-- `evidence[].path` 加可选 `lines` 由工具按 `ctx.cwd` 解析、在渲染时读取，因此面板用带 `path` 与 `start` 的 `code` 节点画**真实行**（`packages/wire/src/tsp.ts:222-236`），而不是模型敲进去的代码。读不到的引用用错误色画出原因，不阻塞这次 ask。
-- `diagram` 是 Mermaid 源码，Tern 由 `md` 节点原生绘制，TUI 画 ASCII。
-- `tradeoff` / `holds_when` / `cost` 各一行，面板在选项下方用 `kv` 三行呈现；transcript 卡片里不出现这些扩展字段。
+- `brief.where/what/how` 画在选项上方，默认不折叠。
+- `evidence[].path` 加可选 `lines` 由工具按会话工作目录解析、在渲染时读取，因此面板用带 `path` 与 `start` 的 `code` 节点画**真实行**（`packages/wire/src/tsp.ts:222-236`），而不是模型敲进去的代码。读不到的引用用错误色画出原因，不阻塞这次 ask。
+- `diagram` 是 Mermaid 源码：Tern 由 `md` 节点原生绘制，TUI 由 Markdown 渲染器画成 ASCII（`packages/tui/src/theme/mermaid-cache.ts:66,100`）。
+- `tradeoff` / `holds_when` / `cost` 各一行，画在聚焦选项下方。
+
+限制：一次一个问题、2–5 个选项、最多 6 条证据引用、每条引用最多 80 行、不支持 `multi`。
 
 ## 校验
 
-校验发生在工具边界、任何 UI 打开之前，返回结构化工具错误并列出全部违规项，绝不静默降级成薄 ask。
+校验发生在工具边界、任何 UI 打开之前，一次返回全部问题，绝不降级成更薄的 ask。
 
 | 规则 | 拒绝信息 |
 |---|---|
-| `questions.length === 1` | 一次一个决定；拆成多次调用 |
-| `brief.where`、`brief.what`、`brief.how` 非空 | 缺 `brief.<field>` |
-| 每个选项的 `tradeoff` 非空 | 选项 `<label>` 没有取舍 |
-| `evidence` 项有 `path`；`lines` 可解析为 `N` 或 `N-M` | 证据 `<i>` 不是 `path[:lines]` |
-| 拒绝保留标签（`Other (type your own)`、`Chat about this`、`Next →`） | 与原生规则一致，`ask.ts:52-58` |
-| `multi` 不设 | 面板只选一个答案；要选两个就调两次 |
-
-证据路径会检查是否存在，但不作为门槛：读不到只会在面板里标成不可读，因为路径可能指向尚未创建的目标、另一个 checkout，或 `ssh` 主机。
+| 恰好一个问题 | `questions: expected exactly one question` |
+| `brief.where/what/how` 非空 | `questions[0].brief.<field>: empty` |
+| 每个选项 `tradeoff` 非空 | `questions[0].options[i].tradeoff: empty` |
+| 至少两个选项 | 决定至少需要两个选项 |
+| 标签唯一且不是保留标签（`Other (type your own)`、`Chat about this`、`Next →`） | 逐项指明 |
+| 不设 `multi` | 不支持；调两次 |
+| `recommended` 是选项下标 | 指明非法值 |
+| 证据 ≤ 6 条；`lines` 为 `N` 或 `N-M` 且跨度 ≤ 80 行 | 指明第几条与跨度 |
 
 ## 表面
 
@@ -93,71 +98,65 @@ flowchart LR
   m[模型] --> t["ask（插件工具）"]
   t --> v{校验}
   v -- 不通过 --> e[结构化错误回给模型]
-  v -- 通过 --> u{"有富 UI 吗"}
-  u -- 没有 --> n["ctx.invokeTool（原生 ask）：只画原生字段"]
-  u -- 有 --> s{"有 Tern 表面?"}
-  s -- 有 --> p["picker 面板：原生 + 扩展字段"]
-  s -- 没有 --> c["ANSI 对话框：原生 + 扩展字段"]
+  v -- 通过 --> u{"hasUI 且 mode 为 tui"}
+  u -- 否 --> n["ctx.invokeTool（原生 ask）或直接拒绝"]
+  u -- 是 --> s{"支持 picker 吗"}
+  s -- 支持 --> p["picker 面板（screen、cards、preview side）"]
+  s -- 不支持 --> c["ANSI 对话框（同一组件）"]
   p --> a[AskToolDetails]
   c --> a
   n --> a
 ```
 
-两个富表面是同一个 pi-tui 组件，经 `ui.custom()` 挂载（`extension-ui-controller.ts:1283-1360`）；终端说 TSP 时由 Tern 后端调用它的 `describe()` 而不是 `render()`（`packages/tui/src/tui.ts:264-272,294-305`）。
+两个表面是同一个 pi-tui 组件（`src/component.ts`），经 `ui.custom` 挂载（`extension-ui-controller.ts:1283-1360`）：终端说 TSP 时由 Tern 后端调用 `describe()` 而不是 `render()`（`packages/tui/src/tui.ts:264-272,294-305`）。两种情况下键盘都在组件手里，`↑↓`、`enter`、`o`、`esc`、`ctrl+o` 行为一致。
 
-**Tern。** 组件声明 `nativeSheet(cx) => cx.supports("picker")`，`describe()` 返回 `picker` 节点：
+在 Tern 里，组件把 `picker` 作为名为 `picker` 的子节点描述（`dockedPicker` 的形态，`packages/tui/src/native/picker.ts`），由 reconciler 提升进 `layer`（`packages/tui/src/native/reconcile.ts:27-28,426,484`）：`size: "screen"`、`layout: "cards"`、`preview: "side"`，每个选项一张卡，预览里放简报各段、证据 `code` 节点、Mermaid 的 `md`、风险、聚焦选项的取舍，动作条是 `Submit`、`Other`、`Cancel`。
 
-| 部位 | 节点 | 内容 |
-|---|---|---|
-| 头 | `picker.title` / `subtitle` | `header`，然后 `question` |
-| 行 | `picker.items`，`layout: "cards"` | 每个选项一张卡：label、一行 `description`、`Recommended` 徽章、tone |
-| 预览 | `picker.preview: "side"` 的子节点 | `card`(简报) 内含 WHERE / WHAT / HOW 各一个 `section.collapsible`、解析后的 `code` 节点、Mermaid 的 `md`、`risks`，然后是聚焦选项的 `tradeoff` / `holds_when` / `cost` 组成的 `kv` |
-| 动作 | `picker.actions` | `Submit`（enter）、`Skip`（esc）、`Other`（o），各带键帽 |
-
-`picker`（`packages/wire/src/tsp.ts:532-620`）在已安装的 Tern 0.9.6 上以 `size:"screen"`、`layout:"cards"`、`preview:"side"` 实测渲染，预览子树可为 `col → md/code/card → table`；`/tmp/tern-catalog-events.jsonl:1` 的 hello 在 45 个 kind 中列有 `picker`、`section`、`el`、`editor`、`md`、`code`；预览里折叠的 `section` 会本地切换并上报 `toggle`（`:7`），程序发 `set(collapsed:false)` 后展开（`:16-17`）；Mermaid 由 `md` 原生绘制（图注 `mermaid · flowchart`）。键盘留在组件里：`ui.custom` 会聚焦它（`extension-ui-controller.ts:1358`），指针事件经 `handleNativeEvent` 回来（`packages/tui/src/native/backend.ts:860-932`）。
-
-若实测发现 picker 作为 dock 组件根不会被 hoist 到 `layer`，回退为 `ui.custom(factory, {overlay: true})` + 同一 `describe()`——这正是 `reconcile.ts:27-28,426,484` 已用于 `overlay`/`picker` 的路径。
-
-**普通 TUI。** 同一组件的 `render(width)` 用 `Markdown` 画简报、把每个选项画成单选/多选行并带上它的取舍行，`Ctrl+O` 逐段展开/折叠；Mermaid 经 `@oh-my-pi/pi-utils/mermaid-ascii` 画成 ASCII（`packages/tui/src/theme/mermaid-cache.ts:66,100`），与助手正文同一条路径。
-
-**原生表面。** 凡是原生组件绘制的地方——`ctx.invokeTool` 委托、`/tree` 重答——它画原生字段、丢掉扩展字段：`question`、`description`、聚焦选项的 `preview`。简报、取舍、图在那里不显示。这是保留同一个工具名与同一份答案契约所接受的成本。
+`ctx.hasUI` 为假或模式不是 `tui` 时，工具用原生子集调 `ctx.invokeTool`（`src/schema.ts#nativeQuestion`），由原生对话框渲染原生字段；没有原生解析器时（例如 print 模式）返回结构化拒绝，而不是挂住。
 
 ## 答案与生命周期
 
 | 关注点 | 行为 |
 |---|---|
-| 答案 | 原生 `AskToolDetails`：`results[{id, question, options, multi, selectedOptions, customInput}]`，由 `askToolRenderer` 渲染 |
-| 取消 | `ctx.abort()`（`types.ts:699`）后返回取消结果；`ToolAbortError` 未向扩展导出，所以结果文本里说明取消 |
-| 并发 | 同时只允许一个；第二次调用返回错误而不是再开一个面板 |
-| 超时 | 不设。原生"超时自动选推荐项"读的是扩展拿不到的 session settings（`ask.ts:742-745`），设计选择不做第二个计时器 |
+| 答案 | 原生 `AskToolDetails`（`results[{id, question, options, multi, selectedOptions, customInput}]`），由 `askToolRenderer` 渲染（渲染器按工具名选取，`packages/tui/src/tools/index.ts:37`） |
+| 取消 | `ctx.abort()`，然后返回取消结果（`id: (cancelled)`），与原生措辞一致 |
+| 并发 | 同时只允许一个；第二次调用被拒绝，而不是替换已打开的面板 |
+| 超时 | 无；原生超时自动选择读的是扩展拿不到的 session settings（`ask.ts:742-745`） |
 | 审批 | `approval: "read"`，与 `ask.ts:544-551` 一致 |
-| 子会话、RPC、print | 委托原生，与今天一样以 "requires interactive mode" 中止 |
+| 表面内部失败 | `ui.notify` 警告，然后委托原生对话框 |
 
 ## 已知限制
 
-- **`/tree` 重答**走 `new AskTool()`（`packages/coding-agent/src/modes/controllers/selector-controller.ts:1723-1748`）。扩展参数能通过它的 schema 检查，所以 ask 会重新打开——用原生 dock，只画原生字段。
-- **协作 guest** 通过原生 ask 镜像通道作答（`extension-ui-controller.ts:923-1025`），该通道没有 `ui.custom` 表面的表示。ask-more 面板打开期间 guest 无法作答；仅 host 作答是本设计接受的范围。
-- **plan mode 的超时自动选择**在 ask-more 表面期间不可用。
-- **多问题与 `multi: true`** 被拒绝，不实现。
-- **没有富 UI 时**：原生对话框只显示问题与选项标签，因为简报在原生组件忽略的扩展字段里。本设计不把简报塞进 `question`/`preview` 伪造等价，回退就是诚实地更薄。
-- 工具以原生名注册，模型读到的是 ask-more 的描述而不是 `prompts/tools/ask.md`。
+- **`/tree` 重答**直接 `new AskTool()`（`packages/coding-agent/src/modes/controllers/selector-controller.ts:1723-1748`）。扩展参数能通过它的 schema 检查，所以 ask 会重新打开——用原生 dock，只画原生字段。
+- **协作 guest** 走原生镜像通道（`extension-ui-controller.ts:923-1025`），该通道没有 `ui.custom` 表面的表示：ask-more 面板打开期间 guest 无法作答。
+- **print 与没有原生解析器的 RPC** 得到结构化拒绝；原生工具会中止整个操作。
+- **没有 plan mode 超时自动选择**，没有 `multi`，没有多问题标签页，没有 note。
+- 工具以原生名注册：模型读到的是本插件的描述，而不是 `prompts/tools/ask.md`。改写 ask prompt 的扩展必须针对最终描述。
 
-## 文件（计划）
+## 文件
 
 ```
-index.ts                 插件入口；注册 ask、委托、按 UI 门控
-src/schema.ts            原生字段 + brief/tradeoff、边界解析、校验规则
-src/brief.ts             简报/证据解析，按 ctx.cwd 解析 path:lines
-src/component.ts         单个 pi-tui 组件：render() 给 ANSI，describe() 给 Tern
-src/nodes.ts             picker/card/section/code/md/kv 组装、tone 与折叠状态
-src/result.ts            AskToolDetails 构造与取消结果
-src/i18n.ts              界面标签；字段名保持英文
-tern/plugin.toml         可选：只有将来需要 Tern 侧命令时才加
+index.ts        插件入口：注册 ask、校验、选择表面、委托
+src/schema.ts   原生字段 + brief/tradeoff、zod 参数、语义校验
+src/brief.ts    按工作目录解析 path:lines，限界读取
+src/nodes.ts    picker/card/section/code/md/kv 组装与预览子节点
+src/component.ts 单个组件：render() 给 ANSI，describe() 给 Tern
+src/result.ts   AskToolDetails 构造、取消与拒绝结果
+src/i18n.ts     界面标签取自 OMOMP_LANG / LC_*；协议字段保持英文
+src/description.ts 面向模型的工具描述
+test/           校验与原生投影测试（bun test）
 ```
 
-## 验证计划
+## 验证
 
-1. 单测：schema 接受与每条拒绝信息；对 fixture 的 `path:lines` 解析；证据读取上界；只有原生字段、没有扩展字段的载荷被"缺简报"拒绝。
-2. Tern 端到端（真实 pane）：`omp plugin link` 安装，在 Tern pane 里跑 `omp`，让模型问一个决定；观察 `size: screen` 的 picker，展开/折叠一个代码段，按 `o` 输入 Other，提交；确认工具结果含所选 label，transcript 卡片仍由原生渲染器画出。
-3. 回退：同一 ask 在非 Tern 终端（ANSI 对话框）、`tui` 模式关闭、子会话（委托原生，只有原生字段）各跑一次。
-4. 回归：用扩展参数持久化的调用走 `/tree` 重答，仍能打开原生对话框并得到答案。
+2026-10-28 执行，omp 18.13.3、Tern 0.9.6、`opencode-go/deepseek-v4.1-flash`。
+
+| 检查 | 命令 | 观察结果 |
+|---|---|---|
+| 类型 | `bun run check` | `tsc --noEmit` 无错误 |
+| 单测 | `bun test` | 10 通过 0 失败：每条拒绝信息、证据上下界、`nativeQuestion` 投影 |
+| ANSI 表面 | PTY 里 `omp --no-extensions -e /tmp/ask-more-verify/index.ts`，提示词「调用 ask 工具…」 | 面板画出简报各段、带单选标记的选项、聚焦选项的取舍；`↓` 移动游标并切换取舍；`o` 输入文本后 `enter` 返回 `User answers: fixture: "…"`；另一次用裸 `enter` 提交返回 `User answers: verify-dir-lifecycle: 一次性脚手架目录` |
+| Tern 表面 | 无头 `tern serve --control …`，`run` 带 `PI_TUI_TSP_RECORD` 的 omp 包装脚本，`ctl tree` 与 `ctl click` | `tree .sf-layer .sf-picker` → 一个 `sf-picker sz-screen lay-cards pv-side` 节点，rect 1268×754；`tree .pk-pv-slot .sf` → 11 个节点，含带 Where/What/How 文本的 `sf-section collapsible`；点 `.pk-row[data-v=o1]` 后预览切到该选项的取舍；点 `.pk-btn.primary` 发出 `{"ev":"action","act":"submit"}`，transcript 出现 `User answers: first_move: 我先给一份改动提案` |
+| 无 UI 路径 | `omp -p … "调用 ask…"` | 载荷通过校验后得到 `ask rejected: … no native ask is available to delegate to here` |
+
+尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、以及带扩展参数的 `/tree` 重答。

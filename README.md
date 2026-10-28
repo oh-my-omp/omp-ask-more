@@ -2,37 +2,40 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Status: **design only**. No code is written yet; nothing here ships behavior.
+An OMP plugin that shadows the native `ask` tool. Its parameters are the native ones **plus** extension fields: the native component renders the native part and ignores the rest; the ask-more component renders both. The answer shape, the result renderer and the persisted-call contract stay native.
 
-`omp-ask-more` is an omp plugin that shadows the native `ask` tool. Its parameters are the native ones **plus** extension fields. The native component renders the native part and ignores the rest; the ask-more component renders both. The answer shape, the result renderer and the persisted-call contract stay native.
+Status: **implemented, v0.1.0**. Verified on omp 18.13.3 with Tern 0.9.6: unit tests, the ANSI dialog end to end, the Tern picker end to end with pointer input, and the no-UI path. See [Verification](#verification).
 
-## The failure this addresses
+## Why
 
-Native `ask` already has the fields this feature needs: `question` is rendered as Markdown (Tern: an `md` node, `packages/tui/src/overlays/ask-dialog.ts:884`; TUI: Markdown with fenced-code highlighting, `:298-311`), and every option has a free-form `preview` (Tern: the focused option's `preview` as `md`, `:939`; TUI: rendered under the focused option, `:501-503`).
+Native `ask` already has fields for this: `question` is Markdown (Tern: an `md` node, `packages/tui/src/overlays/ask-dialog.ts:884`; TUI: Markdown with fenced-code highlighting, `:298-311`), and every option has a free-form `preview` (`:939`, `:501-503`). Two things stop them from being used:
 
-Two things stop those fields from being used:
+1. The model is told not to. The native tool prompt is seven lines and says "short labels, tradeoffs in `description`" (`packages/coding-agent/src/prompts/tools/ask.md:1-7`); `preview` is never mentioned.
+2. The surface is small. The dialog is mounted in the composer container (`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts:887-905`), capped at four header rows and 70% of the terminal (`packages/tui/src/overlays/ask-dialog.ts:116-123`), and in Tern it describes as `omp.editor.ask` — a dock `col` with the `md` question, a `list` of options, and exactly one option's `preview` (`:762-940`).
 
-1. The model is told not to. The whole tool prompt is seven lines and says "short labels, tradeoffs in `description`" (`packages/coding-agent/src/prompts/tools/ask.md:1-7`); `preview` is never mentioned, and `description` is a single line.
-2. The surface is small. The dialog is mounted in the composer container (`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts:887-905`), its header is capped at four rows and the whole panel at 70% of the terminal (`packages/tui/src/overlays/ask-dialog.ts:116-123`), and in Tern it describes as `omp.editor.ask` — a dock `col` with `md` question, a `list` of options, and exactly one option's `preview` (`:762-940`). A brief of any length has nowhere to go, so the model writes a one-liner, the user cannot decide from it, and the ask is discarded.
+This plugin changes what the model must write and how the answer surface is drawn. It does not change what a question *is*.
 
-Free-form Markdown inside `question` and `preview` cannot fix this either: nothing validates that a brief exists, and the surface still gives it four rows.
+## Install
 
-## What changes, what does not
+```sh
+omp plugin install https://github.com/oh-my-omp/omp-ask-more
+```
 
-The parameter schema is **native plus extension fields**, the same shape omp-todo-more uses for `todo`: the native component draws what it knows and ignores what it does not.
+For local development, `omp plugin link /path/to/omp-ask-more`. The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`; no config section is needed, and the native `ask` must stay enabled so the no-UI path can delegate to it.
 
-| Kept | Added | Replaced |
-|---|---|---|
-| Tool name `ask`; every native field (`id`, `question`, `header?`, `options[{label, description?, preview?}]`, `multi?`, `recommended?`) and its meaning (`packages/coding-agent/src/tools/ask.ts:52-88`) | Top level: `brief {where, what, how, evidence?, diagram?, risks?}` | The model-facing tool description: the contract below replaces "short labels" |
-| Answer shape `AskToolDetails` and the `askToolRenderer` result card (renderers are selected by tool name, `packages/tui/src/tools/index.ts:37`) | Per option: `tradeoff`, `holds_when?`, `cost?` | The answering surface when a rich UI is available |
-| Persisted call arguments and `/tree` recovery: `arktype` keeps undeclared keys, so `recoverAskQuestions` accepts the extended arguments and still returns `questions` (`packages/coding-agent/src/tools/ask.ts:94-109`; behaviour measured with the repo's own `arktype`: a payload carrying `brief` and `tradeoff` comes back unchanged) | — | — |
-| Delegation to the native built-in when no rich UI exists (`ctx.invokeTool`, `packages/coding-agent/src/extensibility/extensions/types.ts:780-799`), which sees the extras and ignores them | — | — |
+## Parameters
 
-Extension fields are `required` where they carry the decision (`brief.where/what/how`, each option's `tradeoff`), because a schema that asks politely does not change model behaviour. Fields that only qualify a decision (`evidence`, `diagram`, `risks`, `holds_when`, `cost`) stay optional, matching "必要时要附上代码片段和 mermaid 图".
+The schema is the native one extended the way `omp-todo-more` extends `todo`:
+
+| Kept | Added |
+|---|---|
+| Tool name `ask`; `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `multi?`, `recommended?` (`packages/coding-agent/src/tools/ask.ts:52-88`) | `brief {where, what, how, evidence?, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?` |
+
+`arktype` keeps undeclared keys, so a persisted extended call still passes `recoverAskQuestions` (`ask.ts:94-109`) and `/tree` re-answer reopens it; the native dialog there renders the native fields only.
 
 ## The contract
 
-`question` stays a question: one or two sentences, no brief smuggled into it. The brief is its own field.
+`question` stays a question: one or two sentences. The brief is its own field.
 
 ```
 ask({
@@ -66,25 +69,27 @@ ask({
 })
 ```
 
-- `brief.where/what/how` are prose the user reads before deciding; they are rendered above the options, never collapsed by default.
-- `evidence[].path` with optional `lines` is resolved by the tool against `ctx.cwd` and read at render time, so the panel shows the real lines in a `code` node with `path` and `start` (`packages/wire/src/tsp.ts:222-236`) instead of model-typed code. A reference that cannot be read is drawn in an error tone with the reason, and never blocks the ask.
-- `diagram` is Mermaid source, drawn by the `md` node natively in Tern and as ASCII in the TUI.
-- `tradeoff` / `holds_when` / `cost` are one line each; the panel renders them as a three-row `kv` under the option, and the transcript card shows nothing of them (they are extension fields).
+- `brief.where/what/how` are rendered above the options and never collapsed by default.
+- `evidence[].path` with optional `lines` is resolved against the session's working directory and read at render time, so the panel shows the real lines in a `code` node with `path` and `start` (`packages/wire/src/tsp.ts:222-236`) instead of model-typed code. An unreadable reference is drawn in an error tone with the reason and never blocks the ask.
+- `diagram` is Mermaid source: the `md` node draws it natively in Tern, and the TUI Markdown renderer draws it as ASCII (`packages/tui/src/theme/mermaid-cache.ts:66,100`).
+- `tradeoff` / `holds_when` / `cost` are one line each and are drawn under the focused option.
+
+Limits: one question per call, 2–5 options, at most 6 evidence references, at most 80 lines per reference, no `multi`.
 
 ## Validation
 
-Validation runs at the tool boundary, before any UI opens, and returns a structured tool error listing every violation. It never silently downgrades to a thin ask.
+Validation runs at the tool boundary, before any UI opens, returns every problem at once, and never degrades into a thinner ask.
 
-| Rule | Rejection message |
+| Rule | Rejection |
 |---|---|
-| `questions.length === 1` | one decision per call; split the call |
-| `brief.where`, `brief.what`, `brief.how` non-empty | missing `brief.<field>` |
-| every option has non-empty `tradeoff` | option `<label>` has no tradeoff |
-| `evidence` entries have `path`; `lines` parses as `N` or `N-M` | evidence `<i>` is not `path[:lines]` |
-| reserved labels rejected (`Other (type your own)`, `Chat about this`, `Next →`) | mirrors the native rule, `ask.ts:52-58` |
-| `multi` unset | the sheet selects one answer; ask twice for two |
-
-Evidence paths are checked for existence but never gate the call: a missing file is reported in the panel as unreadable, because a path may belong to a target that does not exist yet, another checkout, or an `ssh` host.
+| exactly one question | `questions: expected exactly one question` |
+| `brief.where/what/how` non-empty | `questions[0].brief.<field>: empty` |
+| every option has a non-empty `tradeoff` | `questions[0].options[i].tradeoff: empty` |
+| ≥ 2 options | a decision needs at least two options |
+| labels unique and not reserved (`Other (type your own)`, `Chat about this`, `Next →`) | named per option |
+| `multi` unset | not supported; ask twice |
+| `recommended` is an index into the options | names the bad value |
+| ≤ 6 evidence references; `lines` is `N` or `N-M` and spans ≤ 80 lines | names the reference and the span |
 
 ## Surfaces
 
@@ -93,71 +98,65 @@ flowchart LR
   m[model] --> t["ask (plugin tool)"]
   t --> v{validate}
   v -- invalid --> e[structured error back to model]
-  v -- ok --> u{"rich UI available"}
-  u -- "no" --> n["ctx.invokeTool(native ask): native fields only"]
-  u -- "yes" --> s{"Tern surface?"}
-  s -- "yes" --> p["picker sheet: native + extension fields"]
-  s -- "no" --> c["ANSI dialog: native + extension fields"]
+  v -- ok --> u{"hasUI and mode tui"}
+  u -- "no" --> n["ctx.invokeTool(native ask) or a rejection"]
+  u -- "yes" --> s{"Tern picker supported?"}
+  s -- "yes" --> p["picker sheet (screen, cards, preview side)"]
+  s -- "no" --> c["ANSI dialog (same component)"]
   p --> a[AskToolDetails]
   c --> a
   n --> a
 ```
 
-Both rich surfaces are one pi-tui component mounted with `ui.custom()` (`extension-ui-controller.ts:1283-1360`); the Tern backend calls its `describe()` instead of `render()` when the terminal speaks TSP (`packages/tui/src/tui.ts:264-272,294-305`).
+One pi-tui component (`src/component.ts`) mounted with `ui.custom` (`extension-ui-controller.ts:1283-1360`) draws both surfaces: the Tern backend calls `describe()` instead of `render()` when the terminal speaks TSP (`packages/tui/src/tui.ts:264-272,294-305`). Keys stay with the component in both cases, so `↑↓`, `enter`, `o`, `esc` and `ctrl+o` behave identically.
 
-**Tern.** The component reports `nativeSheet(cx) => cx.supports("picker")` and `describe()` returns a `picker` node:
+In Tern the component describes a `picker` docked as a child named `picker` (`dockedPicker`'s shape, `packages/tui/src/native/picker.ts`), which the reconciler hoists into `layer` (`packages/tui/src/native/reconcile.ts:27-28,426,484`): `size: "screen"`, `layout: "cards"`, `preview: "side"`, one card per option, the preview holding the brief sections, the evidence `code` nodes, the Mermaid `md`, the risks and the focused option's tradeoffs, and an action bar with `Submit`, `Other`, `Cancel`.
 
-| Part | Node | Content |
-|---|---|---|
-| Head | `picker.title` / `subtitle` | `header`, then `question` |
-| Rows | `picker.items`, `layout: "cards"` | one card per option: label, one-line `description`, `Recommended` badge, tone |
-| Preview | `picker.preview: "side"` children | `card`(brief) with `section.collapsible` for WHERE / WHAT / HOW, the resolved `code` nodes, the Mermaid `md`, `risks`, then the focused option's `tradeoff` / `holds_when` / `cost` as a `kv` |
-| Actions | `picker.actions` | `Submit` (enter), `Skip` (esc), `Other` (o), each with keycaps |
-
-`picker` (`packages/wire/src/tsp.ts:532-620`) at `size: "screen"`, `layout: "cards"`, `preview: "side"` with a preview subtree of `col → md/code/card → table` was exercised on the installed Tern 0.9.6: the hello at `/tmp/tern-catalog-events.jsonl:1` advertises `picker`, `section`, `el`, `editor`, `md`, `code` among 45 kinds; a folded `section` in the preview toggled locally and reported `toggle` (`:7`), then expanded after the program sent `set(collapsed:false)` (`:16-17`); Mermaid rendered inside `md` (figure caption `mermaid · flowchart`). Keyboard stays with the component: `ui.custom` focuses it (`extension-ui-controller.ts:1358`), and pointer events return through `handleNativeEvent` (`packages/tui/src/native/backend.ts:860-932`).
-
-If the picker root is not hoisted from the dock, the fallback is `ui.custom(factory, {overlay: true})` with the same `describe()` — the path `reconcile.ts:27-28,426,484` already uses for `overlay`/`picker` nodes.
-
-**Plain TUI.** The same component's `render(width)` draws the brief with `Markdown`, each option as a radio/checkbox row with its tradeoff rows, and `Ctrl+O` expand/collapse per section; Mermaid renders as ASCII through `@oh-my-pi/pi-utils/mermaid-ascii` (`packages/tui/src/theme/mermaid-cache.ts:66,100`), the path assistant Markdown already uses.
-
-**Native surfaces.** Wherever the native component draws — `ctx.invokeTool` delegation, a `/tree` re-answer — it renders the native fields and drops the extension fields: `question`, `description`, the focused option's `preview`. The brief, the tradeoffs and the diagram are not shown there. That is the accepted cost of keeping one tool name and one answer contract.
+When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with the native subset (`src/schema.ts#nativeQuestion`), so the native dialog renders the native fields; without a native resolver — print mode, for instance — it returns a structured rejection instead of hanging.
 
 ## Answer and lifecycle
 
 | Concern | Behavior |
 |---|---|
-| Answer | native `AskToolDetails`: `results[{id, question, options, multi, selectedOptions, customInput}]`, rendered by `askToolRenderer` |
-| Cancel | `ctx.abort()` (`types.ts:699`) then a cancelled result; `ToolAbortError` is not exported to extensions, so the result text states the cancellation |
-| Concurrent asks | one in flight; a second call returns an error instead of opening a second sheet |
-| Timeout | none. The native auto-select-on-timeout reads session settings the extension cannot reach (`ask.ts:742-745`), so the design drops it rather than running a second timer |
+| Answer | native `AskToolDetails` (`results[{id, question, options, multi, selectedOptions, customInput}]`), rendered by `askToolRenderer` because renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`) |
+| Cancel | `ctx.abort()`, then a cancelled result (`id: (cancelled)`), matching the native wording |
+| Concurrent asks | one in flight; a second call is rejected instead of replacing the open component |
+| Timeout | none; the native auto-select reads session settings an extension cannot reach (`ask.ts:742-745`) |
 | Approval | `approval: "read"`, matching `ask.ts:544-551` |
-| Subagent, RPC, print | delegates to native, which aborts with "requires interactive mode" exactly as today |
+| Failure inside the surface | `ui.notify` warning, then delegation to the native dialog |
 
 ## Known limitations
 
 - **`/tree` re-answer** runs `new AskTool()` directly (`packages/coding-agent/src/modes/controllers/selector-controller.ts:1723-1748`). The extended arguments survive its schema check, so the ask reopens — in the native dock, with the native fields only.
-- **Collaborator guests** answer through the native ask mirroring channel (`extension-ui-controller.ts:923-1025`), which has no representation for a `ui.custom` surface. While the ask-more sheet is open, a guest cannot answer; host-only is the accepted scope.
-- **Plan-mode timeout auto-select** is unavailable while the ask-more surface is used.
-- **Multiple questions and `multi: true`** are rejected, not implemented.
-- **No UI**: the native dialog shows a question and option labels, because the brief lives in extension fields the native component ignores. The design does not smuggle the brief into `question` or `preview` to fake parity; the fallback is honestly thinner.
-- The tool is registered under the native name, so the model-facing description is ask-more's, not `prompts/tools/ask.md`.
+- **Collaborator guests** answer through the native mirroring channel (`extension-ui-controller.ts:923-1025`), which has no representation for a `ui.custom` surface: while the ask-more sheet is open, a guest cannot answer.
+- **Print and RPC without a native resolver** get a structured rejection; the native tool would abort the operation instead.
+- **No plan-mode timeout auto-select**, no `multi`, no multi-question tabs, no notes.
+- The tool is registered under the native name: the model reads this plugin's description, not `prompts/tools/ask.md`. Extensions that rewrite ask's prompt must target the final description.
 
-## Files (planned)
+## Files
 
 ```
-index.ts                 plugin entry; registers the ask tool, delegates, gates on UI
-src/schema.ts            native fields + brief/tradeoff, boundary parse, validation rules
-src/brief.ts             brief/evidence parsing, path:lines resolution against ctx.cwd
-src/component.ts         one pi-tui component: render() for ANSI, describe() for Tern
-src/nodes.ts             picker/card/section/code/md/kv composition, tone and fold state
-src/result.ts            AskToolDetails construction and the cancelled result
-src/i18n.ts              UI labels; field names stay English
-tern/plugin.toml         optional: only if a Tern-side command is ever needed
+index.ts        plugin entry: registers ask, validates, chooses the surface, delegates
+src/schema.ts   native fields + brief/tradeoff, zod parameters, semantic validation
+src/brief.ts    path:lines resolution against the working directory, bounded reads
+src/nodes.ts    picker/card/section/code/md/kv composition, preview children
+src/component.ts one component: render() for ANSI, describe() for Tern
+src/result.ts   AskToolDetails construction, cancelled and rejected results
+src/i18n.ts     UI labels from OMOMP_LANG / LC_*; protocol fields stay English
+src/description.ts the model-facing tool description
+test/           validation and native-projection tests (bun test)
 ```
 
-## Verification plan
+## Verification
 
-1. Unit: schema acceptance and each rejection message; `path:lines` resolution against a fixture; evidence read bounds; a native-shaped payload without extension fields is rejected with the missing-brief message.
-2. Tern end to end in a real pane: install the plugin with `omp plugin link`, run `omp` in a Tern pane, have the model ask a decision; observe the picker at `size: screen`, fold/unfold a code section, press `o` for Other, submit; confirm the tool result carries the chosen label and the transcript card renders through the native renderer.
-3. Fallbacks: the same ask in a non-Tern terminal (ANSI dialog), with `tui` mode off, and inside a subagent (native delegation, native fields only).
-4. Regression: a persisted call with the extended arguments re-answered through `/tree` still opens the native dialog and returns an answer.
+Executed on 2026-10-28 with omp 18.13.3, Tern 0.9.6, `opencode-go/deepseek-v4.1-flash`.
+
+| Check | Command | Observed |
+|---|---|---|
+| Types | `bun run check` | `tsc --noEmit` clean |
+| Unit | `bun test` | 10 pass, 0 fail: every rejection message, evidence bounds, `nativeQuestion` projection |
+| ANSI surface | `omp --no-extensions -e /tmp/ask-more-verify/index.ts` in a PTY, prompt "调用 ask 工具…" | the dialog drew the brief sections, options with radio markers and the focused option's tradeoff; `↓` moved the cursor and swapped the tradeoff; `o` + text + `enter` returned `User answers: fixture: "…"`; a second run submitted with plain `enter` and returned `User answers: verify-dir-lifecycle: 一次性脚手架目录` |
+| Tern surface | headless `tern serve --control …`, `run` an omp wrapper with `PI_TUI_TSP_RECORD`, `ctl tree` and `ctl click` | `tree .sf-layer .sf-picker` → one node `sf-picker sz-screen lay-cards pv-side`, rect 1268×754; `tree .pk-pv-slot .sf` → 11 nodes including `sf-section collapsible` with the Where/What/How text; click on `.pk-row[data-v=o1]` swapped the preview to that option's tradeoff; click on `.pk-btn.primary` emitted `{"ev":"action","act":"submit"}` and the transcript showed `User answers: first_move: 我先给一份改动提案` |
+| No-UI path | `omp -p … "调用 ask…"` | `ask rejected: … no native ask is available to delegate to here`, after the payload passed validation |
+
+Not yet exercised at runtime: the native-delegation path itself (needs an environment where `ctx.invokeTool` exists but `ui.custom` does not), collaborator guests, and `/tree` re-answer with an extended call.

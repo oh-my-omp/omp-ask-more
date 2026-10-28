@@ -1,0 +1,33 @@
+{
+	"name": "omp-ask-more",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Ask with context: native ask parameters extended with a brief, evidence and per-option tradeoffs, rendered by a Tern picker",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/oh-my-omp/omp-ask-more.git"
+	},
+	"files": ["index.ts", "src"],
+	"omp": {
+		"extensions": ["./index.ts"]
+	},
+	"scripts": {
+		"check": "tsc --noEmit -p tsconfig.json",
+		"test": "bun test"
+	},
+	"peerDependencies": {
+		"@oh-my-pi/pi-agent-core": "*",
+		"@oh-my-pi/pi-coding-agent": "*",
+		"@oh-my-pi/pi-tui": "*",
+		"@oh-my-pi/pi-utils": "*"
+	},
+	"devDependencies": {
+		"@oh-my-pi/pi-agent-core": "latest",
+		"@oh-my-pi/pi-coding-agent": "latest",
+		"@oh-my-pi/pi-tui": "latest",
+		"@oh-my-pi/pi-utils": "latest",
+		"@types/bun": "latest",
+		"typescript": "latest"
+	}
+}
