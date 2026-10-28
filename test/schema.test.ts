@@ -21,7 +21,26 @@ function payload(overrides: (params: AskParams) => void = () => {}): AskParams {
 
 describe("validate", () => {
 	it("accepts a complete question", () => {
-		expect(validate(payload())).toEqual({ ok: true, question: payload().questions[0]! });
+		expect(validate(payload())).toEqual({ ok: true, questions: payload().questions });
+	});
+
+	it("validates every question and names the one that is wrong", () => {
+		const params = payload();
+		const second = structuredClone(params.questions[0]!);
+		second.id = "budget";
+		second.options[1]!.tradeoff = "";
+		params.questions.push(second);
+		const checked = validate(params);
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
+	});
+
+	it("rejects two questions with the same id", () => {
+		const params = payload();
+		params.questions.push(structuredClone(params.questions[0]!));
+		const checked = validate(params);
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) expect(checked.problems).toEqual(['questions[1].id: duplicate "retry"; every question needs its own id']);
 	});
 
 	it("rejects an empty brief section", () => {

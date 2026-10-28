@@ -1,9 +1,8 @@
-// One component, two surfaces: `render()` draws the ANSI dialog for a plain terminal, `describe()`
-// draws the native sheet for a Tern pane. Both read the same state, so keys, folding and the focused
-// option stay in sync. The Other answer is a pi-tui `Input`: its value is the only copy of the text,
-// edited by raw keys (delegated while the sheet holds focus, or direct once the field is focused) and
-// by the terminal's own edit/undo events, which the reconciler routes to the field component.
-import type { TspScrollBy } from "@oh-my-pi/pi-wire";
+// One component, two surfaces. It is mounted as a fullscreen overlay: `render()` draws the ANSI page
+// (fixed title and question tabs, a scrolling body, fixed key hints) on the alternate screen, and in
+// Tern `describe()` draws the content of the native sheet the backend wraps it in (`nativeOverlay`).
+// Both read the same per-question state, so keys and pointer events lead to the same answers.
+// The component holds the overlay focus and hands keys to the open Other field itself.
 import {
 	type Component,
 	type DescribeContext,
@@ -11,79 +10,183 @@ import {
 	Markdown,
 	type NativeNode,
 	type NativeUiEvent,
+	routeSgrMouseInput,
+	ScrollView,
 	type TUI,
 	getMarkdownTheme,
 	matchesKey,
 	theme,
 	truncateToWidth,
 	visibleWidth,
+	Ellipsis,
 } from "@oh-my-pi/pi-tui";
 import { matchesSelectPageDown, matchesSelectPageUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
 import { leafKey } from "@oh-my-pi/pi-tui/native/node";
+import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import type { ResolvedEvidence } from "./brief.ts";
 import { tr } from "./i18n.ts";
-import { CANCEL_ACT, describeSheet, OPTIONS_KEY, OTHER_ITEM, optionIndex, type SheetView, SUBMIT_ACT, sheetTitle } from "./nodes.ts";
+import {
+	answerLabel,
+	CANCEL_ACT,
+	describeSheet,
+	ENTER_ACT,
+	OTHER_ITEM,
+	optionIndex,
+	questionListKey,
+	REVIEW_TAB,
+	SUBMIT_ACT,
+	sheetTitle,
+	TABS_KEY,
+	tabLabel,
+} from "./nodes.ts";
+import { type Answer, UNANSWERED } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
+import { type ActiveTab, type NativeScrollRequest, onOther, type QuestionState, type ReviewState } from "./state.ts";
 
-export type Submission = { readonly kind: "answer"; readonly index: number } | { readonly kind: "other"; readonly text: string } | { readonly kind: "cancel" };
+export type Submission = { readonly kind: "submit"; readonly answers: readonly Answer[] } | { readonly kind: "cancel" };
 
 export interface AskMoreOptions {
 	readonly tui: TUI;
-	readonly question: AskQuestion;
-	readonly evidence: readonly ResolvedEvidence[];
+	readonly questions: readonly AskQuestion[];
+	/** Resolved evidence, one list per question. */
+	readonly evidence: readonly (readonly ResolvedEvidence[])[];
 	readonly finish: (submission: Submission) => void;
 }
 
+/** Evidence rows drawn per reference in the ANSI page before ctrl+o opens them. */
 const DOCUMENT_SCROLL = 10;
+/** Rows a mouse-wheel notch or Shift+↑↓ moves the ANSI body. */
+const WHEEL_ROWS = 3;
+const FAST_ROWS = 5;
+
+function newView(): ScrollView {
+	return new ScrollView([], {
+		height: 1,
+		scrollbar: "auto",
+		ellipsis: Ellipsis.Omit,
+		theme: { track: text => theme.fg("dim", text), thumb: text => theme.fg("accent", text) },
+	});
+}
 
 export class AskMoreComponent implements Component {
 	debugKind = "AskMore";
+	readonly nativeOverlay: NonNullable<Component["nativeOverlay"]>;
 	readonly #tui: TUI;
-	readonly #question: AskQuestion;
-	readonly #evidence: readonly ResolvedEvidence[];
 	readonly #finish: (submission: Submission) => void;
-	readonly #other = new Input();
-	#view: SheetView;
-	#memo: { key: string; lines: readonly string[] } | undefined;
-	#native: { view: SheetView; overlay: boolean; cols: number; node: NativeNode } | undefined;
+	readonly #states: readonly QuestionState[];
+	readonly #review: ReviewState = { view: newView(), nativeScroll: undefined };
+	readonly #title: string;
+	#active: ActiveTab = { kind: "question", index: 0 };
+	/** Bumped on every change a surface draws; scrolling alone does not change it. */
+	#version = 0;
+	#body: { key: string; lines: readonly string[]; focus: { start: number; end: number } | undefined } | undefined;
+	#native: { version: number; scroll: NativeScrollRequest | undefined; node: NativeNode } | undefined;
 	#closed = false;
 
 	constructor(options: AskMoreOptions) {
 		this.#tui = options.tui;
-		this.#question = options.question;
-		this.#evidence = options.evidence;
 		this.#finish = options.finish;
-		this.#view = {
-			cursor: Math.min(options.question.recommended ?? 0, options.question.options.length - 1),
-			otherMode: false,
-			expanded: false,
-			scroll: undefined,
-		};
-		this.#other.placeholder = tr("Type your own answer", "自己写一个答案");
-		this.#other.onSubmit = value => this.#submitOther(value);
-		this.#other.onEscape = () => this.#leaveOther();
+		this.#title = sheetTitle(options.questions);
+		this.nativeOverlay = { role: "omp.overlay.askMore", size: "full", anchor: "center", head: this.#title };
+		this.#states = options.questions.map((question, index) => {
+			const input = new Input();
+			input.placeholder = tr("Type your own answer", "自己写一个答案");
+			const state: QuestionState = {
+				question,
+				evidence: options.evidence[index] ?? [],
+				cursor: Math.min(question.recommended ?? 0, question.options.length - 1),
+				answer: UNANSWERED,
+				editing: false,
+				expanded: false,
+				input,
+				view: newView(),
+				nativeScroll: undefined,
+			};
+			input.onSubmit = value => this.#saveOther(index, value);
+			input.onEscape = () => this.#change(() => {
+				state.editing = false;
+			});
+			return state;
+		});
 	}
 
 	dispose(): void {
 		this.#closed = true;
+		for (const state of this.#states) state.view.dispose?.();
+		this.#review.view.dispose?.();
 	}
+
+	// ── ANSI ──────────────────────────────────────────────────────────────
 
 	render(width: number): readonly string[] {
 		const inner = Math.max(24, width - 4);
-		const view = this.#view;
-		const key = `${width}|${view.otherMode}|${view.cursor}|${view.expanded}|${this.#other.getValue()}|${this.#other.getCursor()}`;
-		if (this.#memo?.key === key) return this.#memo.lines;
+		const bodyWidth = Math.max(1, inner - 1);
+		const tabRow = this.#tabRow(inner);
+		const hint = theme.fg("muted", this.#hints());
+		const bodyHeight = Math.max(1, this.#tui.terminal.rows - 3 - (tabRow === undefined ? 0 : 1));
 
+		const view = this.#activeView();
+		const key = `${this.#version}|${bodyWidth}|${this.#active.kind === "review" ? "review" : this.#active.index}`;
+		if (this.#body?.key !== key) {
+			const built = this.#active.kind === "review" ? { lines: this.#reviewLines(bodyWidth), focus: undefined } : this.#questionLines(this.#active.index, bodyWidth);
+			this.#body = { key, ...built };
+			view.setLines(built.lines);
+		}
+		view.setHeight(bodyHeight);
+		const focus = this.#body.focus;
+		if (focus !== undefined && this.#active.kind === "question") {
+			const state = this.#states[this.#active.index];
+			if (state !== undefined) view.revealRange({ id: `${this.#active.index}|${state.cursor}|${state.editing}`, start: focus.start, end: focus.end }, inner);
+		}
+
+		const title = ` ${this.#title} `;
+		const top = theme.fg("border", `╭─${title}${"─".repeat(Math.max(0, inner - visibleWidth(title) - 1))}╮`);
+		const side = (row: string) => `${theme.fg("border", "│")} ${fit(row, inner)} ${theme.fg("border", "│")}`;
+		const lines = [top];
+		if (tabRow !== undefined) lines.push(side(tabRow));
+		for (const row of view.render(inner)) lines.push(side(row));
+		lines.push(side(hint));
+		lines.push(theme.fg("border", `╰${"─".repeat(inner + 2)}╯`));
+		return lines;
+	}
+
+	#tabRow(width: number): string | undefined {
+		if (this.#states.length < 2) return undefined;
+		const chips = this.#states.map((state, index) => {
+			const label = ` ${state.answer.kind === "unanswered" ? "" : "✓ "}${tabLabel(state.question)} `;
+			const active = this.#active.kind === "question" && this.#active.index === index;
+			return active ? theme.bold(theme.bg("selectedBg", theme.fg("text", label))) : theme.fg("muted", label);
+		});
+		const review = ` ${tr("Review", "汇总")} `;
+		chips.push(this.#active.kind === "review" ? theme.bold(theme.bg("selectedBg", theme.fg("text", review))) : theme.fg("muted", review));
+		return truncateToWidth(chips.join(" "), width);
+	}
+
+	#hints(): string {
+		if (this.#active.kind === "review") {
+			return tr("enter submit · tab/shift+tab questions · pgup/pgdn scroll · esc cancel all", "enter 提交 · tab/shift+tab 切题 · pgup/pgdn 滚动 · esc 全部取消");
+		}
+		const state = this.#states[this.#active.index];
+		if (state?.editing) return tr("enter save · esc back to the options", "enter 保存 · esc 回到选项");
+		const next = this.#states.length > 1 ? tr(" · tab next question", " · tab 下一题") : "";
+		return tr(
+			`↑↓ choose · enter answer · o other${next} · pgup/pgdn scroll · ctrl+o code · esc cancel all`,
+			`↑↓ 选择 · enter 作答 · o 其他${next} · pgup/pgdn 滚动 · ctrl+o 代码 · esc 全部取消`,
+		);
+	}
+
+	#questionLines(index: number, width: number): { lines: readonly string[]; focus: { start: number; end: number } | undefined } {
+		const state = this.#states[index];
+		if (state === undefined) return { lines: [], focus: undefined };
+		const { question } = state;
+		const { brief } = question;
 		const rows: string[] = [];
 		const paragraph = (source: string) => {
-			for (const line of new Markdown(source, 0, 0, getMarkdownTheme()).render(inner)) rows.push(line);
+			for (const line of new Markdown(source, 0, 0, getMarkdownTheme()).render(width)) rows.push(line);
 		};
-		const heading = (label: string) => rows.push(theme.fg("accent", label));
+		const heading = (label: string) => rows.push(theme.bold(theme.fg("accent", label)));
 
-		const { brief } = this.#question;
-		const title = sheetTitle(this.#question);
-		rows.push(theme.fg("accent", title));
-		paragraph(this.#question.question);
+		paragraph(question.question);
 		rows.push("");
 		for (const [label, body] of [
 			[tr("Where", "现状"), brief.where],
@@ -95,20 +198,61 @@ export class AskMoreComponent implements Component {
 			rows.push("");
 		}
 
-		if (this.#evidence.length > 0) {
+		let focus: { start: number; end: number } | undefined;
+		question.options.forEach((option, optionIndexValue) => {
+			const here = state.cursor === optionIndexValue;
+			const chosen = state.answer.kind === "option" && state.answer.index === optionIndexValue;
+			const pointer = here ? theme.fg("accent", "›") : " ";
+			const mark = chosen ? theme.fg("accent", "●") : theme.fg("muted", "○");
+			const label = here ? theme.bold(theme.fg("accent", option.label)) : option.label;
+			const recommended = optionIndexValue === question.recommended ? theme.fg("success", tr(" (recommended)", "（推荐）")) : "";
+			const detail = option.description?.trim() ? theme.fg("muted", `  ${option.description.trim()}`) : "";
+			if (here) focus = { start: rows.length, end: rows.length + 1 };
+			rows.push(`${pointer} ${mark} ${label}${recommended}${detail}`);
+		});
+		const otherHere = onOther(state);
+		const custom = state.answer.kind === "custom" ? theme.fg("accent", `  “${state.answer.text}”`) : "";
+		if (otherHere) focus = { start: rows.length, end: rows.length + 1 };
+		rows.push(
+			`${otherHere ? theme.fg("accent", "›") : " "} ${state.answer.kind === "custom" ? theme.fg("accent", "●") : theme.fg("muted", "○")} ${otherHere ? theme.bold(theme.fg("accent", tr("Other…", "其他…"))) : tr("Other…", "其他…")}${custom}`,
+		);
+		rows.push("");
+
+		const option = question.options[state.cursor];
+		if (state.editing) {
+			rows.push(theme.fg("accent", tr("Your answer", "你的答案")));
+			const start = rows.length;
+			for (const line of state.input.render(width)) rows.push(line);
+			focus = { start: focus?.start ?? start, end: rows.length };
+			rows.push("");
+		} else if (option !== undefined) {
+			for (const [label, value] of [
+				[tr("Tradeoff", "取舍"), option.tradeoff],
+				[tr("Holds when", "成立条件"), option.holds_when],
+				[tr("Cost", "成本"), option.cost],
+			] as const) {
+				if (value === undefined || value.trim().length === 0) continue;
+				for (const line of wrapLabelled(theme.fg("muted", `${label}  `), value.trim(), width)) rows.push(line);
+			}
+			if (focus !== undefined) focus = { start: focus.start, end: rows.length };
+			rows.push("");
+		}
+
+		if (state.evidence.length > 0) {
 			heading(tr("Evidence", "证据"));
-			for (const entry of this.#evidence) {
+			for (const entry of state.evidence) {
 				if (!entry.ok) {
 					rows.push(theme.fg("error", `${entry.path}: ${entry.error}`));
 					continue;
 				}
 				const location = entry.start > 0 ? `${entry.path}:${entry.start}-${entry.end}` : entry.path;
 				rows.push(theme.fg("muted", location));
+				if (entry.note) rows.push(theme.fg("muted", entry.note));
 				if (entry.start === 0) continue;
-				const visible = view.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
-				for (const line of visible) rows.push(`  ${line}`);
+				const visible = state.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
+				visible.forEach((line, offset) => rows.push(`${theme.fg("dim", String(entry.start + offset).padStart(4))}  ${line}`));
 				if (visible.length < entry.lines.length) {
-					rows.push(theme.fg("muted", tr(`  … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `  … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
+					rows.push(theme.fg("muted", tr(`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
 				}
 			}
 			rows.push("");
@@ -120,122 +264,73 @@ export class AskMoreComponent implements Component {
 			rows.push("");
 		}
 
-		const risks = brief.risks?.filter(risk => risk.trim().length > 0) ?? [];
+		const risks = brief.risks?.map(risk => risk.trim()).filter(risk => risk.length > 0) ?? [];
 		if (risks.length > 0) {
 			heading(tr("Risks", "风险"));
-			for (const risk of risks) rows.push(`  ${risk.trim()}`);
-			rows.push("");
+			paragraph(risks.map(risk => `- ${risk}`).join("\n"));
 		}
-
-		this.#question.options.forEach((option, index) => {
-			const chosen = !view.otherMode && index === view.cursor;
-			const marker = chosen ? "●" : "○";
-			const recommended = index === this.#question.recommended ? theme.fg("success", tr(" (recommended)", "（推荐）")) : "";
-			const detail = option.description?.trim() ? theme.fg("muted", `  ${option.description.trim()}`) : "";
-			rows.push(`${chosen ? theme.fg("accent", marker) : theme.fg("muted", marker)} ${chosen ? theme.fg("accent", option.label) : option.label}${recommended}${detail}`);
-		});
-		rows.push("");
-
-		const option = this.#question.options[view.cursor];
-		if (!view.otherMode && option !== undefined) {
-			for (const [label, value] of [
-				[tr("Tradeoff", "取舍"), option.tradeoff],
-				[tr("Holds when", "成立条件"), option.holds_when],
-				[tr("Cost", "成本"), option.cost],
-			] as const) {
-				if (value === undefined || value.trim().length === 0) continue;
-				rows.push(`${theme.fg("muted", `${label}  `)}${value.trim()}`);
-			}
-			rows.push("");
-		}
-
-		if (view.otherMode) {
-			rows.push(theme.fg("accent", tr("Your answer", "你的答案")));
-			for (const line of this.#other.render(inner)) rows.push(line);
-			rows.push(theme.fg("muted", tr("enter submit · esc back", "enter 提交 · esc 返回")));
-		} else {
-			rows.push(theme.fg("muted", tr("↑↓ select · enter submit · o other · esc cancel", "↑↓ 选择 · enter 提交 · o 其他 · esc 取消")));
-		}
-
-		const top = theme.fg("border", `╭─ ${title} ${"─".repeat(Math.max(0, inner - visibleWidth(title) - 3))}╮`);
-		const bottom = theme.fg("border", `╰${"─".repeat(inner + 2)}╯`);
-		const lines = [top, ...rows.map(row => `${theme.fg("border", "│")} ${fit(row, inner)} ${theme.fg("border", "│")}`), bottom];
-		this.#memo = { key, lines };
-		return lines;
+		return { lines: rows, focus };
 	}
 
-	describe(cx: DescribeContext): NativeNode {
-		const overlay = cx.supports("overlay");
-		const native = this.#native;
-		if (native !== undefined && native.view === this.#view && native.overlay === overlay && native.cols === cx.cols) return native.node;
-		const node = describeSheet(this.#question, this.#evidence, this.#view, this.#other, { overlay, cols: cx.cols });
-		this.#native = { view: this.#view, overlay, cols: cx.cols, node };
+	#reviewLines(width: number): readonly string[] {
+		const rows = [theme.bold(theme.fg("accent", tr("Review your answers", "核对你的答案"))), ""];
+		const unanswered = this.#states.filter(state => state.answer.kind === "unanswered").length;
+		for (const state of this.#states) {
+			const answer = answerLabel(state.question, state.answer);
+			rows.push(theme.bold(tabLabel(state.question)));
+			for (const line of wrapLabelled("  ", answer ?? theme.fg("warning", tr("unanswered", "未回答")), width)) rows.push(line);
+		}
+		rows.push("");
+		if (unanswered > 0) rows.push(theme.fg("warning", tr(`${unanswered} unanswered; enter still submits the rest.`, `${unanswered} 题未回答；enter 仍会提交其余答案。`)));
+		return rows;
+	}
+
+	// ── Tern ──────────────────────────────────────────────────────────────
+
+	describe(_cx: DescribeContext): NativeNode {
+		const scroll = this.#activeNativeScroll();
+		const memo = this.#native;
+		if (memo !== undefined && memo.version === this.#version && memo.scroll === scroll) return memo.node;
+		const node = describeSheet(this.#states, this.#active, scroll);
+		this.#native = { version: this.#version, scroll, node };
 		return node;
 	}
 
-	handleInput(data: string): void {
-		if (this.#closed) return;
-		if (matchesKey(data, "ctrl+o")) {
-			this.#update({ expanded: !this.#view.expanded });
-			return;
-		}
-		if (this.#view.otherMode) {
-			// The field owns Escape (back) and Enter (submit) through its callbacks.
-			this.#other.handleInput(data);
-			this.#memo = undefined;
-			return;
-		}
-		const count = this.#question.options.length;
-		if (matchesKey(data, "up")) {
-			this.#update({ cursor: (this.#view.cursor - 1 + count) % count });
-			return;
-		}
-		if (matchesKey(data, "down")) {
-			this.#update({ cursor: (this.#view.cursor + 1) % count });
-			return;
-		}
-		const scroll = scrollKey(data);
-		if (scroll !== undefined) {
-			this.#update({ scroll: { by: scroll, n: (this.#view.scroll?.n ?? 0) + 1 } });
-			return;
-		}
-		if (isEnter(data)) {
-			this.#submit({ kind: "answer", index: this.#view.cursor });
-			return;
-		}
-		if (matchesKey(data, "escape")) {
-			this.#submit({ kind: "cancel" });
-			return;
-		}
-		if (data === "o" || data === "O") this.#enterOther();
-	}
-
-	/** Pointer routes: a row click selects (Other opens the field), a double click answers, the bar submits or cancels. */
+	/** Pointer routes: a tab switches pages, a row click moves the cursor, a double click answers, the bar presses Enter or cancels. */
 	handleNativeEvent(event: NativeUiEvent): void {
 		if (this.#closed) return;
+		const key = leafKey(event.key);
 		switch (event.type) {
 			case "select":
 			case "activate": {
-				if (leafKey(event.key) !== OPTIONS_KEY) return;
+				if (key === TABS_KEY) {
+					this.#goToTabId(event.item);
+					return;
+				}
+				const active = this.#active;
+				if (active.kind !== "question" || key !== questionListKey(active.index)) return;
+				const state = this.#states[active.index];
+				if (state === undefined) return;
 				if (event.item === OTHER_ITEM) {
-					this.#enterOther();
+					this.#change(() => {
+						state.cursor = state.question.options.length;
+						state.editing = true;
+					});
 					return;
 				}
-				const index = optionIndex(this.#question, event.item);
+				const index = optionIndex(state.question, event.item);
 				if (index === undefined) return;
-				if (event.type === "activate") {
-					this.#submit({ kind: "answer", index });
-					return;
-				}
-				this.#update({ cursor: index, otherMode: false });
+				this.#change(() => {
+					state.cursor = index;
+					state.editing = false;
+				});
+				if (event.type === "activate") this.#answerOption(active.index, index);
 				return;
 			}
 			case "action":
 				if (event.act === CANCEL_ACT) this.#submit({ kind: "cancel" });
-				else if (event.act === SUBMIT_ACT) {
-					if (this.#view.otherMode) this.#submitOther(this.#other.getValue());
-					else this.#submit({ kind: "answer", index: this.#view.cursor });
-				}
+				else if (event.act === ENTER_ACT) this.#pressEnter();
+				else if (event.act === SUBMIT_ACT) this.#submitAll();
 				return;
 			case "toggle":
 			case "change":
@@ -246,24 +341,182 @@ export class AskMoreComponent implements Component {
 		}
 	}
 
-	#update(patch: Partial<SheetView>): void {
-		this.#view = { ...this.#view, ...patch };
+	// ── Keys ──────────────────────────────────────────────────────────────
+
+	handleInput(data: string): void {
+		if (this.#closed) return;
+		if (
+			routeSgrMouseInput(data, mouse => {
+				if (mouse.wheel === null) return false;
+				this.#activeView().scroll(mouse.wheel * WHEEL_ROWS);
+				return true;
+			})
+		) {
+			return;
+		}
+
+		const active = this.#active;
+		const state = active.kind === "question" ? this.#states[active.index] : undefined;
+		if (state?.editing) {
+			// The field owns Enter (save) and Escape (back) through its callbacks.
+			state.input.handleInput(data);
+			this.#change(() => {});
+			return;
+		}
+
+		if (matchesKey(data, "escape")) {
+			this.#submit({ kind: "cancel" });
+			return;
+		}
+		if (this.#states.length > 1) {
+			if (matchesKey(data, "tab") || matchesKey(data, "right")) {
+				this.#stepTab(1);
+				return;
+			}
+			if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
+				this.#stepTab(-1);
+				return;
+			}
+		}
+		const scroll = scrollKey(data);
+		if (scroll !== undefined) {
+			this.#scroll(scroll, FAST_ROWS);
+			return;
+		}
+		if (isEnter(data)) {
+			this.#pressEnter();
+			return;
+		}
+
+		if (state === undefined) {
+			// The review page: ↑↓ read through the answers.
+			if (matchesKey(data, "up")) this.#scroll("line-up", 1);
+			else if (matchesKey(data, "down")) this.#scroll("line-down", 1);
+			return;
+		}
+		if (matchesKey(data, "ctrl+o")) {
+			this.#change(() => {
+				state.expanded = !state.expanded;
+			});
+			return;
+		}
+		const rows = state.question.options.length + 1;
+		if (matchesKey(data, "up")) {
+			this.#change(() => {
+				state.cursor = (state.cursor - 1 + rows) % rows;
+			});
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			this.#change(() => {
+				state.cursor = (state.cursor + 1) % rows;
+			});
+			return;
+		}
+		if (data === "o" || data === "O") {
+			this.#change(() => {
+				state.cursor = state.question.options.length;
+				state.editing = true;
+			});
+		}
 	}
 
-	#enterOther(): void {
-		this.#update({ otherMode: true });
+	/**
+	 * Natively the terminal scrolls the sheet (a request it applies once per bump); on the ANSI page
+	 * the active viewport moves. Line moves go `rows` at a time.
+	 */
+	#scroll(by: TspScrollBy, rows: number): void {
+		const view = this.#activeView();
+		if (by === "page-up") view.page(-1);
+		else if (by === "page-down") view.page(1);
+		else if (by === "start") view.scrollToTop();
+		else if (by === "end") view.scrollToBottom();
+		else view.scroll(by === "line-up" ? -rows : rows);
+		const holder = this.#active.kind === "review" ? this.#review : this.#states[this.#active.index];
+		if (holder !== undefined) holder.nativeScroll = { by, n: (holder.nativeScroll?.n ?? 0) + 1 };
 	}
 
-	/** Back to the options; a field focused by pointer hands the keys back to the sheet. */
-	#leaveOther(): void {
-		this.#update({ otherMode: false });
-		this.#tui.setFocus(this);
-		this.#tui.requestRender();
+	// ── Transitions ───────────────────────────────────────────────────────
+
+	/** Enter on the page: answer the row under the cursor, save the Other text, or submit the review. */
+	#pressEnter(): void {
+		const active = this.#active;
+		if (active.kind === "review") {
+			this.#submitAll();
+			return;
+		}
+		const state = this.#states[active.index];
+		if (state === undefined) return;
+		if (state.editing) {
+			this.#saveOther(active.index, state.input.getValue());
+			return;
+		}
+		if (onOther(state)) {
+			this.#change(() => {
+				state.editing = true;
+			});
+			return;
+		}
+		this.#answerOption(active.index, state.cursor);
 	}
 
-	#submitOther(value: string): void {
+	#answerOption(index: number, option: number): void {
+		const state = this.#states[index];
+		if (state === undefined) return;
+		this.#change(() => {
+			state.answer = { kind: "option", index: option };
+			state.cursor = option;
+			state.editing = false;
+		});
+		this.#advance(index);
+	}
+
+	/** A non-blank Other text answers the question; a blank one keeps the field open. */
+	#saveOther(index: number, value: string): void {
+		const state = this.#states[index];
 		const text = value.trim();
-		if (text.length > 0) this.#submit({ kind: "other", text });
+		if (state === undefined || text.length === 0) return;
+		this.#change(() => {
+			state.answer = { kind: "custom", text };
+			state.editing = false;
+		});
+		this.#advance(index);
+	}
+
+	/** After an answer: one question submits; in a batch the next question opens, the last one leads to the review. */
+	#advance(index: number): void {
+		if (this.#states.length === 1) {
+			this.#submitAll();
+			return;
+		}
+		this.#goTo(index + 1 < this.#states.length ? { kind: "question", index: index + 1 } : { kind: "review" });
+	}
+
+	#stepTab(delta: number): void {
+		const count = this.#states.length + 1;
+		const current = this.#active.kind === "review" ? this.#states.length : this.#active.index;
+		const next = (current + delta + count) % count;
+		this.#goTo(next === this.#states.length ? { kind: "review" } : { kind: "question", index: next });
+	}
+
+	#goToTabId(id: string): void {
+		if (this.#states.length < 2) return;
+		if (id === REVIEW_TAB) {
+			this.#goTo({ kind: "review" });
+			return;
+		}
+		const index = Number(id);
+		if (Number.isInteger(index) && index >= 0 && index < this.#states.length) this.#goTo({ kind: "question", index });
+	}
+
+	#goTo(tab: ActiveTab): void {
+		this.#change(() => {
+			this.#active = tab;
+		});
+	}
+
+	#submitAll(): void {
+		this.#submit({ kind: "submit", answers: this.#states.map(state => state.answer) });
 	}
 
 	#submit(submission: Submission): void {
@@ -271,19 +524,42 @@ export class AskMoreComponent implements Component {
 		this.#closed = true;
 		this.#finish(submission);
 	}
+
+	#change(mutate: () => void): void {
+		mutate();
+		this.#version++;
+	}
+
+	#activeView(): ScrollView {
+		return this.#active.kind === "review" ? this.#review.view : (this.#states[this.#active.index]?.view ?? this.#review.view);
+	}
+
+	#activeNativeScroll(): NativeScrollRequest | undefined {
+		return this.#active.kind === "review" ? this.#review.nativeScroll : this.#states[this.#active.index]?.nativeScroll;
+	}
 }
 
+/** The scroll a key asks for: pages, ends, and Shift+↑↓ for a few lines. */
 function scrollKey(data: string): TspScrollBy | undefined {
 	if (matchesSelectPageUp(data)) return "page-up";
 	if (matchesSelectPageDown(data)) return "page-down";
 	if (matchesKey(data, "home")) return "start";
 	if (matchesKey(data, "end")) return "end";
+	if (matchesKey(data, "shift+up")) return "line-up";
+	if (matchesKey(data, "shift+down")) return "line-down";
 	return undefined;
 }
 
 /** Enter arrives as a named key, `\r` or `\n` depending on the terminal. */
 function isEnter(data: string): boolean {
 	return data === "\r" || data === "\n" || matchesKey(data, "enter") || matchesKey(data, "return");
+}
+
+/** `label` then `value`, wrapped to `width` with the continuation lines indented under the value. */
+function wrapLabelled(label: string, value: string, width: number): string[] {
+	const indent = visibleWidth(label);
+	const lines = new Markdown(value, 0, 0, getMarkdownTheme()).render(Math.max(8, width - indent));
+	return lines.map((line, index) => (index === 0 ? label : " ".repeat(indent)) + line);
 }
 
 /** Pad or truncate one rendered row to exactly `width` cells. */

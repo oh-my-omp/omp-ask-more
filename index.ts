@@ -6,20 +6,20 @@
  * keep the native contracts (`AskToolDetails`, `/tree` recovery), so nothing downstream changes.
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext } from "@oh-my-pi/pi-coding-agent";
+import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions } from "@oh-my-pi/pi-coding-agent";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
 import { DESCRIPTION } from "./src/description.ts";
 import { answerResult, cancelledResult, rejectedResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 
-/** One ask at a time: a second call would replace the first component and orphan its promise. */
+/** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
 let asking = false;
 
-/** The native dialog when this session cannot host the richer surface. */
+/** The native dialog when this session cannot host the richer surface: the whole batch at once. */
 async function delegate(
 	ctx: ExtensionContext,
-	question: AskQuestion,
+	questions: readonly AskQuestion[],
 	signal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
 ): Promise<AgentToolResult<AskToolDetails>> {
@@ -28,10 +28,16 @@ async function delegate(
 		return rejectedResult(["ask needs an interactive session, and no native ask is available to delegate to here"]);
 	}
 	return invoke<AskToolDetails>(
-		{ questions: [nativeQuestion(question)] },
+		{ questions: questions.map(nativeQuestion) },
 		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
 	);
 }
+
+/**
+ * A fullscreen overlay: the alternate screen in an ANSI terminal; in Tern the component's
+ * `nativeOverlay` turns it into a sheet over the transcript.
+ */
+const SHEET: OverlayOptions = { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0, anchor: "top-left" };
 
 async function ask(
 	ctx: ExtensionContext,
@@ -42,31 +48,31 @@ async function ask(
 ): Promise<AgentToolResult<AskToolDetails>> {
 	const checked = validate(params);
 	if (!checked.ok) return rejectedResult(checked.problems);
-	const question = checked.question;
+	const questions = checked.questions;
 
-	if (!(ctx.hasUI && ctx.mode === "tui")) return delegate(ctx, question, signal, onUpdate);
+	if (!(ctx.hasUI && ctx.mode === "tui")) return delegate(ctx, questions, signal, onUpdate);
 	if (asking) return rejectedResult(["another ask is open in this session; answer it before asking again"]);
 
 	asking = true;
 	try {
-		const evidence = await resolveEvidence(question.brief.evidence, ctx.cwd);
+		const evidence = await Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd)));
 		const submission = await ui.custom<Submission | undefined>(
-			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, question, evidence, finish: done }),
-			{ ...(signal === undefined ? {} : { signal }) },
+			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, finish: done }),
+			{ overlay: true, overlayOptions: SHEET, ...(signal === undefined ? {} : { signal }) },
 		);
 		if (submission === undefined || submission.kind === "cancel") {
 			ctx.abort();
-			return cancelledResult(question);
+			return cancelledResult(questions);
 		}
-		return answerResult(question, submission);
+		return answerResult(questions, submission.answers);
 	} catch (error) {
 		if (signal?.aborted) {
 			ctx.abort();
-			return cancelledResult(question);
+			return cancelledResult(questions);
 		}
 		// The rich surface failed before it could be answered: fall back rather than lose the ask.
 		ctx.ui.notify?.(`ask-more: ${error instanceof Error ? error.message : String(error)}`, "warning");
-		return delegate(ctx, question, signal, onUpdate);
+		return delegate(ctx, questions, signal, onUpdate);
 	} finally {
 		asking = false;
 	}

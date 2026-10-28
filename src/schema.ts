@@ -35,16 +35,18 @@ export const optionSchema = z.object({
 });
 
 export const questionSchema = z.object({
-	id: z.string().min(1),
+	id: z.string().min(1).describe("unique within the call; the answer is reported under it"),
 	question: z.string().min(1).describe("one or two sentences; the brief carries the context"),
-	header: z.string().optional().describe("short display chip"),
+	header: z.string().optional().describe("short tab label"),
 	options: z.array(optionSchema).min(2).max(5),
-	multi: z.boolean().optional().describe("not supported: one answer per call"),
+	multi: z.boolean().optional().describe("not supported: one answer per question"),
 	recommended: z.number().optional().describe("0-based index of the option you would pick"),
 	brief: briefSchema,
 });
 
-export const parametersSchema = z.object({ questions: z.array(questionSchema).min(1) });
+export const parametersSchema = z.object({
+	questions: z.array(questionSchema).min(1).describe("independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
+});
 
 export type EvidenceRef = z.infer<typeof evidenceSchema>;
 export type Brief = z.infer<typeof briefSchema>;
@@ -52,8 +54,8 @@ export type AskOption = z.infer<typeof optionSchema>;
 export type AskQuestion = z.infer<typeof questionSchema>;
 export type AskParams = z.infer<typeof parametersSchema>;
 
-/** Exactly one question, validated; or every reason it cannot be asked. */
-export type Validated = { readonly ok: true; readonly question: AskQuestion } | { readonly ok: false; readonly problems: readonly string[] };
+/** Every question validated; or every reason the call cannot be asked. */
+export type Validated = { readonly ok: true; readonly questions: readonly AskQuestion[] } | { readonly ok: false; readonly problems: readonly string[] };
 
 const LINE_SPEC = /^\d+(?:-\d+)?$/;
 
@@ -63,63 +65,70 @@ export const MAX_EVIDENCE_LINES = 80;
 
 /**
  * Semantic checks the schema cannot state. They run before any UI opens and never degrade
- * into a thinner ask: the model gets every problem at once and calls again.
+ * into a thinner ask: the model gets every problem of every question at once and calls again.
  */
 export function validate(params: AskParams): Validated {
 	const problems: string[] = [];
-	if (params.questions.length !== 1) {
-		problems.push(`questions: expected exactly one question, got ${params.questions.length}. Split the call; one decision per call.`);
-	}
-	const question = params.questions[0];
-	if (question === undefined) return { ok: false, problems };
+	if (params.questions.length === 0) problems.push("questions: empty; ask at least one question");
+	const ids = new Set<string>();
+	params.questions.forEach((question, index) => {
+		const id = question.id.trim();
+		if (id.length === 0) problems.push(`questions[${index}].id: empty`);
+		else if (ids.has(id)) problems.push(`questions[${index}].id: duplicate "${question.id}"; every question needs its own id`);
+		else ids.add(id);
+		problems.push(...validateQuestion(question, `questions[${index}]`));
+	});
+	return problems.length === 0 ? { ok: true, questions: params.questions } : { ok: false, problems };
+}
 
-	if ((question.question ?? "").trim().length === 0) problems.push("questions[0].question: empty");
-	if (question.multi === true) problems.push("questions[0].multi: not supported; the sheet selects one answer. Ask twice for two.");
+function validateQuestion(question: AskQuestion, at: string): string[] {
+	const problems: string[] = [];
+	if (question.question.trim().length === 0) problems.push(`${at}.question: empty`);
+	if (question.multi === true) problems.push(`${at}.multi: not supported; each question takes one answer. Split it into separate questions.`);
 
 	for (const field of ["where", "what", "how"] as const) {
-		if (question.brief[field].trim().length === 0) problems.push(`questions[0].brief.${field}: empty`);
+		if (question.brief[field].trim().length === 0) problems.push(`${at}.brief.${field}: empty`);
 	}
 
 	if (question.options.length < 2) {
-		problems.push("questions[0].options: a decision needs at least two options; act and state the choice instead of asking for one.");
+		problems.push(`${at}.options: a decision needs at least two options; act and state the choice instead of asking for one.`);
 	}
 	const seen = new Set<string>();
 	question.options.forEach((option, index) => {
-		const at = `questions[0].options[${index}]`;
+		const optionAt = `${at}.options[${index}]`;
 		const label = option.label.trim();
-		if (label.length === 0) problems.push(`${at}.label: empty`);
-		else if (RESERVED_LABELS[label] === true) problems.push(`${at}.label: "${option.label}" is added by the UI; give the option its own label`);
-		else if (seen.has(label)) problems.push(`${at}.label: duplicate "${option.label}"`);
+		if (label.length === 0) problems.push(`${optionAt}.label: empty`);
+		else if (RESERVED_LABELS[label] === true) problems.push(`${optionAt}.label: "${option.label}" is added by the UI; give the option its own label`);
+		else if (seen.has(label)) problems.push(`${optionAt}.label: duplicate "${option.label}"`);
 		else seen.add(label);
-		if (option.tradeoff.trim().length === 0) problems.push(`${at}.tradeoff: empty; say what the option buys and what it costs`);
+		if (option.tradeoff.trim().length === 0) problems.push(`${optionAt}.tradeoff: empty; say what the option buys and what it costs`);
 	});
 
 	const evidence = question.brief.evidence ?? [];
 	if (evidence.length > MAX_EVIDENCE_REFS) {
-		problems.push(`questions[0].brief.evidence: ${evidence.length} references; the surface shows at most ${MAX_EVIDENCE_REFS}. Cite the ones that decide it.`);
+		problems.push(`${at}.brief.evidence: ${evidence.length} references; the surface shows at most ${MAX_EVIDENCE_REFS}. Cite the ones that decide it.`);
 	}
-	for (const [index, ref] of evidence.entries()) {
-		if (ref.lines === undefined) continue;
-		const [, first, last] = /^(\d+)(?:-(\d+))?$/.exec(ref.lines.trim()) ?? [];
-		if (first === undefined) continue;
-		const span = last === undefined ? 1 : Math.abs(Number(last) - Number(first)) + 1;
-		if (span > MAX_EVIDENCE_LINES) {
-			problems.push(`questions[0].brief.evidence[${index}].lines: "${ref.lines}" spans ${span} lines; narrow it to ${MAX_EVIDENCE_LINES} or fewer.`);
+	evidence.forEach((ref, index) => {
+		const refAt = `${at}.brief.evidence[${index}]`;
+		if (ref.path.trim().length === 0) problems.push(`${refAt}.path: empty`);
+		if (ref.lines === undefined) return;
+		const spec = ref.lines.trim();
+		if (!LINE_SPEC.test(spec)) {
+			problems.push(`${refAt}.lines: "${ref.lines}" is not "N" or "N-M"`);
+			return;
 		}
-	}
+		const [first, last] = spec.split("-").map(Number);
+		const span = last === undefined ? 1 : Math.abs(last - (first ?? 0)) + 1;
+		if (span > MAX_EVIDENCE_LINES) {
+			problems.push(`${refAt}.lines: "${ref.lines}" spans ${span} lines; narrow it to ${MAX_EVIDENCE_LINES} or fewer.`);
+		}
+	});
 
 	const recommended = question.recommended;
 	if (recommended !== undefined && (!Number.isInteger(recommended) || recommended < 0 || recommended >= question.options.length)) {
-		problems.push(`questions[0].recommended: ${recommended} is not an index into ${question.options.length} options`);
+		problems.push(`${at}.recommended: ${recommended} is not an index into ${question.options.length} options`);
 	}
-
-	question.brief.evidence?.forEach((ref, index) => {
-		const at = `questions[0].brief.evidence[${index}]`;
-		if (ref.path.trim().length === 0) problems.push(`${at}.path: empty`);
-		if (ref.lines !== undefined && !LINE_SPEC.test(ref.lines.trim())) problems.push(`${at}.lines: "${ref.lines}" is not "N" or "N-M"`);
-	});
-
-	return problems.length === 0 ? { ok: true, question } : { ok: false, problems };
+	return problems;
 }
 
 /** The native shape of one question: extension fields dropped, `preview` kept when the model wrote one. */
