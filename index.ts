@@ -7,8 +7,10 @@
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions } from "@oh-my-pi/pi-coding-agent";
+import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
+import { loadQuestionDemos } from "./src/demo.ts";
 import { DESCRIPTION } from "./src/description.ts";
 import { answerResult, cancelledResult, rejectedResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
@@ -55,9 +57,13 @@ async function ask(
 
 	asking = true;
 	try {
-		const evidence = await Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd)));
+		const [evidence, demos] = await Promise.all([
+			Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd))),
+			// Tern plays image bytes itself; the ANSI page draws decoded frames as wide as the page.
+			loadQuestionDemos(questions, ctx.cwd, isNativeRendering() ? "native" : "ansi", (process.stdout.columns ?? 80) - 8, signal),
+		]);
 		const submission = await ui.custom<Submission | undefined>(
-			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, finish: done }),
+			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, demos, finish: done }),
 			{ overlay: true, overlayOptions: SHEET, ...(signal === undefined ? {} : { signal }) },
 		);
 		if (submission === undefined || submission.kind === "cancel") {

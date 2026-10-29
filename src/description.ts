@@ -14,9 +14,14 @@ Every question carries a \`brief\`:
 - \`how\`: what happens after each answer, and which constraint should decide it.
 - \`evidence[{path, lines, note}]\`: real code. The tool reads the lines from disk and shows them; \`lines\` is "41" or "41-58" (at most 80 lines, at most 6 references). Cite the lines the decision is about whenever there are any.
 - \`diagram\`: Mermaid source. Draw one whenever the decision involves a flow, a sequence, states, dependencies or a structure.
+- \`demo\`: an animation of how things behave now (see Demos).
 - \`risks[]\`: what can go wrong whichever way it goes.
 
-Every option carries \`tradeoff\` (one line: what it buys and what it costs), \`holds_when\` (when it is the right choice) and \`cost\` (files, migrations, time). \`description\` is a one-line disambiguator, never the tradeoff. Set \`recommended\` to the option you would pick and make its tradeoff say why.
+Every option carries \`tradeoff\` (one line: what it buys and what it costs), \`holds_when\` (when it is the right choice) and \`cost\` (files, migrations, time). \`description\` is a one-line disambiguator, never the tradeoff. Set \`recommended\` to the option you would pick and make its tradeoff say why. An option may carry a \`demo\` of the result of picking it; it plays while that option is focused, so the user compares options by moving between them.
+
+Demos: show a demo whenever the decision is about behaviour over time — a UI interaction, states a request goes through, before and after a change. Give exactly one source:
+- \`frames[{body, caption}]\` (2–12) with \`interval_ms\` (300–5000, default 1200): you write each frame in Markdown — text, a \`\`\`mermaid diagram, or a fenced text drawing of a screen. Keep every frame the same shape so only what changes moves.
+- \`path\`: an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), relative to the working directory. It can be a recording you made for this ask (for example with ffmpeg from screenshots). Up to 16 MB and the first 15 seconds play; terminals without graphics show it as a coarse color picture, so say what to watch in \`caption\`.
 
 Several questions in one call: put decisions that do not depend on each other in the same call (each question is a tab; the user can answer them in any order and submit). A decision whose options depend on another answer goes in a later call, after you have that answer.
 

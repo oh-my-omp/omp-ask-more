@@ -2,13 +2,14 @@
 // declares `nativeOverlay`, so the backend wraps it in Tern's sheet (the frame and the title row);
 // `describe()` returns only the content. The sheet body scrolls as one column: the question tabs,
 // the question and its short brief, the decision with its buttons, then the long material.
-import { card, code, col, item, md, node, span, text, type NativeChild, type NativeNode, type TspSpan } from "@oh-my-pi/pi-tui";
+import { card, code, col, item, md, nativeImageNode, node, span, text, type NativeChild, type NativeNode, type TspSpan } from "@oh-my-pi/pi-tui";
 import { actionBar, actionButton, selectList } from "@oh-my-pi/pi-tui/native/overlay";
 import type { ResolvedEvidence } from "./brief.ts";
+import { frameCount } from "./demo.ts";
 import { tr } from "./i18n.ts";
 import type { Answer } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
-import { type ActiveTab, type NativeScrollRequest, onOther, type QuestionState } from "./state.ts";
+import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
 
 /** Keys and ids the component routes (keys compared with `leafKey(event.key)`). */
 export const TABS_KEY = "tabs";
@@ -20,6 +21,63 @@ export const SUBMIT_ACT = "submit";
 export const CANCEL_ACT = "cancel";
 
 const OPTION_PREFIX = "option:";
+const DEMO_PREFIX = "demo:";
+
+/** A demo control: step back, pause or play, step forward. */
+export type DemoMove = "prev" | "toggle" | "next";
+
+function demoAct(slot: DemoSlot, move: DemoMove): string {
+	return `${DEMO_PREFIX}${slot}:${move}`;
+}
+
+/** The demo and control an action id names, or undefined when it is not a demo control. */
+export function parseDemoAct(act: string): { readonly slot: DemoSlot; readonly move: DemoMove } | undefined {
+	if (!act.startsWith(DEMO_PREFIX)) return undefined;
+	const [slot, move] = act.slice(DEMO_PREFIX.length).split(":");
+	if (slot !== "question" && slot !== "option") return undefined;
+	if (move !== "prev" && move !== "toggle" && move !== "next") return undefined;
+	return { slot, move };
+}
+
+/** Image height cap in the sheet. */
+const DEMO_IMAGE_LINES = "18lines";
+
+/** A demo as it plays in the sheet: frames the component steps, or an image Tern animates. */
+function demoNode(page: PageDemo): NativeNode {
+	const { demo, play, slot } = page;
+	const caption = demo.caption ? [text([span(demo.caption, "muted")], { wrap: "word" })] : [];
+	switch (demo.kind) {
+		case "frames": {
+			const frame = demo.frames[play.frame] ?? demo.frames[0];
+			const count = frameCount(demo);
+			const controls = node(
+				"row",
+				{ gap: "sm", align: "center" },
+				[
+					text([span(`${play.frame + 1}/${count}`, "muted")]),
+					actionButton(tr("Previous", "上一帧"), demoAct(slot, "prev"), { keys: "[" }),
+					actionButton(play.playing ? tr("Pause", "暂停") : tr("Play", "播放"), demoAct(slot, "toggle"), { keys: "p" }),
+					actionButton(tr("Next", "下一帧"), demoAct(slot, "next"), { keys: "]" }),
+				],
+				"controls",
+			);
+			const frameCaption = frame?.caption ? [text([span(frame.caption)], { wrap: "word" })] : [];
+			return node("col", { gap: "sm", role: "omp.ask.demo" }, [node("md", { text: frame?.body ?? "" }, undefined, "frame"), ...frameCaption, ...caption, controls], `demo-${slot}`);
+		}
+		case "image":
+			return node(
+				"col",
+				{ gap: "sm", role: "omp.ask.demo" },
+				[nativeImageNode(demo.bytes, demo.mime, { alt: demo.caption ?? demo.path, max: { h: DEMO_IMAGE_LINES } }, "image"), ...caption],
+				`demo-${slot}`,
+			);
+		case "raster":
+			// Decoded for the ANSI page; the sheet never loads this kind.
+			return node("col", { gap: "sm" }, [text([span(demo.path, "muted")]), ...caption], `demo-${slot}`);
+		case "error":
+			return node("card", { head: [span(demo.path, "muted")], tone: "error" }, [text([span(demo.error, "error")], { wrap: "word" }), ...caption], `demo-${slot}`);
+	}
+}
 
 /** The list key of question `index`: a late click on a page already left cannot answer the new one. */
 export function questionListKey(index: number): string {
@@ -129,12 +187,12 @@ function options(state: QuestionState, index: number): NativeNode {
 	return selectList(questionListKey(index), rows, { selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor) });
 }
 
-/** The focused option's tradeoff rows, under the options. */
-function tradeoff(state: QuestionState): NativeNode | undefined {
+/** The focused option's tradeoff rows, under the options, and the demo of picking it. */
+function tradeoff(state: QuestionState, demo: PageDemo | undefined): NativeNode | undefined {
 	const option = state.question.options[state.cursor];
 	if (option === undefined || state.editing) return undefined;
 	// Label then value per row: a `kv` grid sizes its label column too narrow for CJK labels.
-	const rows = (
+	const rows: NativeNode[] = (
 		[
 			[tr("Tradeoff", "取舍"), option.tradeoff],
 			[tr("Holds when", "成立条件"), option.holds_when],
@@ -143,6 +201,7 @@ function tradeoff(state: QuestionState): NativeNode | undefined {
 	)
 		.filter((pair): pair is readonly [string, string] => pair[1] !== undefined && pair[1].trim().length > 0)
 		.map(([label, value], index) => node("text", { spans: [span(label, "muted"), span("  "), span(value.trim())], wrap: "word" }, undefined, `t${index}`));
+	if (demo !== undefined) rows.push(demoNode(demo));
 	return { ...card({ role: "omp.ask.tradeoff", tone: "accent", head: [span(option.label)] }, rows), key: "tradeoff" };
 }
 
@@ -178,8 +237,9 @@ function actions(primary: { readonly label: string; readonly act: string }): Nat
 function questionPage(states: readonly QuestionState[], index: number): NativeChild[] {
 	const state = states[index];
 	if (state === undefined) return [];
+	const demos = pageDemos(state);
 	const decision: NativeChild[] = [options(state, index)];
-	const focused = tradeoff(state);
+	const focused = tradeoff(state, demos.find(demo => demo.slot === "option"));
 	if (focused !== undefined) decision.push(focused);
 	// The field is its own component, so the terminal's edits and undo reach it directly.
 	if (state.editing) decision.push(node("row", { role: "omp.ask.otherField" }, [state.input], "otherField"));
@@ -190,7 +250,9 @@ function questionPage(states: readonly QuestionState[], index: number): NativeCh
 	// `omp.actions` row would cover it; so the bar sits in the decision column (not last) and reveals
 	// itself when a page opens, which pulls the whole decision into view after a long brief.
 	decision.push({ ...actions(primary), reveal: "nearest" });
-	return [...lead(state.question), node("col", { gap: "md" }, decision, `decision${index}`), ...appendix(state)];
+	const questionDemo = demos.find(demo => demo.slot === "question");
+	const demo = questionDemo === undefined ? [] : [block("demo", tr("Demo", "演示"), [demoNode(questionDemo)])];
+	return [...lead(state.question), node("col", { gap: "md" }, decision, `decision${index}`), ...demo, ...appendix(state)];
 }
 
 function reviewPage(states: readonly QuestionState[]): NativeChild[] {

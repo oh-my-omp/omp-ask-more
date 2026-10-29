@@ -12,6 +12,7 @@ import {
 	type NativeUiEvent,
 	routeSgrMouseInput,
 	ScrollView,
+	type RenderTimer,
 	type TUI,
 	getMarkdownTheme,
 	matchesKey,
@@ -24,6 +25,7 @@ import { matchesSelectPageDown, matchesSelectPageUp } from "@oh-my-pi/pi-tui/key
 import { leafKey } from "@oh-my-pi/pi-tui/native/node";
 import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import type { ResolvedEvidence } from "./brief.ts";
+import { frameCount, frameInterval, halfBlockRows, type LoadedDemo, type QuestionDemos } from "./demo.ts";
 import { tr } from "./i18n.ts";
 import {
 	answerLabel,
@@ -32,6 +34,8 @@ import {
 	ENTER_ACT,
 	OTHER_ITEM,
 	optionIndex,
+	type DemoMove,
+	parseDemoAct,
 	questionListKey,
 	REVIEW_TAB,
 	SUBMIT_ACT,
@@ -41,7 +45,7 @@ import {
 } from "./nodes.ts";
 import { type Answer, UNANSWERED } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
-import { type ActiveTab, type NativeScrollRequest, onOther, type QuestionState, type ReviewState } from "./state.ts";
+import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState, type ReviewState, startPlayback } from "./state.ts";
 
 export type Submission = { readonly kind: "submit"; readonly answers: readonly Answer[] } | { readonly kind: "cancel" };
 
@@ -50,6 +54,8 @@ export interface AskMoreOptions {
 	readonly questions: readonly AskQuestion[];
 	/** Resolved evidence, one list per question. */
 	readonly evidence: readonly (readonly ResolvedEvidence[])[];
+	/** Loaded demos, one entry per question. */
+	readonly demos: readonly QuestionDemos[];
 	readonly finish: (submission: Submission) => void;
 }
 
@@ -79,8 +85,23 @@ export class AskMoreComponent implements Component {
 	#active: ActiveTab = { kind: "question", index: 0 };
 	/** Bumped on every change a surface draws; scrolling alone does not change it. */
 	#version = 0;
-	#body: { key: string; lines: readonly string[]; focus: { start: number; end: number } | undefined } | undefined;
-	#native: { version: number; scroll: NativeScrollRequest | undefined; node: NativeNode } | undefined;
+	#body:
+		| {
+				key: string;
+				lines: readonly string[];
+				focus: { start: number; end: number } | undefined;
+				/** Rows reserved for each demo the page plays; filled per frame. */
+				slots: readonly { slot: DemoSlot; start: number; height: number }[];
+		  }
+		| undefined;
+	/** The `#frames` value the ANSI viewport last drew. */
+	#drawnFrames = -1;
+	#native: { version: number; frames: number; scroll: NativeScrollRequest | undefined; node: NativeNode } | undefined;
+	/** Bumped when a demo frame changes; a frame alone redraws only the demo. */
+	#frames = 0;
+	#timer: RenderTimer | undefined;
+	/** Rendered frames of each frames demo per width, padded to its tallest frame. */
+	readonly #frameLines = new WeakMap<LoadedDemo, { width: number; frames: readonly (readonly string[])[] }>();
 	#closed = false;
 
 	constructor(options: AskMoreOptions) {
@@ -94,6 +115,9 @@ export class AskMoreComponent implements Component {
 			const state: QuestionState = {
 				question,
 				evidence: options.evidence[index] ?? [],
+				demos: options.demos[index] ?? { question: undefined, options: [] },
+				questionPlay: startPlayback(),
+				optionPlay: startPlayback(question.recommended ?? 0),
 				cursor: Math.min(question.recommended ?? 0, question.options.length - 1),
 				answer: UNANSWERED,
 				editing: false,
@@ -108,10 +132,13 @@ export class AskMoreComponent implements Component {
 			});
 			return state;
 		});
+		this.#arm();
 	}
 
 	dispose(): void {
 		this.#closed = true;
+		this.#timer?.cancel();
+		this.#timer = undefined;
 		for (const state of this.#states) state.view.dispose?.();
 		this.#review.view.dispose?.();
 	}
@@ -128,9 +155,13 @@ export class AskMoreComponent implements Component {
 		const view = this.#activeView();
 		const key = `${this.#version}|${bodyWidth}|${this.#active.kind === "review" ? "review" : this.#active.index}`;
 		if (this.#body?.key !== key) {
-			const built = this.#active.kind === "review" ? { lines: this.#reviewLines(bodyWidth), focus: undefined } : this.#questionLines(this.#active.index, bodyWidth);
+			const built = this.#active.kind === "review" ? { lines: this.#reviewLines(bodyWidth), focus: undefined, slots: [] } : this.#questionLines(this.#active.index, bodyWidth);
 			this.#body = { key, ...built };
-			view.setLines(built.lines);
+			this.#drawnFrames = -1;
+		}
+		if (this.#drawnFrames !== this.#frames) {
+			view.setLines(this.#withDemoFrames(this.#body.lines, this.#body.slots, bodyWidth));
+			this.#drawnFrames = this.#frames;
 		}
 		view.setHeight(bodyHeight);
 		const focus = this.#body.focus;
@@ -169,15 +200,19 @@ export class AskMoreComponent implements Component {
 		const state = this.#states[this.#active.index];
 		if (state?.editing) return tr("enter save · esc back to the options", "enter 保存 · esc 回到选项");
 		const next = this.#states.length > 1 ? tr(" · tab next question", " · tab 下一题") : "";
+		const demo = state !== undefined && pageDemos(state).some(page => frameCount(page.demo) > 1) ? tr(" · p/[ ] demo", " · p/[ ] 演示") : "";
 		return tr(
-			`↑↓ choose · enter answer · o other${next} · pgup/pgdn scroll · ctrl+o code · esc cancel all`,
-			`↑↓ 选择 · enter 作答 · o 其他${next} · pgup/pgdn 滚动 · ctrl+o 代码 · esc 全部取消`,
+			`↑↓ choose · enter answer · o other${next}${demo} · pgup/pgdn scroll · ctrl+o code · esc cancel all`,
+			`↑↓ 选择 · enter 作答 · o 其他${next}${demo} · pgup/pgdn 滚动 · ctrl+o 代码 · esc 全部取消`,
 		);
 	}
 
-	#questionLines(index: number, width: number): { lines: readonly string[]; focus: { start: number; end: number } | undefined } {
+	#questionLines(
+		index: number,
+		width: number,
+	): { lines: readonly string[]; focus: { start: number; end: number } | undefined; slots: readonly { slot: DemoSlot; start: number; height: number }[] } {
 		const state = this.#states[index];
-		if (state === undefined) return { lines: [], focus: undefined };
+		if (state === undefined) return { lines: [], focus: undefined, slots: [] };
 		const { question } = state;
 		const { brief } = question;
 		const rows: string[] = [];
@@ -185,6 +220,15 @@ export class AskMoreComponent implements Component {
 			for (const line of new Markdown(source, 0, 0, getMarkdownTheme()).render(width)) rows.push(line);
 		};
 		const heading = (label: string) => rows.push(theme.bold(theme.fg("accent", label)));
+		const demos = pageDemos(state);
+		const slots: { slot: DemoSlot; start: number; height: number }[] = [];
+		/** Blank rows the demo's frames are drawn into, as tall as its tallest frame. */
+		const reserve = (page: PageDemo | undefined) => {
+			if (page === undefined) return;
+			const height = this.#demoLines(page, width).length;
+			slots.push({ slot: page.slot, start: rows.length, height });
+			for (let row = 0; row < height; row++) rows.push("");
+		};
 
 		paragraph(question.question);
 		rows.push("");
@@ -235,6 +279,14 @@ export class AskMoreComponent implements Component {
 				for (const line of wrapLabelled(theme.fg("muted", `${label}  `), value.trim(), width)) rows.push(line);
 			}
 			if (focus !== undefined) focus = { start: focus.start, end: rows.length };
+			reserve(demos.find(page => page.slot === "option"));
+			rows.push("");
+		}
+
+		const questionDemo = demos.find(page => page.slot === "question");
+		if (questionDemo !== undefined) {
+			heading(tr("Demo", "演示"));
+			reserve(questionDemo);
 			rows.push("");
 		}
 
@@ -269,7 +321,67 @@ export class AskMoreComponent implements Component {
 			heading(tr("Risks", "风险"));
 			paragraph(risks.map(risk => `- ${risk}`).join("\n"));
 		}
-		return { lines: rows, focus };
+		return { lines: rows, focus, slots };
+	}
+
+	/** `lines` with each demo slot filled by the frame its playback is on. */
+	#withDemoFrames(lines: readonly string[], slots: readonly { slot: DemoSlot; start: number; height: number }[], width: number): readonly string[] {
+		if (slots.length === 0 || this.#active.kind !== "question") return lines;
+		const state = this.#states[this.#active.index];
+		if (state === undefined) return lines;
+		const pages = pageDemos(state);
+		const filled = lines.slice();
+		for (const { slot, start, height } of slots) {
+			const page = pages.find(candidate => candidate.slot === slot);
+			if (page === undefined) continue;
+			this.#demoLines(page, width)
+				.slice(0, height)
+				.forEach((line, row) => {
+					filled[start + row] = line;
+				});
+		}
+		return filled;
+	}
+
+	/** The ANSI rows of a demo on its current frame; every frame of one demo has the same height. */
+	#demoLines(page: PageDemo, width: number): string[] {
+		const { demo, play } = page;
+		const caption = demo.caption ? wrapLabelled("", theme.fg("muted", demo.caption), width) : [];
+		const controls = (count: number) =>
+			theme.fg(
+				"muted",
+				`${play.frame + 1}/${count} ${play.playing ? "▶" : "⏸"}  ${tr(`p ${play.playing ? "pause" : "play"} · [ ] step`, `p ${play.playing ? "暂停" : "播放"} · [ ] 逐帧`)}`,
+			);
+		switch (demo.kind) {
+			case "frames": {
+				const frames = this.#renderedFrames(demo, width);
+				return [...(frames[play.frame] ?? frames[0] ?? []), ...caption, controls(demo.frames.length)];
+			}
+			case "raster": {
+				const frame = demo.frames[play.frame] ?? demo.frames[0];
+				const picture = frame === undefined ? [] : halfBlockRows(frame, demo.width, demo.rows);
+				return [...picture, ...caption, ...(demo.frames.length > 1 ? [controls(demo.frames.length)] : [])];
+			}
+			case "image":
+				// Loaded for Tern, which animates it; this page draws where it is.
+				return [theme.fg("muted", tr(`${demo.path} (plays in Tern)`, `${demo.path}（在 Tern 中播放）`)), ...caption];
+			case "error":
+				return [theme.fg("error", `${demo.path}: ${demo.error}`), ...caption];
+		}
+	}
+
+	/** Every frame of a frames demo at `width`, padded to the tallest so the page does not jump. */
+	#renderedFrames(demo: Extract<LoadedDemo, { kind: "frames" }>, width: number): readonly (readonly string[])[] {
+		const cached = this.#frameLines.get(demo);
+		if (cached?.width === width) return cached.frames;
+		const rendered = demo.frames.map(frame => [
+			...new Markdown(frame.body, 0, 0, getMarkdownTheme()).render(width),
+			...(frame.caption ? wrapLabelled("", frame.caption, width) : []),
+		]);
+		const height = Math.max(...rendered.map(lines => lines.length));
+		const frames = rendered.map(lines => [...lines, ...Array.from({ length: height - lines.length }, () => "")]);
+		this.#frameLines.set(demo, { width, frames });
+		return frames;
 	}
 
 	#reviewLines(width: number): readonly string[] {
@@ -290,9 +402,9 @@ export class AskMoreComponent implements Component {
 	describe(_cx: DescribeContext): NativeNode {
 		const scroll = this.#activeNativeScroll();
 		const memo = this.#native;
-		if (memo !== undefined && memo.version === this.#version && memo.scroll === scroll) return memo.node;
+		if (memo !== undefined && memo.version === this.#version && memo.frames === this.#frames && memo.scroll === scroll) return memo.node;
 		const node = describeSheet(this.#states, this.#active, scroll);
-		this.#native = { version: this.#version, scroll, node };
+		this.#native = { version: this.#version, frames: this.#frames, scroll, node };
 		return node;
 	}
 
@@ -331,6 +443,10 @@ export class AskMoreComponent implements Component {
 				if (event.act === CANCEL_ACT) this.#submit({ kind: "cancel" });
 				else if (event.act === ENTER_ACT) this.#pressEnter();
 				else if (event.act === SUBMIT_ACT) this.#submitAll();
+				else {
+					const control = parseDemoAct(event.act);
+					if (control !== undefined) this.#moveDemos(control.move, control.slot);
+				}
 				return;
 			case "toggle":
 			case "change":
@@ -398,6 +514,10 @@ export class AskMoreComponent implements Component {
 			this.#change(() => {
 				state.expanded = !state.expanded;
 			});
+			return;
+		}
+		if (data === "p" || data === "P" || data === "[" || data === "]") {
+			this.#moveDemos(data === "[" ? "prev" : data === "]" ? "next" : "toggle");
 			return;
 		}
 		const rows = state.question.options.length + 1;
@@ -522,12 +642,77 @@ export class AskMoreComponent implements Component {
 	#submit(submission: Submission): void {
 		if (this.#closed) return;
 		this.#closed = true;
+		this.#timer?.cancel();
+		this.#timer = undefined;
 		this.#finish(submission);
 	}
 
 	#change(mutate: () => void): void {
 		mutate();
 		this.#version++;
+		this.#arm();
+	}
+
+	// ── Demo playback ─────────────────────────────────────────────────────
+
+	/** The demos of the open page that the component animates (Tern plays image demos itself). */
+	#animatedDemos(): PageDemo[] {
+		if (this.#active.kind !== "question") return [];
+		const state = this.#states[this.#active.index];
+		return state === undefined ? [] : pageDemos(state).filter(page => frameCount(page.demo) > 1);
+	}
+
+	/** One timer for the open page, due at the earliest next frame of a playing demo; none otherwise. */
+	#arm(): void {
+		this.#timer?.cancel();
+		this.#timer = undefined;
+		if (this.#closed) return;
+		const now = performance.now();
+		let due = Number.POSITIVE_INFINITY;
+		for (const { demo, play } of this.#animatedDemos()) {
+			const interval = frameInterval(demo);
+			if (!play.playing || interval === undefined) continue;
+			if (play.nextAt === 0) play.nextAt = now + interval;
+			due = Math.min(due, play.nextAt);
+		}
+		if (due === Number.POSITIVE_INFINITY) return;
+		this.#timer = this.#tui.scheduleAfter(Math.max(0, due - now), () => this.#stepFrames());
+	}
+
+	/** Step every playing demo whose frame is due, redraw, and arm the next frame. */
+	#stepFrames(): void {
+		this.#timer = undefined;
+		if (this.#closed) return;
+		const now = performance.now();
+		let stepped = false;
+		for (const { demo, play } of this.#animatedDemos()) {
+			const interval = frameInterval(demo);
+			if (!play.playing || interval === undefined || play.nextAt > now) continue;
+			play.frame = (play.frame + 1) % frameCount(demo);
+			play.nextAt = now + interval;
+			stepped = true;
+		}
+		if (stepped) {
+			this.#frames++;
+			this.#tui.requestComponentRender(this);
+		}
+		this.#arm();
+	}
+
+	/** A demo control: on one demo (a button) or on every animated demo of the page (a key). */
+	#moveDemos(move: DemoMove, slot?: DemoSlot): void {
+		const pages = this.#animatedDemos().filter(page => slot === undefined || page.slot === slot);
+		if (pages.length === 0) return;
+		for (const { demo, play } of pages) {
+			const count = frameCount(demo);
+			if (move === "toggle") play.playing = !play.playing;
+			else play.frame = (play.frame + (move === "next" ? 1 : count - 1)) % count;
+			// A step or a resume shows the frame for a whole interval.
+			play.nextAt = 0;
+		}
+		this.#frames++;
+		this.#arm();
+		this.#tui.requestComponentRender(this);
 	}
 
 	#activeView(): ScrollView {
