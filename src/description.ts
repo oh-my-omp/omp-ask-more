@@ -1,6 +1,5 @@
 // The model-facing tool description. It replaces the native `prompts/tools/ask.md` because this
-// tool is registered under the native name. The rule "a decision asked in chat is wrong" is the same
-// rule omp-config's turn-judge enforces; keep the two worded alike.
+// tool is registered under the native name. It alone routes the user's decisions into ask.
 export const DESCRIPTION = `Hand the user a decision. ask is the only way to put a decision to the user: anything that needs the user to choose — an approach, a tradeoff, a preference, the scope, a risky or irreversible step — goes through ask, never as a question in your reply. Ending a turn on a question or a list of options in text is wrong; call ask instead.
 
 When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask. Everything else that instruction requires (research, implementation, verification) still applies.
