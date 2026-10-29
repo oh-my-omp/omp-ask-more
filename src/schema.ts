@@ -10,10 +10,32 @@ export const RESERVED_LABELS: Readonly<Record<string, true>> = {
 	"Next →": true,
 };
 
+/** Demo bounds: enough frames to show a change over time, slow enough to read each one. */
+export const MIN_DEMO_FRAMES = 2;
+export const MAX_DEMO_FRAMES = 12;
+export const MIN_FRAME_MS = 300;
+export const MAX_FRAME_MS = 5000;
+export const DEFAULT_FRAME_MS = 1200;
+/** File extensions a demo `path` may name: animations the sheet shows as images, and videos it converts. */
+export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const;
+export const DEMO_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v"] as const;
+
 export const evidenceSchema = z.object({
 	path: z.string().min(1).describe("file or directory path, relative to the working directory or absolute"),
 	lines: z.string().optional().describe('line window: "41" or "41-58"; omitted reads the head of the file'),
 	note: z.string().optional().describe("why this evidence matters"),
+});
+
+export const demoFrameSchema = z.object({
+	body: z.string().min(1).describe("Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
+	caption: z.string().optional().describe("one line under this frame"),
+});
+
+export const demoSchema = z.object({
+	frames: z.array(demoFrameSchema).optional().describe(`${MIN_DEMO_FRAMES}-${MAX_DEMO_FRAMES} frames played in a loop; give either frames or path`),
+	interval_ms: z.number().optional().describe(`frames only: time per frame, ${MIN_FRAME_MS}-${MAX_FRAME_MS} ms, default ${DEFAULT_FRAME_MS}`),
+	path: z.string().optional().describe("an animation (GIF, APNG, WebP) or video (mp4, mov, webm, mkv, m4v); relative to the working directory or absolute"),
+	caption: z.string().optional().describe("one line saying what to watch"),
 });
 
 export const briefSchema = z.object({
@@ -22,6 +44,7 @@ export const briefSchema = z.object({
 	how: z.string().min(1).describe("what happens after each answer, and which constraint decides it"),
 	evidence: z.array(evidenceSchema).optional(),
 	diagram: z.string().optional().describe("Mermaid source (a flowchart, sequence or state diagram)"),
+	demo: demoSchema.optional().describe("an animation of how things behave now"),
 	risks: z.array(z.string()).optional(),
 });
 
@@ -32,6 +55,7 @@ export const optionSchema = z.object({
 	tradeoff: z.string().min(1).describe("what the option buys and what it costs, in one line"),
 	holds_when: z.string().optional().describe("the condition under which this option is right"),
 	cost: z.string().optional().describe("what changes: files, migrations, time"),
+	demo: demoSchema.optional().describe("an animation of the result of picking this option"),
 });
 
 export const questionSchema = z.object({
@@ -49,6 +73,7 @@ export const parametersSchema = z.object({
 });
 
 export type EvidenceRef = z.infer<typeof evidenceSchema>;
+export type DemoParams = z.infer<typeof demoSchema>;
 export type Brief = z.infer<typeof briefSchema>;
 export type AskOption = z.infer<typeof optionSchema>;
 export type AskQuestion = z.infer<typeof questionSchema>;
@@ -102,7 +127,9 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 		else if (seen.has(label)) problems.push(`${optionAt}.label: duplicate "${option.label}"`);
 		else seen.add(label);
 		if (option.tradeoff.trim().length === 0) problems.push(`${optionAt}.tradeoff: empty; say what the option buys and what it costs`);
+		if (option.demo !== undefined) problems.push(...validateDemo(option.demo, `${optionAt}.demo`));
 	});
+	if (question.brief.demo !== undefined) problems.push(...validateDemo(question.brief.demo, `${at}.brief.demo`));
 
 	const evidence = question.brief.evidence ?? [];
 	if (evidence.length > MAX_EVIDENCE_REFS) {
@@ -127,6 +154,43 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 	const recommended = question.recommended;
 	if (recommended !== undefined && (!Number.isInteger(recommended) || recommended < 0 || recommended >= question.options.length)) {
 		problems.push(`${at}.recommended: ${recommended} is not an index into ${question.options.length} options`);
+	}
+	return problems;
+}
+
+/** The extension of `path`, lower-cased, with its dot; empty when it has none. */
+export function extensionOf(path: string): string {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	const dot = name.lastIndexOf(".");
+	return dot <= 0 ? "" : name.slice(dot).toLowerCase();
+}
+
+function validateDemo(demo: DemoParams, at: string): string[] {
+	const problems: string[] = [];
+	const { frames, path } = demo;
+	if ((frames === undefined) === (path === undefined)) {
+		problems.push(`${at}: give exactly one of frames (an animation you write) or path (an animation or video file)`);
+	}
+	if (frames !== undefined) {
+		if (frames.length < MIN_DEMO_FRAMES || frames.length > MAX_DEMO_FRAMES) {
+			problems.push(`${at}.frames: ${frames.length} frames; a demo plays ${MIN_DEMO_FRAMES} to ${MAX_DEMO_FRAMES}`);
+		}
+		frames.forEach((frame, index) => {
+			if (frame.body.trim().length === 0) problems.push(`${at}.frames[${index}].body: empty`);
+		});
+	}
+	const interval = demo.interval_ms;
+	if (interval !== undefined) {
+		if (frames === undefined) problems.push(`${at}.interval_ms: only frames take an interval; a file plays at its own speed`);
+		else if (!Number.isInteger(interval) || interval < MIN_FRAME_MS || interval > MAX_FRAME_MS) {
+			problems.push(`${at}.interval_ms: ${interval} is not a whole number of ms from ${MIN_FRAME_MS} to ${MAX_FRAME_MS}`);
+		}
+	}
+	if (path !== undefined) {
+		const extension = extensionOf(path.trim());
+		const known = [...DEMO_IMAGE_EXTENSIONS, ...DEMO_VIDEO_EXTENSIONS] as readonly string[];
+		if (path.trim().length === 0) problems.push(`${at}.path: empty`);
+		else if (!known.includes(extension)) problems.push(`${at}.path: "${path}" is not one of ${known.join(", ")}`);
 	}
 	return problems;
 }

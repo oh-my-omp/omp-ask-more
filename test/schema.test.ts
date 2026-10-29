@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { nativeQuestion, parametersSchema, validate, type AskParams } from "../src/schema.ts";
+import { demoSchema, nativeQuestion, parametersSchema, validate, type AskParams } from "../src/schema.ts";
 
 function payload(overrides: (params: AskParams) => void = () => {}): AskParams {
 	const params = parametersSchema.parse({
@@ -105,6 +105,43 @@ describe("validate", () => {
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) expect(checked.problems.join("\n")).toContain("is not \"N\" or \"N-M\"");
+	});
+
+	it("accepts a question demo of frames and an option demo of a file", () => {
+		const params = payload();
+		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "a" }, { body: "b" }], interval_ms: 800 });
+		params.questions[0]!.options[0]!.demo = demoSchema.parse({ path: "docs/retry.gif", caption: "两次失败后退避" });
+		expect(validate(params).ok).toBe(true);
+	});
+
+	it("rejects a demo with both frames and a path, or with neither", () => {
+		const params = payload();
+		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "a" }, { body: "b" }], path: "a.gif" });
+		params.questions[0]!.options[1]!.demo = demoSchema.parse({ caption: "nothing to play" });
+		const checked = validate(params);
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) {
+			expect(checked.problems).toEqual([
+				"questions[0].options[1].demo: give exactly one of frames (an animation you write) or path (an animation or video file)",
+				"questions[0].brief.demo: give exactly one of frames (an animation you write) or path (an animation or video file)",
+			]);
+		}
+	});
+
+	it("rejects a frame count, an interval or a file type the sheet cannot play", () => {
+		const params = payload();
+		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "only one" }], interval_ms: 100 });
+		params.questions[0]!.options[0]!.demo = demoSchema.parse({ path: "notes/plan.pdf" });
+		params.questions[0]!.options[1]!.demo = demoSchema.parse({ path: "clip.mp4", interval_ms: 1000 });
+		const checked = validate(params);
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) {
+			const problems = checked.problems.join("\n");
+			expect(problems).toContain("questions[0].brief.demo.frames: 1 frames; a demo plays 2 to 12");
+			expect(problems).toContain("questions[0].brief.demo.interval_ms: 100 is not a whole number of ms from 300 to 5000");
+			expect(problems).toContain('questions[0].options[0].demo.path: "notes/plan.pdf" is not one of');
+			expect(problems).toContain("questions[0].options[1].demo.interval_ms: only frames take an interval");
+		}
 	});
 });
 
