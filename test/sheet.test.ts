@@ -11,11 +11,49 @@ import type { LoadedDemo, QuestionDemos } from "../src/demo.ts";
 import { tr } from "../src/i18n.ts";
 import { encodeAct, parseAct, type SheetAct } from "../src/nodes.ts";
 import { type AskQuestion, questionSchema } from "../src/schema.ts";
+import type { TimeoutPolicy } from "../src/timeout.ts";
 
 const CX: DescribeContext = { cols: 120, reduceMotion: false, dark: true, supports: () => true, feature: () => true };
 
 /** A render clock that never fires: demos only move when a test presses their controls. */
 const HOST: SheetHost = { scheduleAfter: () => ({ cancel() {} }), requestComponentRender() {}, terminal: { rows: 40 } };
+
+/** A render clock the test moves: `advance` fires every live timer that comes due, in order. */
+class Clock implements SheetHost {
+	readonly terminal = { rows: 40 };
+	#now = 0;
+	readonly #timers: { due: number; callback: () => void; live: boolean }[] = [];
+
+	scheduleAfter(delayMs: number, callback: () => void): { cancel(): void } {
+		const timer = { due: this.#now + delayMs, callback, live: true };
+		this.#timers.push(timer);
+		return {
+			cancel() {
+				timer.live = false;
+			},
+		};
+	}
+
+	requestComponentRender(): void {}
+
+	advance(ms: number): void {
+		const until = this.#now + ms;
+		for (;;) {
+			const next = this.#timers.filter(timer => timer.live && timer.due <= until).sort((a, b) => a.due - b.due)[0];
+			if (next === undefined) break;
+			next.live = false;
+			this.#now = next.due;
+			next.callback();
+		}
+		this.#now = until;
+	}
+}
+
+interface Timing {
+	readonly host?: SheetHost;
+	readonly timeout?: TimeoutPolicy;
+	readonly notify?: (due: Date | undefined) => void;
+}
 
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
@@ -77,13 +115,15 @@ class Sheet {
 	readonly #document = new TspDocument("ask");
 	#seq = 0;
 
-	constructor(questions: readonly AskQuestion[], demos: readonly QuestionDemos[] = []) {
+	constructor(questions: readonly AskQuestion[], demos: readonly QuestionDemos[] = [], timing: Timing = {}) {
 		this.component = new AskMoreComponent({
-			tui: HOST,
+			tui: timing.host ?? HOST,
 			questions,
 			evidence: questions.map(() => []),
 			demos,
 			finish: submission => this.submissions.push(submission),
+			timeout: timing.timeout ?? { kind: "off" },
+			notify: timing.notify ?? (() => {}),
 		});
 	}
 
@@ -135,6 +175,22 @@ class Sheet {
 
 	key(data: string): void {
 		this.component.handleInput(data);
+	}
+
+	/** The terminal typing `text` into the open Other field, as Tern sends it: to the field, not the sheet. */
+	typeIntoField(text: string): void {
+		const row = only(this.frame(), withRole("omp.ask.otherField"));
+		const field = (row.c ?? [])[0];
+		if (field === undefined) throw new Error("the Other field row is empty");
+		const target = this.#reconciler.target(field.id);
+		if (target === null) throw new Error(`${field.id} routes nowhere`);
+		target.component.handleNativeEvent?.({ type: "edit", key: target.keypath, from: 0, to: 0, text, cursor: text.length, len: 0 });
+	}
+
+	/** The countdown line: the text before the action bar's buttons, if the sheet shows one. */
+	countdown(): string | undefined {
+		const first = (only(this.frame(), withRole("omp.actions")).c ?? [])[0];
+		return first?.k === "text" ? textOf(first) : undefined;
 	}
 
 	/** Review, then Submit: the answers the sheet hands back. */
@@ -289,5 +345,98 @@ describe("Tern sheet events", () => {
 		sheet.click(cancel);
 		sheet.click(cancel);
 		expect(sheet.submissions).toEqual([{ kind: "cancel" }]);
+	});
+});
+
+const MIN = 60_000;
+const DECIDE: TimeoutPolicy = { kind: "decide", idleMs: 30 * MIN };
+const NOTIFY_THEN_DECIDE: TimeoutPolicy = { kind: "notify", idleMs: 30 * MIN, channels: [{ kind: "terminal" }], then: { kind: "decide", returnMs: 20 * MIN } };
+const NOTIFY_THEN_WAIT: TimeoutPolicy = { kind: "notify", idleMs: 30 * MIN, channels: [{ kind: "terminal" }], then: { kind: "wait" } };
+const ENTER = "\r";
+
+describe("countdown", () => {
+	it("hands the answers given so far back, the rest unanswered, when nobody acts", () => {
+		const clock = new Clock();
+		const sheet = new Sheet([question("a", ["x", "y"]), question("b", ["p", "q"])], [], { host: clock, timeout: DECIDE });
+		sheet.key(ENTER);
+		clock.advance(30 * MIN - 1);
+		expect(sheet.submissions).toEqual([]);
+		clock.advance(1);
+		expect(sheet.submissions).toEqual([{ kind: "timeout", answers: [{ kind: "option", index: 0 }, { kind: "unanswered" }] }]);
+	});
+
+	it("starts over on any key", () => {
+		const clock = new Clock();
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: DECIDE });
+		clock.advance(29 * MIN);
+		sheet.key(DOWN);
+		clock.advance(29 * MIN);
+		expect(sheet.submissions).toEqual([]);
+		clock.advance(MIN);
+		expect(sheet.submissions.map(submission => submission.kind)).toEqual(["timeout"]);
+	});
+
+	it("starts over when the terminal edits the Other field", () => {
+		const clock = new Clock();
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: DECIDE });
+		sheet.key("o");
+		clock.advance(29 * MIN);
+		sheet.typeIntoField("draft");
+		clock.advance(29 * MIN);
+		expect(sheet.submissions).toEqual([]);
+	});
+
+	it("notifies once, says so on the sheet, and hands over when the return window ends", () => {
+		const clock = new Clock();
+		const dues: (Date | undefined)[] = [];
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: due => dues.push(due) });
+		const idle = sheet.countdown();
+		expect(idle).toBeDefined();
+		clock.advance(30 * MIN);
+		expect(dues).toHaveLength(1);
+		expect(Math.abs((dues[0]?.getTime() ?? 0) - Date.now() - 20 * MIN)).toBeLessThan(5000);
+		expect(sheet.countdown()).not.toBe(idle);
+		expect(sheet.submissions).toEqual([]);
+		clock.advance(20 * MIN);
+		expect(sheet.submissions).toEqual([{ kind: "timeout", answers: [{ kind: "unanswered" }] }]);
+		expect(dues).toHaveLength(1);
+	});
+
+	it("goes back to the first countdown when the user returns after the notification", () => {
+		const clock = new Clock();
+		let notified = 0;
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: () => notified++ });
+		const idle = sheet.countdown();
+		clock.advance(30 * MIN);
+		sheet.key(DOWN);
+		expect(sheet.countdown()).toBe(idle);
+		clock.advance(20 * MIN);
+		expect(sheet.submissions).toEqual([]);
+		clock.advance(10 * MIN);
+		expect(notified).toBe(2);
+	});
+
+	it("keeps waiting after the notification when the expiry is wait", () => {
+		const clock = new Clock();
+		let notified = 0;
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_WAIT, notify: () => notified++ });
+		clock.advance(30 * MIN);
+		clock.advance(24 * 60 * MIN);
+		expect(notified).toBe(1);
+		expect(sheet.submissions).toEqual([]);
+	});
+
+	it("returns only the answer when the user answers before the deadline", () => {
+		const clock = new Clock();
+		let notified = 0;
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: () => notified++ });
+		sheet.key(ENTER);
+		clock.advance(60 * MIN);
+		expect(sheet.submissions).toEqual([{ kind: "submit", answers: [{ kind: "option", index: 0 }] }]);
+		expect(notified).toBe(0);
+	});
+
+	it("shows no countdown line when timing is off", () => {
+		expect(new Sheet([question("a", ["x", "y"])]).countdown()).toBeUndefined();
 	});
 });
