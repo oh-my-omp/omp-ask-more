@@ -34,9 +34,9 @@
 skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了四版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；第三版用一份简短的通用说明替换了第二版（提交 `e73cd59`）；现行版在第三版上补了模型推理里显示它缺的东西。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`；现行说明还用 `openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 以及 `opencode-go/qwen3.8-flash`、`minimax-m3.1-flash`、`glm-5.3-flash` 跑过。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
 
 - **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
-- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T、U、W 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T、U、W 组用现行版，U 组另用为严格工具调用重写的参数，W 组再加上以期望值开头的字段说明），反例 N、RN、SN、TN、WN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
-- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN、TN、WN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
-- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T、U、W 组在第一轮出现后停止，S、T、U、W 组未作答。
+- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T、U、W、X 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T、U、W、X 组用现行版，U 组另用为严格工具调用重写的参数，W 组再加上以期望值开头的字段说明，X 组再加上追加到所调用 skill 末尾的规则），反例 N、RN、SN、TN、WN、XN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
+- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN、TN、WN、XN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
+- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T、U、W、X 组在第一轮出现后停止，S、T、U、W、X 组未作答。
 - **判定**：用 `score.jq` 读 `sessions/` 里的会话文件；`runs/` 是 `transcript.jq` 渲染的每个会话（注入的 skill 第一行、模型的推理与回复、每次 ask 调用及结果）。一轮的问题经 ask-more 调用交到人手里、且回复里没有提问，这一轮才算通过。
 - **管道**：`probe-A` 用 A 组参数和一个要选项的提示词，打开了 ask-more 页面（`Counter store` 面板，带现状/决定/后果、取舍卡片和分帧演示）。`probe-V2` 见下面的变体。
 
@@ -72,6 +72,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | mm-U1 | minimax-m3.1-flash | U 严格模式参数 | 回复里 `chat(8)`，同一轮里再 `ask(8)` |
 | glm-U1 | glm-5.3-flash | U 严格模式参数 | `ask`（字符串）rejected → `ask(9)` rejected → `ask`（字符串）rejected → `ask(9)` |
 | glm-W1 | glm-5.3-flash | W 期望值字段说明 | `ask`（字符串）rejected → `ask(6)` |
+| km-X1 | kimi | X skill 规则 | `ask(4)` |
 | ds-B1 | deepseek | B 无 ask | `chat(7)` |
 | km-B1 | kimi | B 无 ask | `chat(6)` |
 | ds-C1 | deepseek | C 原生 ask | `chat(6)` |
@@ -84,6 +85,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | ds-TN1 | deepseek | TN 反例，现行 | 三条要点，没有 ask |
 | l6-TN1 | gpt-6-luna | TN 反例，现行 | 三条要点，没有 ask |
 | glm-WN1 | glm-5.3-flash | WN 反例，现行 | 三条要点，没有 ask |
+| km-XN1 | kimi | XN 反例，skill 规则 | 三条要点，没有 ask |
 | km-V1a | kimi | V1 措辞 | `chat(7)` |
 | km-V1b | kimi | V1 措辞 | `chat(4)` |
 | km-V2a | kimi | V2 系统提示行 | `chat(3)` |
@@ -94,7 +96,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 
 `ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）；以“已停止”结尾的行一次都没打开；`ask`（字符串）是 `questions` 以字符串形式到达的调用。`rejected` 是在打开任何界面之前被拒绝的调用，拒绝方是插件（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`、空的 `demo`）或 omp 的参数检查（参数格式错乱）；模型随后经 ask 重发，人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
 
-不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。另外三个 `opencode-go` 模型里，qwen 和 glm 把这一轮放进了 ask，minimax 先在回复里写了一遍再放进 ask（见下文）。所有说明下，模型做摘要时都没有调用 ask。
+不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。另外三个 `opencode-go` 模型里，qwen 和 glm 把这一轮放进了 ask，minimax 先在回复里写了一遍再放进 ask（见下文）。在所调用的 skill 末尾加上规则之后，kimi 唯一一次运行把这一轮放进了 ask（见下文）。所有说明下，模型做摘要时都没有调用 ask。
 
 ### 第一版说明为什么输，后几版改了什么
 
@@ -136,6 +138,13 @@ A 组运行里，模型的推理给出了四个原因：
 - **minimax-m3.1-flash** 先在回复里按 skill 的模板写完整轮，八道 `❓` 题，每道带 `➡️` 推荐，随后写道 “Now the same round through the dialog, so you can answer in one pass”，第一次调用就在 ask 里打开了同样的八题。问题到了人面前两次；说明里的 “NEVER write such questions in your reply” 在走 ask 这件事上被遵守了，在回复里没被遵守。
 - **glm-5.3-flash** 第四次调用打开了 9 题的一轮。有两次它把 `questions` 发成了一个字符串，而且不是合法 JSON；它的推理把原因归于自己写坏了数组（“I put recommended outside the object”）。还有一次每道题都缺 `question` 字段。在这个渠道上，参数显然没有按 schema 的语法约束：严格解码下，需要数组的位置不可能出现字符串；omp 这里是否发出了 `strict` 没有核实。
 - **拒绝信息的措辞。** omp 把拒绝写成 `<路径> must be <该字段的说明> (was …)`，而 `src/schema.ts` 里的字段说明原本是按用法写的，所以 glm 读到的是 “questions must be independent decisions, one tab each; a decision that depends on another answer goes in a later call (was a string)”，里面没说需要的是数组。现在每个字段说明都先写期望的值（W 组）：同样的调用读到的是 “questions must be an array of independent decisions, … (was a string)”。glm-W1 第一次调用又把 `questions` 发成了字符串，这次是合法 JSON，omp 把它解析回了数组；拒绝信息指出一条空的证据（“evidence[1].path must be a non-empty path to a file or directory, … (was missing)”），模型的推理写着 “One evidence entry was `{}` — remove it”，第二次调用打开了 6 题的一轮。只跑一次看不出改写是否减少了重发，因为它针对的类型错误没有再出现。glm-WN1 的摘要没有调用 ask。
+
+### 所调用 skill 末尾的规则
+
+omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：`IMPORTANT` 开头一行、带 `❓ … ➡️` 模板的 skill 正文、skill 目录和用户的话。X 组里，插件的 `context` 处理器在发往模型的那份副本末尾、所有这些内容之后，追加一段：“[IMPORTANT: Any question, confirmation or choice the skill above puts to the user MUST go through the `ask` tool, NEVER into your reply, even where the skill says to ask in chat or shows how the questions look in your reply. Keep their content, order and recommendations.]”（`src/skill-prompt.ts`）。V2 把同类规则放在系统提示里；这一段是承载模板的那条消息的最后一段。会话文件里保存的是 omp 原来的消息，不带这一段，所以效果只能从模型的推理和调用里看出来。
+
+- **kimi**：km-X1 第一次调用就在 ask 里打开了 4 题的第一轮。它的推理在读任何文件之前就提到了这个工具（“4. Use the `ask` tool for questions”），并用它压过了模板：“The skill says to format rounds with Q1, Q2, etc., but the important thing is that all questions go through `ask`.” 在四版说明下，kimi 8 次里只有 2 次走 ask，其余几次的推理从未提到这个工具。只跑了一次。
+- **摘要**：km-XN1 用三条要点作答，没有调用 ask；这个提示词没有调用 skill，处理器不改任何东西。
 
 ### 在第一版说明上试过的改动
 

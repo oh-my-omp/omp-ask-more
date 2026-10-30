@@ -32,6 +32,14 @@ The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in
 
 One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`extension-ui-controller.ts:1283-1369`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself. One ask is in flight at a time: a second call is rejected instead of opening a second sheet and orphaning the first one's promise.
 
+## The rule in an invoked skill
+
+omp renders `/skill:<name>` from a fixed template (`packages/coding-agent/src/prompts/skills/user-invocation.md`, imported by `extensibility/skills.ts:36` and rendered at `:885-928`): the `IMPORTANT` header, the skill body, the skill directory and the user's words, sent as a custom message with `customType: "skill-prompt"` and `attribution: "user"` (`modes/skill-command.ts:74-85`). Nothing lets a plugin change the template. A skill that shows how its questions look in the reply sits closer to generation than the tool description, and on kimi it won.
+
+While `ask` is active (`pi.getActiveTools()`), a `context` handler (`index.ts`) passes the history to `withSkillAskRule` (`src/skill-prompt.ts`), which appends one `[IMPORTANT: …]` paragraph to every user-invoked skill prompt: after the whole message, so it is the last thing the model reads before it answers; to a string, or to the first text block ahead of attached images. Messages are copied with object spread, which keeps the symbol-keyed history index omp uses to pair a copy with its persisted message (`extensibility/extensions/runner.ts:2249-2295`); a message that already ends with the paragraph, and a history without a skill prompt, come back unchanged and allocate nothing. Autoloaded skills are not user-attributed and stay as they are.
+
+The change exists only on the way to the model: the session file, `/tree` and transcripts show omp's message. Registering a `context` handler makes omp clone the history before every model call (`runner.ts:2240-2248`), and omp marks the changed skill message as per-call context, which Anthropic's explicit cache breakpoints skip (`packages/ai/src/providers/anthropic.ts:4264-4279`); the paragraph is the same on every call, so automatic prefix caching still matches it.
+
 ## Schema
 
 The schema is the native one extended the way `omp-todo-more` extends `todo`:
@@ -152,7 +160,7 @@ sequenceDiagram
 ## Files
 
 ```
-index.ts           plugin entry: registers ask, validates, mounts the fullscreen overlay, delegates
+index.ts           plugin entry: registers ask, validates, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
 src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question validation
 src/brief.ts       evidence windows (path, start, end) read against the working directory, bounded reads
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
@@ -164,8 +172,10 @@ src/settings.ts    the askMore.* settings in omp's registry, snapshotted from th
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels from OMOMP_LANG / LC_*; protocol fields stay English
+src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/description.ts the model-facing tool description
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
-test/              validation, native projection, demo loading, half-block rows, the timeout policy and result, and the
-                   Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
+test/              validation, native projection, demo loading, half-block rows, the timeout policy and result, the skill
+                   rule, and the Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown
+                   included (bun test)
 ```

@@ -32,6 +32,14 @@ flowchart LR
 
 一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
 
+## 调用 skill 时附加的规则
+
+omp 用固定模板渲染 `/skill:<name>`（`packages/coding-agent/src/prompts/skills/user-invocation.md`，由 `extensibility/skills.ts:36` 导入、在 `:885-928` 渲染）：`IMPORTANT` 开头一行、skill 正文、skill 目录和用户的话，作为 `customType: "skill-prompt"`、`attribution: "user"` 的自定义消息发出（`modes/skill-command.ts:74-85`）。插件没有办法改这个模板。规定问题在回复里长什么样的 skill 比工具说明离生成位置更近，在 kimi 上它赢了。
+
+`ask` 启用时（`pi.getActiveTools()`），一个 `context` 处理器（`index.ts`）把历史交给 `withSkillAskRule`（`src/skill-prompt.ts`），给每条用户调用的 skill 消息追加一段 `[IMPORTANT: …]`：加在整条消息之后，让它成为模型作答前读到的最后一段；内容是字符串就接在后面，是数组就接在附图之前的第一个文本块里。消息用对象展开复制，保留 omp 用来把副本和落盘消息配对的 symbol 键历史索引（`extensibility/extensions/runner.ts:2249-2295`）；已经以这段结尾的消息、以及没有 skill 消息的历史原样返回，不额外分配。自动加载的 skill 不是用户发出的，保持原样。
+
+改动只存在于发往模型的途中：会话文件、`/tree` 和对话记录里是 omp 原来的消息。注册 `context` 处理器后，omp 每次调用模型前都会克隆一遍历史（`runner.ts:2240-2248`），并把改过的 skill 消息标为单次调用的上下文，Anthropic 的显式缓存断点会跳过它（`packages/ai/src/providers/anthropic.ts:4264-4279`）；这段话每次都一样，自动前缀缓存仍能命中。
+
 ## Schema
 
 schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字段：
@@ -152,7 +160,7 @@ sequenceDiagram
 ## 文件
 
 ```
-index.ts           插件入口：注册 ask、校验、挂载全屏 overlay、委托
+index.ts           插件入口：注册 ask、校验、挂载全屏 overlay、委托；给调用的 skill 加上规则
 src/schema.ts      原生字段 + brief/tradeoff、zod 参数、逐题校验
 src/brief.ts       按工作目录读取证据行段（path、start、end），限界读取
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
@@ -164,8 +172,9 @@ src/settings.ts    注册在 omp 设置表里的 askMore.* 设置，从发起提
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
 src/i18n.ts        界面标签取自 OMOMP_LANG / LC_*；协议字段保持英文
+src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾的规则
 src/description.ts 面向模型的工具描述
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
-test/              校验、原生投影、演示加载、半块画面、超时策略与结果，以及经 pi-tui reconciler 与参考 TSP
-                   applier 驱动的 Tern 面板（含倒计时）（bun test）
+test/              校验、原生投影、演示加载、半块画面、超时策略与结果、skill 规则，以及经 pi-tui reconciler
+                   与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
 ```

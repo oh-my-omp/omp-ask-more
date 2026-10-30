@@ -4,6 +4,8 @@
  * (an ANSI dialog, or a modal sheet in Tern); any other session delegates to the native built-in,
  * which renders the native fields and ignores the extension ones. The answer and the persisted call
  * keep the native contracts (`AskToolDetails`, `/tree` recovery), so nothing downstream changes.
+ * While `ask` is active, every user-invoked skill reaches the model with the rule that its
+ * questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions } from "@oh-my-pi/pi-coding-agent";
@@ -16,6 +18,7 @@ import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
+import { withSkillAskRule } from "./src/skill-prompt.ts";
 import { readTimeoutSettings } from "./src/settings.ts";
 import { type TimeoutPolicy, timeoutPolicy } from "./src/timeout.ts";
 
@@ -127,5 +130,12 @@ export default function askMore(pi: ExtensionAPI): void {
 		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
+	});
+	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
+	// place left to carry the rule. Registering costs omp a clone of the history per model call.
+	pi.on("context", event => {
+		if (!pi.getActiveTools().includes("ask")) return undefined;
+		const messages = withSkillAskRule(event.messages);
+		return messages === undefined ? undefined : { messages };
 	});
 }

@@ -5,8 +5,9 @@
 #   A, N  this plugin (REPO/index.ts); the A and N runs with REPO at commit e50dc7b, the R and RN
 #         runs at commit e90586d, the S and SN runs at commit e73cd59, the T and TN runs at commit
 #         96b4cd5 (the openai-codex T2 runs at e0394c5, which declared strict: false), the U runs at
-#         79c65cc, with the parameters written for strict tool calling, and the W runs at the
-#         current field descriptions, which open with the value each field expects
+#         79c65cc, with the parameters written for strict tool calling, the W runs at 50f8eb4, with
+#         field descriptions that open with the value each field expects, and the X runs at the
+#         current code, which appends the ask rule to every user-invoked skill on its way to the model
 #   B  no ask tool      C  omp's native ask
 #   V1..V3  a copy of this plugin with variants/<n>-*.diff applied, at /tmp/askmore-v<n>
 set -eu

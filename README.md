@@ -10,7 +10,7 @@ Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verif
 
 The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
 
-This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat; whether a model does so depends on the model ([Known limitations](#known-limitations)).
+This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
 
 ## Demo videos
 
@@ -162,6 +162,8 @@ The tool description says what `ask` does and when to use it:
 - It writes for someone who has not read the session; the independent questions of a round go in one call, or one per call when the instruction asks one at a time, and a question whose options depend on an answer goes in a later call; a rejected call lists every problem, and the model fixes them and calls again.
 - How to read the result, and that a question reading `id: (timed out: …)` is the model's to decide, saying what it chose.
 
+When the user invokes a skill (`/skill:<name>`) while `ask` is active, the copy of the skill message sent to the model ends, after the skill and the user's words, with one more paragraph: "[IMPORTANT: Any question, confirmation or choice the skill above puts to the user MUST go through the `ask` tool, NEVER into your reply, even where the skill says to ask in chat or shows how the questions look in your reply. Keep their content, order and recommendations.]" omp renders that message from a fixed template, so the paragraph is added in omp's `context` event, on the way to the model: the session file, `/tree` and exported transcripts show the skill message without it. Skills a subagent loads on its own are left as they are.
+
 What each field means is in the parameter schema. The limits below are not in the description: a call that breaks one is rejected with a message naming it, and a demo file the page cannot play shows an error row there instead.
 
 `question` stays a question: one or two sentences. The brief is its own field.
@@ -242,7 +244,7 @@ They read the native result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
-- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling` and the current description, `opencode-go/deepseek-v4.1-flash`, `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`; `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`; `opencode-go/kimi-k2.7-code` asked it in chat, its reasoning never considering the tool (one run each). Across the four descriptions tested, deepseek asked through `ask` in 9/9 runs and kimi in 2/8, both of those under a description since replaced because it restated that skill's template. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
+- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/kimi-k2.7-code` put its first round into `ask` once the rule was appended to the invoked skill (one run); with the tool description alone it had asked in chat in 6 of 8 runs, its reasoning never considering the tool. With the description alone, before the rule was added, `opencode-go/deepseek-v4.1-flash` (9 of 9 runs), `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`, and `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`. Without this plugin deepseek and kimi asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

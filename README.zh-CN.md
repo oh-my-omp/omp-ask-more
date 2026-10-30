@@ -10,7 +10,7 @@
 
 原生 `ask` 太弱，模型也不用它把话说清楚，于是决定都在 chat 里做：“grill”一类的 skill 不能指望宿主有 ask 工具，只能在对话里问用户。原生工具其实已有承载更多内容的字段——`question` 按 Markdown 渲染，每个选项都有自由文本 `preview`——但它的 prompt 要求模型把标签写短、从不提 `preview`，对话框又挂在 composer 里，标题最多四行、整块最多占终端 70%。
 
-本插件要求每个问题写明现状/决定/后果、每个选项写明取舍，鼓励引用真实代码行、画示意图和放演示动画，并把作答界面画成全屏。工具说明要求模型把所有需要用户回答的问题都交给 `ask`，skill 要求在 chat 里问的问题也一样；模型是否照做因模型而异（见[已知限制](#已知限制)）。
+本插件要求每个问题写明现状/决定/后果、每个选项写明取舍，鼓励引用真实代码行、画示意图和放演示动画，并把作答界面画成全屏。工具说明要求模型把所有需要用户回答的问题都交给 `ask`，skill 要求在 chat 里问的问题也一样；用户调用的 skill 送到模型时，末尾也带着这条规则。模型是否照做因模型而异（见[已知限制](#已知限制)）。
 
 ## 演示视频
 
@@ -162,6 +162,8 @@ stateDiagram-v2
 - 写给没看过会话的人；一轮里彼此独立的问题放进同一次调用，指令要求一次问一题时每题一次调用，选项依赖某个答案的问题放到后一次调用；被拒的调用会列出全部问题，模型改好后重新调用。
 - 怎样读结果；结果里某题为 `id: (timed out: …)` 时由模型自己决定这一题，并说明选了什么。
 
+有 `ask` 时用户调用 skill（`/skill:<name>`），送给模型的那份 skill 消息在 skill 正文和用户的话之后，多出一段：“[IMPORTANT: Any question, confirmation or choice the skill above puts to the user MUST go through the `ask` tool, NEVER into your reply, even where the skill says to ask in chat or shows how the questions look in your reply. Keep their content, order and recommendations.]” 这条消息由 omp 用固定模板渲染，所以这段话是在 omp 的 `context` 事件里、发往模型的途中加上的：会话文件、`/tree` 和导出的对话记录里显示的 skill 消息不带它。子代理自行加载的 skill 不改动。
+
 各字段的含义写在参数 schema 里。下面的限制不写进说明：违反限制的调用被拒绝，拒绝信息点名该限制；页面放不了的演示文件则在页面上显示一行错误。
 
 `question` 只当问题用：一两句话。简报是独立字段。
@@ -242,7 +244,7 @@ ask({
 
 ## 已知限制
 
-- **规定在 chat 里提问的 skill 在部分模型上仍可能占上风。** 以 `/skill:grilling` 调用 `grilling` skill、使用现行说明时，`opencode-go/deepseek-v4.1-flash`、`qwen3.8-flash`、`glm-5.3-flash` 以及 `openai-codex` 的 `gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 都把第一轮问题放进了 `ask`；`opencode-go/minimax-m3.1-flash` 先在回复里写了这一轮，再把同样的问题放进 `ask`；`opencode-go/kimi-k2.7-code` 则在 chat 里问，推理里从未想到这个工具（各跑一次）。测过的四版说明合计，deepseek 9/9 次经 `ask` 提问，kimi 2/8 次，这两次都出自一版因复述该 skill 模板而被替换的说明。不加载本插件时两者都在 chat 里问，有原生 `ask` 也一样。运行记录、对话记录、早先的说明和试过的改动见[验证](docs/verification.zh-CN.md#要求在对话中提问的-skill)。
+- **规定在 chat 里提问的 skill 在部分模型上仍可能占上风。** 以 `/skill:grilling` 调用 `grilling` skill 时，在 skill 末尾加上规则之后，`opencode-go/kimi-k2.7-code` 把第一轮问题放进了 `ask`（跑一次）；只靠工具说明时，它 8 次里有 6 次在 chat 里问，推理里从未想到这个工具。只靠说明、尚未加这条规则时，`opencode-go/deepseek-v4.1-flash`（9 次里 9 次）、`qwen3.8-flash`、`glm-5.3-flash` 以及 `openai-codex` 的 `gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 都把第一轮问题放进了 `ask`，`opencode-go/minimax-m3.1-flash` 先在回复里写了这一轮，再把同样的问题放进 `ask`。不加载本插件时 deepseek 和 kimi 都在 chat 里问，有原生 `ask` 也一样。运行记录、对话记录、早先的说明和试过的改动见[验证](docs/verification.zh-CN.md#要求在对话中提问的-skill)。
 - **`/tree` 重答**会在原生对话框里重新打开带扩展字段的 ask，只显示原生字段。
 - **协作 guest** 在 ask-more 面板打开期间无法作答。
 - **print 与没有原生 ask 的 RPC** 收到拒绝；原生工具会中止整个操作。
