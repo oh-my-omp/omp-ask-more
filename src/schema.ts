@@ -6,6 +6,10 @@
 // every optional field nullable and drops null placeholders before validation, so a choice
 // between shapes is a union tagged by `kind`, never two optional fields, and every optional
 // string rejects "" so an empty placeholder is dropped the same way.
+//
+// omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`,
+// so every description opens with the value it expects, and holds at most one " or ": with
+// more, the check rewrites the text as a list of alternatives.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
 /** Labels the UI adds itself; the native tool rejects them too (`tools/ask.ts:52-58`). */
@@ -26,27 +30,27 @@ export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const
 export const DEMO_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v"] as const;
 
 export const evidenceSchema = z.object({
-	path: z.string().min(1).describe("file or directory path, relative to the working directory or absolute"),
-	start: z.number().int().min(1).optional().describe("first line, 1-based; without it the file's first lines are shown"),
-	end: z.number().int().min(1).optional().describe("last line, inclusive; needs start, and omitted means start alone. For lines that are not adjacent, cite each window as its own entry"),
-	note: z.string().min(1).optional().describe("why this evidence matters"),
+	path: z.string().min(1).describe("a non-empty path to a file or directory, relative to the working directory unless absolute"),
+	start: z.number().int().min(1).optional().describe("a 1-based line number where the window starts; without it the file's first lines are shown"),
+	end: z.number().int().min(1).optional().describe("a 1-based line number where the window ends, inclusive; needs start, and omitted means start alone. For lines that are not adjacent, cite each window as its own entry"),
+	note: z.string().min(1).optional().describe("text saying why this evidence matters"),
 });
 
 export const demoFrameSchema = z.object({
-	body: z.string().min(1).describe("Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
+	body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
 	caption: z.string().min(1).optional().describe("one line under this frame"),
 });
 
 export const framesDemoSchema = z.object({
 	kind: z.literal("frames"),
-	frames: z.array(demoFrameSchema).describe("frames played in a loop"),
-	interval_ms: z.number().int().optional().describe("time per frame in ms"),
+	frames: z.array(demoFrameSchema).describe("an array of frames played in a loop"),
+	interval_ms: z.number().int().optional().describe("an integer: milliseconds per frame"),
 	caption: z.string().min(1).optional().describe("one line saying what to watch"),
 });
 
 export const fileDemoSchema = z.object({
 	kind: z.literal("file"),
-	path: z.string().min(1).describe("an animation or video file; relative to the working directory or absolute"),
+	path: z.string().min(1).describe("a non-empty path to an animation or video file, relative to the working directory unless absolute"),
 	caption: z.string().min(1).optional().describe("one line saying what to watch"),
 });
 
@@ -54,36 +58,36 @@ export const fileDemoSchema = z.object({
 export const demoSchema = z.union([framesDemoSchema, fileDemoSchema]);
 
 export const briefSchema = z.object({
-	where: z.string().min(1).describe("what exists now: paths, symbols, the observation that forces the decision"),
-	what: z.string().min(1).describe("the decision, and why code, docs and conventions cannot make it"),
-	how: z.string().min(1).describe("what happens after each answer, and which constraint decides it"),
+	where: z.string().min(1).describe("non-empty text saying what exists now: paths, symbols, the observation that forces the decision"),
+	what: z.string().min(1).describe("non-empty text naming the decision, and why code, docs and conventions cannot make it"),
+	how: z.string().min(1).describe("non-empty text saying what happens after each answer, and which constraint decides it"),
 	evidence: z.array(evidenceSchema).optional(),
-	diagram: z.string().min(1).optional().describe("Mermaid source (a flowchart, sequence or state diagram)"),
-	demo: demoSchema.optional().describe("an animation of how things behave now"),
+	diagram: z.string().min(1).optional().describe("Mermaid source of a flowchart, sequence diagram or state diagram"),
+	demo: demoSchema.optional().describe("a demo tagged by kind: an animation of how things behave now"),
 	risks: z.array(z.string().min(1)).optional(),
 });
 
 export const optionSchema = z.object({
 	label: z.string().min(1),
 	description: z.string().min(1).optional().describe("one line that disambiguates the option; never the tradeoff"),
-	preview: z.string().min(1).optional().describe("extra Markdown the native surface can show"),
-	tradeoff: z.string().min(1).describe("what the option buys and what it costs, in one line"),
-	holds_when: z.string().min(1).optional().describe("the condition under which this option is right"),
-	cost: z.string().min(1).optional().describe("what changes: files, migrations, time"),
-	demo: demoSchema.optional().describe("an animation of the result of picking this option"),
+	preview: z.string().min(1).optional().describe("Markdown the native surface can show"),
+	tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
+	holds_when: z.string().min(1).optional().describe("text naming the condition under which this option is right"),
+	cost: z.string().min(1).optional().describe("text naming what changes: files, migrations, time"),
+	demo: demoSchema.optional().describe("a demo tagged by kind: an animation of the result of picking this option"),
 });
 
 export const questionSchema = z.object({
-	id: z.string().min(1).describe("unique within the call; the answer is reported under it"),
-	question: z.string().min(1).describe("one or two sentences; the brief carries the context"),
-	header: z.string().min(1).optional().describe("short tab label"),
+	id: z.string().min(1).describe("a non-empty string, unique within the call; the answer is reported under it"),
+	question: z.string().min(1).describe("non-empty text of one or two sentences; the brief carries the context"),
+	header: z.string().min(1).optional().describe("a short tab label"),
 	options: z.array(optionSchema).min(2).max(5),
-	recommended: z.number().int().optional().describe("0-based index of the option you would pick; the cursor starts there, so Enter accepts it"),
+	recommended: z.number().int().optional().describe("an integer: the 0-based index of the option you would pick; the cursor starts there, so Enter accepts it"),
 	brief: briefSchema,
 });
 
 export const parametersSchema = z.object({
-	questions: z.array(questionSchema).min(1).describe("independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
+	questions: z.array(questionSchema).min(1).describe("an array of independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
 });
 
 export type EvidenceRef = z.infer<typeof evidenceSchema>;

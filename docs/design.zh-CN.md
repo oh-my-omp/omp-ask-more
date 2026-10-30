@@ -44,6 +44,8 @@ schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字�
 
 参数形状按严格模式选定，严格模式下模型必须生成每个字段。两种形状二选一时，用以 `kind` 区分的联合，模型只构造其中一支，不会去填另一支；“两个可选字段、只能给一个”的写法曾让严格模式下的模型发出 `{frames: […], path: ""}`。每个可选字符串都拒绝 `""`，所以空占位值和 null 一样在校验前被去掉。行号是整数，而不是 `"41-58"` 这样的字符串。`tryEnforceStrictSchema` 必须让 schema 保持严格（`test/schema.test.ts`）；它表达不了的形状会悄悄退回非严格模式。
 
+omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was …)`，所以每个字段的说明先写期望的值（`an array of …`、`non-empty text …`、`a 1-based line number …`、`a demo tagged by kind: …`），再写这个值的用途：把 `questions` 发成字符串的模型读到的是 “questions must be an array of independent decisions, … (was a string)”。一个说明里最多一个 " or "；多于一个时，检查会把它改写成并列的候选。
+
 各字段的画法：
 
 - `brief.where/what/how` 画在选项上方，不折叠。

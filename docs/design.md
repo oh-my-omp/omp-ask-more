@@ -44,6 +44,8 @@ The schema is the native one extended the way `omp-todo-more` extends `todo`:
 
 The shapes are chosen for strict mode, where the model has to produce every field. A choice between two shapes is a union tagged by `kind`, so the model builds one branch and never fills the other; two optional fields with an "exactly one" rule made strict models send `{frames: […], path: ""}`. Every optional string rejects `""`, so an empty placeholder is dropped before validation the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
+omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`, so each field's description opens with the value it expects (`an array of …`, `non-empty text …`, `a 1-based line number …`, `a demo tagged by kind: …`) and then says what the value is for: a model that sent `questions` as a string reads "questions must be an array of independent decisions, … (was a string)". A description holds at most one " or "; with more, the check rewrites it as a list of alternatives.
+
 How the fields are drawn:
 
 - `brief.where/what/how` are drawn above the options and never collapsed.
