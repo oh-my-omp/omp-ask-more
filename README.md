@@ -12,6 +12,30 @@ The native `ask` is weak and models do not use it to say things plainly, so deci
 
 This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description routes every user decision through `ask`, so nothing needs deciding in chat.
 
+## Demo videos
+
+Three silent videos, recorded in a headless Tern 0.9.8 window with omp 18.14.0 and a real model, `opencode-go/deepseek-v4.1-flash`, working on a small orders service whose payment retry writes a row twice. The person's requests are typed as shown; every question, option, cited line range, diagram and demo on screen is the model's own output. Waits for the model are cut, and the caption says how long they took. Each caption names who acts: the person, the model or ask-more.
+
+| Video | What it shows |
+|---|---|
+| [1. Before and after: one decision](#1-before-and-after-one-decision) | the same request to the same model, first with omp's native ask, then with ask-more; Where / What / How; the Tradeoff / Holds when / Cost card following the cursor; evidence read from disk; a Mermaid diagram; risks; a GIF demo on an option; Submit; the native result shape and the model going on |
+| [2. Several decisions, then walk away](#2-several-decisions-then-walk-away) | three questions in one ask; tabs with `✓`; an own answer through `Other…`; switching tabs keeps answers; a frames demo on a question; Review with one question unanswered; the countdown line, the terminal notification and `(timed out: …)`; the model deciding the open question and saying what it chose |
+| [3. Plain terminal](#3-plain-terminal) | the same request with omp's classic renderer (`PI_TUI_NATIVE=0`): the alternate-screen page, key hints, scrollbar, a frames demo with its counter, `PgDn`, `ctrl+o`, answering with `enter` |
+
+Not shown: the plain-terminal half-block picture of a GIF or video, APNG/WebP/video demo files, `esc` / `Cancel all`, `onExpiry: wait`, the notify command, sessions without the TUI, `/tree` re-answer, observers and collaborator guests.
+
+### 1. Before and after: one decision
+
+https://github.com/user-attachments/assets/eb2ad931-fe61-475e-ab5b-6261b2c190a9
+
+### 2. Several decisions, then walk away
+
+https://github.com/user-attachments/assets/a8dcf3b9-61eb-4ce1-b477-7a7f1838de80
+
+### 3. Plain terminal
+
+https://github.com/user-attachments/assets/4b4f696c-136b-440b-a4d5-798a0f47e519
+
 ## Install
 
 ```sh
