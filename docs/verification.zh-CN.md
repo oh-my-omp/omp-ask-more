@@ -35,7 +35,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 
 - **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
 - **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T、U、W、X 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T、U、W、X 组用现行版，U 组另用为严格工具调用重写的参数，W 组再加上以期望值开头的字段说明，X 组再加上追加到所调用 skill 末尾的规则），反例 N、RN、SN、TN、WN、XN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
-- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN、TN、WN、XN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
+- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。km-X6–X15 与 km-W6–W15 改写 `/skill:grilling` 之后的话，每对一条请求，两组相同（列在[所调用 skill 末尾的规则](#所调用-skill-末尾的规则)）。N、RN、SN、TN、WN、XN 组发 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
 - **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T、U、W、X 组在第一轮出现后停止，S、T、U、W、X 组未作答。
 - **判定**：用 `score.jq` 读 `sessions/` 里的会话文件；`runs/` 是 `transcript.jq` 渲染的每个会话（注入的 skill 第一行、模型的推理与回复、每次 ask 调用及结果）。一轮的问题经 ask-more 调用交到人手里、且回复里没有提问，这一轮才算通过。
 - **管道**：`probe-A` 用 A 组参数和一个要选项的提示词，打开了 ask-more 页面（`Counter store` 面板，带现状/决定/后果、取舍卡片和分帧演示）。`probe-V2` 见下面的变体。
@@ -73,6 +73,8 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | glm-U1 | glm-5.3-flash | U 严格模式参数 | `ask`（字符串）rejected → `ask(9)` rejected → `ask`（字符串）rejected → `ask(9)` |
 | glm-W1 | glm-5.3-flash | W 期望值字段说明 | `ask`（字符串）rejected → `ask(6)` |
 | km-X1 | kimi | X skill 规则 | `ask(4)` |
+| km-X2–X15 | kimi | X skill 规则 | 14 次都走 `ask`，每次第一次调用就打开：`ask(4)`、`ask(4)`、`ask(5)`、`ask(4)`、`ask(7)`、`ask(5)`、`ask(7)`、`ask(5)`、`ask(4)`、`ask(5)`、`ask(5)`、`ask(6)`、`ask(4)`、`ask(9)` |
+| km-W1–W15 | kimi | W 期望值字段说明 | 11 次走 `ask`，每次第一次调用就打开；W4 `chat(5)`、W8 `chat(8)`、W11 `chat(5)`、W12 `chat(4)` |
 | ds-B1 | deepseek | B 无 ask | `chat(7)` |
 | km-B1 | kimi | B 无 ask | `chat(6)` |
 | ds-C1 | deepseek | C 原生 ask | `chat(6)` |
@@ -96,7 +98,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 
 `ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）；以“已停止”结尾的行一次都没打开；`ask`（字符串）是 `questions` 以字符串形式到达的调用。`rejected` 是在打开任何界面之前被拒绝的调用，拒绝方是插件（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`、空的 `demo`）或 omp 的参数检查（参数格式错乱）；模型随后经 ask 重发，人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
 
-不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。另外三个 `opencode-go` 模型里，qwen 和 glm 把这一轮放进了 ask，minimax 先在回复里写了一遍再放进 ask（见下文）。在所调用的 skill 末尾加上规则之后，kimi 唯一一次运行把这一轮放进了 ask（见下文）。所有说明下，模型做摘要时都没有调用 ask。
+不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。另外三个 `opencode-go` 模型里，qwen 和 glm 把这一轮放进了 ask，minimax 先在回复里写了一遍再放进 ask（见下文）。用以期望值开头的字段说明时，kimi 15 次里有 11 次把这一轮放进 ask；再在所调用的 skill 末尾加上规则，15 次全部放进 ask（见下文）。所有说明下，模型做摘要时都没有调用 ask。
 
 ### 第一版说明为什么输，后几版改了什么
 
@@ -141,9 +143,18 @@ A 组运行里，模型的推理给出了四个原因：
 
 ### 所调用 skill 末尾的规则
 
-omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：`IMPORTANT` 开头一行、带 `❓ … ➡️` 模板的 skill 正文、skill 目录和用户的话。X 组里，插件的 `context` 处理器在发往模型的那份副本末尾、所有这些内容之后，追加一段：“[IMPORTANT: Any question, confirmation or choice the skill above puts to the user MUST go through the `ask` tool, NEVER into your reply, even where the skill says to ask in chat or shows how the questions look in your reply. Keep their content, order and recommendations.]”（`src/skill-prompt.ts`）。V2 把同类规则放在系统提示里；这一段是承载模板的那条消息的最后一段。会话文件里保存的是 omp 原来的消息，不带这一段，所以效果只能从模型的推理和调用里看出来。
+omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：`IMPORTANT` 开头一行、带 `❓ … ➡️` 模板的 skill 正文、skill 目录和用户的话。X 组里，插件的 `context` 处理器在发往模型的那份副本末尾、所有这些内容之后，追加一段：“[IMPORTANT: Any question, confirmation or choice the skill above puts to the user MUST go through the `ask` tool, NEVER into your reply, even where the skill says to ask in chat or shows how the questions look in your reply. Keep their content, order and recommendations.]”（`src/skill-prompt.ts`）。V2 把同类规则放在系统提示里；这一段是承载模板的那条消息的最后一段。会话文件里保存的是 omp 原来的消息，不带这一段，所以效果只能从模型的推理和调用里看出来。W 组是不带这条规则的同一份代码（提交 `50f8eb4`，复制到 `/tmp/askmore-base`，`REPO` 指向那里启动）。
 
-- **kimi**：km-X1 第一次调用就在 ask 里打开了 4 题的第一轮。它的推理在读任何文件之前就提到了这个工具（“4. Use the `ask` tool for questions”），并用它压过了模板：“The skill says to format rounds with Q1, Q2, etc., but the important thing is that all questions go through `ask`.” 在四版说明下，kimi 8 次里只有 2 次走 ask，其余几次的推理从未提到这个工具。只跑了一次。
+| kimi，grilling 第一轮 | 加规则（X） | 不加规则（W） |
+|---|---|---|
+| 固定请求，第 1–5 次 | 5 次里 5 次走 ask | 5 次里 4 次走 ask |
+| 十条不同请求，第 6–15 次 | 10 次里 10 次走 ask | 10 次里 7 次走 ask |
+| 合计 | 15 次里 15 次 | 15 次里 11 次 |
+
+十条请求，按第 6–15 次的顺序：“Grill me on PLAN.md before I start coding.” · “Stress-test the rate limiting plan in PLAN.md.” · “I want to ship PLAN.md this week. Poke holes in it.” · “Interview me about the open decisions in PLAN.md.” · “Help me settle the parts of PLAN.md that are still undecided.” · “Review my rate-limiting plan and make me defend it.” · “What still needs deciding in PLAN.md? Push me on each one.” · “Challenge my assumptions in PLAN.md. Don't write any code.” · “Let's nail down the rate limiter design in PLAN.md together.” · “Before I implement PLAN.md, grill me on anything I haven't decided.”
+
+- **加规则的 kimi**：X 组每次都在第一次调用时把第一轮放进 ask 打开，回复里没有写问题。km-X1 的推理在读任何文件之前就提到了这个工具（“4. Use the `ask` tool for questions”），并用它压过了模板：“The skill says to format rounds with Q1, Q2, etc., but the important thing is that all questions go through `ask`.”
+- **不加规则的 kimi**：W 组有四次按 skill 的 `❓ … ➡️` 格式把这一轮写在回复里。两组结果不同的三条请求（第 8、11、12 次）都是 X 组走 ask、W 组在对话里问，没有反过来的。15/15 对 11/15，单侧 Fisher 精确检验 p 约为 0.05。
 - **摘要**：km-XN1 用三条要点作答，没有调用 ask；这个提示词没有调用 skill，处理器不改任何东西。
 
 ### 在第一版说明上试过的改动
