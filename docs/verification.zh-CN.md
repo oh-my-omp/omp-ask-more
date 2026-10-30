@@ -34,9 +34,9 @@
 skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了四版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；第三版用一份简短的通用说明替换了第二版（提交 `e73cd59`）；现行版在第三版上补了模型推理里显示它缺的东西。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`；现行说明还用 `openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 跑过。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
 
 - **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
-- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T 组用现行版），反例 N、RN、SN、TN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
+- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T、U 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T、U 组用现行版，U 组另用为严格工具调用重写的参数），反例 N、RN、SN、TN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
 - **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN、TN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
-- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T 组在第一轮出现后停止，S、T 组未作答。
+- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T、U 组在第一轮出现后停止，S、T、U 组未作答。
 - **判定**：用 `score.jq` 读 `sessions/` 里的会话文件；`runs/` 是 `transcript.jq` 渲染的每个会话（注入的 skill 第一行、模型的推理与回复、每次 ask 调用及结果）。一轮的问题经 ask-more 调用交到人手里、且回复里没有提问，这一轮才算通过。
 - **管道**：`probe-A` 用 A 组参数和一个要选项的提示词，打开了 ask-more 页面（`Counter store` 面板，带现状/决定/后果、取舍卡片和分帧演示）。`probe-V2` 见下面的变体。
 
@@ -61,9 +61,13 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | l56-T1 | gpt-5.6-luna | T 现行，加 `strict: false` 之前 | `ask(7)` rejected ×3，已停止 |
 | l6-T1 | gpt-6-luna | T 现行，加 `strict: false` 之前 | `ask(3)` rejected ×4 → `ask(1)` rejected ×5，已停止 |
 | t61-T1 | gpt-6.1-terra | T 现行，加 `strict: false` 之前 | `ask(7)` rejected ×2 → `ask(1)` rejected ×7，已停止 |
-| l56-T2 | gpt-5.6-luna | T 现行 | `ask(4)` |
-| l6-T2 | gpt-6-luna | T 现行 | `ask(5)` rejected → `ask(6)` rejected ×2 → `ask(5)` |
-| t61-T2 | gpt-6.1-terra | T 现行 | `ask(6)` |
+| l56-T2 | gpt-5.6-luna | T 现行，`strict: false` | `ask(4)` |
+| l6-T2 | gpt-6-luna | T 现行，`strict: false` | `ask(5)` rejected → `ask(6)` rejected ×2 → `ask(5)` |
+| t61-T2 | gpt-6.1-terra | T 现行，`strict: false` | `ask(6)` |
+| l56-U1 | gpt-5.6-luna | U 严格模式参数 | `ask(7)` |
+| l6-U1 | gpt-6-luna | U 严格模式参数 | `ask(7)` |
+| t61-U1 | gpt-6.1-terra | U 严格模式参数 | `ask(7)` |
+| ds-U1 | deepseek | U 严格模式参数 | `ask(6)` |
 | ds-B1 | deepseek | B 无 ask | `chat(7)` |
 | km-B1 | kimi | B 无 ask | `chat(6)` |
 | ds-C1 | deepseek | C 原生 ask | `chat(6)` |
@@ -85,7 +89,7 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 
 `ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）；以“已停止”结尾的行一次都没打开。`rejected` 是在打开任何界面之前被拒绝的调用，拒绝方是插件（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`、空的 `demo`）或 omp 的参数检查（参数格式错乱）；模型随后经 ask 重发，人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
 
-不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型在工具声明 `strict: false` 之后也都经 ask 提问，各跑一次（见下文）。所有说明下，模型做摘要时都没有调用 ask。
+不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。所有说明下，模型做摘要时都没有调用 ask。
 
 ### 第一版说明为什么输，后几版改了什么
 
@@ -113,10 +117,11 @@ A 组运行里，模型的推理给出了四个原因：
 
 ### `openai-codex` 渠道的 OpenAI 模型
 
-`openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra`（该渠道没有 `gpt-6-terra`），用现行说明、同一份素材和参数，各跑一次 grilling。
+`openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra`（该渠道没有 `gpt-6-terra`），用现行说明、同一份素材和参数，每个阶段各跑一次 grilling。
 
-- **加 `strict: false` 之前**（T1 组，提交 `96b4cd5`）：三个模型都把第一轮放进了 ask，但每次调用都在打开前被拒。它们把可选的 `demo` 填成空值，即 `{frames: […], path: ""}` 或 `{frames: [], path: ""}`，违反“frames 和 path 只能给一个”。随后推理里写着 “Removing all demos”“Omitting full demo”，下一次调用却带着同样的空 `demo`：模型没法省掉这个字段。工具没有发出 `strict` 标志，OpenAI 系后端把这当成严格模式，要求每个属性都要生成；omp 自己的 provider 里也写着同样的情况（`openai-responses.ts:1907-1918`，#4336）。三次运行分别在被拒 3、9、9 次后停止。l6-TN1 的摘要没有调用 ask。
-- **加 `strict: false` 之后**（T2 组）：gpt-5.6-luna 和 gpt-6.1-terra 第一次调用就打开了 4 题和 6 题的一轮。gpt-6-luna 第四次调用才打开 5 题的一轮：第一次是 `lines: "7-8,16-17"`，即 deepseek 也犯过的多段写法；后两次在数组里多了第六项，内容是推理文字而不是问题（`"recommended:0}]}]} c? Syntax perhaps JSON invalid? …"`），被 omp 的参数检查拒绝。不用严格模式后，参数不再受语法约束，可能出现格式错乱的调用；每次都附原因被拒，模型随即重发。
+- **没有 `strict` 标志**（T1 组，提交 `96b4cd5`）：三个模型都把第一轮放进了 ask，但每次调用都在打开前被拒。它们把可选的 `demo` 填成空值，即 `{frames: […], path: ""}` 或 `{frames: [], path: ""}`，违反“frames 和 path 只能给一个”。随后推理里写着 “Removing all demos”“Omitting full demo”，下一次调用却带着同样的空 `demo`：模型没法省掉这个字段。工具没有发出 `strict` 标志，OpenAI 系后端把这当成严格模式，要求每个属性都要生成；omp 自己的 provider 里也写着同样的情况（`openai-responses.ts:1907-1918`，#4336）。三次运行分别在被拒 3、9、9 次后停止。l6-TN1 的摘要没有调用 ask。
+- **`strict: false`**（T2 组，提交 `e0394c5`）：gpt-5.6-luna 和 gpt-6.1-terra 第一次调用就打开了 4 题和 6 题的一轮。gpt-6-luna 第四次调用才打开 5 题的一轮：第一次是 `lines: "7-8,16-17"`，即 deepseek 也犯过的多段写法；后两次在数组里多了第六项，内容是推理文字而不是问题（`"recommended:0}]}]} c? Syntax perhaps JSON invalid? …"`），被 omp 的参数检查拒绝。不用严格模式后，参数不再受语法约束，可能出现格式错乱的调用。
+- **为严格模式写的参数，`strict: true`**（U 组，提交 `79c65cc`）：问题出在参数设计，而不在严格模式。演示原本是一个带两个可选来源的对象，外加“只能给一个”的规则，必须生成每个字段的模型在另一个字段里填不出合法值；证据行号是自由文本。现在演示是以 `kind` 区分的联合，证据行号是整数 `start`、`end`，每个可选字符串都拒绝 `""`，`multi` 已删除；omp 把每个可选字段改成可为 null，并在校验前去掉 null。gpt-5.6-luna、gpt-6-luna、gpt-6.1-terra 第一次调用就各打开了 7 题的一轮，deepseek 打开了 6 题的一轮。它们的参数里，没用到的 `demo` 是 `null`，证据写成 `{"path": "src/server.ts", "start": 7, "end": 8, …}`。
 
 ### 在第一版说明上试过的改动
 
