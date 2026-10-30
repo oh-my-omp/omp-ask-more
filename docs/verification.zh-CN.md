@@ -31,7 +31,7 @@
 
 ## 要求在对话中提问的 skill
 
-skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了四版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；第三版用一份简短的通用说明替换了第二版（提交 `e73cd59`）；现行版在第三版上补了模型推理里显示它缺的东西。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`；现行说明还用 `openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 跑过。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
+skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了四版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；第三版用一份简短的通用说明替换了第二版（提交 `e73cd59`）；现行版在第三版上补了模型推理里显示它缺的东西。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`；现行说明还用 `openai-codex/gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 以及 `opencode-go/qwen3.8-flash`、`minimax-m3.1-flash`、`glm-5.3-flash` 跑过。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
 
 - **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
 - **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T、U 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T、U 组用现行版，U 组另用为严格工具调用重写的参数），反例 N、RN、SN、TN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
@@ -68,6 +68,9 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | l6-U1 | gpt-6-luna | U 严格模式参数 | `ask(7)` |
 | t61-U1 | gpt-6.1-terra | U 严格模式参数 | `ask(7)` |
 | ds-U1 | deepseek | U 严格模式参数 | `ask(6)` |
+| qw-U1 | qwen3.8-flash | U 严格模式参数 | `ask(7)` rejected → `ask(7)` |
+| mm-U1 | minimax-m3.1-flash | U 严格模式参数 | 回复里 `chat(8)`，同一轮里再 `ask(8)` |
+| glm-U1 | glm-5.3-flash | U 严格模式参数 | `ask`（字符串）rejected → `ask(9)` rejected → `ask`（字符串）rejected → `ask(9)` |
 | ds-B1 | deepseek | B 无 ask | `chat(7)` |
 | km-B1 | kimi | B 无 ask | `chat(6)` |
 | ds-C1 | deepseek | C 原生 ask | `chat(6)` |
@@ -87,9 +90,9 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | km-V3b | kimi | V3 收尾检查 | `chat(7)` → 检查 → `ask(7)` → `ask(8)` |
 | ds-V3a | deepseek | V3 收尾检查 | `ask(6)` → `ask(7)` |
 
-`ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）；以“已停止”结尾的行一次都没打开。`rejected` 是在打开任何界面之前被拒绝的调用，拒绝方是插件（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`、空的 `demo`）或 omp 的参数检查（参数格式错乱）；模型随后经 ask 重发，人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
+`ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）；以“已停止”结尾的行一次都没打开；`ask`（字符串）是 `questions` 以字符串形式到达的调用。`rejected` 是在打开任何界面之前被拒绝的调用，拒绝方是插件（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`、空的 `demo`）或 omp 的参数检查（参数格式错乱）；模型随后经 ask 重发，人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
 
-不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。所有说明下，模型做摘要时都没有调用 ask。
+不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。现行版下，三个 `openai-codex` 模型也都把这一轮放进了 ask；参数按严格工具调用重写之后，它们和 deepseek 都在第一次调用就打开了（见下文）。另外三个 `opencode-go` 模型里，qwen 和 glm 把这一轮放进了 ask，minimax 先在回复里写了一遍再放进 ask（见下文）。所有说明下，模型做摘要时都没有调用 ask。
 
 ### 第一版说明为什么输，后几版改了什么
 
@@ -122,6 +125,15 @@ A 组运行里，模型的推理给出了四个原因：
 - **没有 `strict` 标志**（T1 组，提交 `96b4cd5`）：三个模型都把第一轮放进了 ask，但每次调用都在打开前被拒。它们把可选的 `demo` 填成空值，即 `{frames: […], path: ""}` 或 `{frames: [], path: ""}`，违反“frames 和 path 只能给一个”。随后推理里写着 “Removing all demos”“Omitting full demo”，下一次调用却带着同样的空 `demo`：模型没法省掉这个字段。工具没有发出 `strict` 标志，OpenAI 系后端把这当成严格模式，要求每个属性都要生成；omp 自己的 provider 里也写着同样的情况（`openai-responses.ts:1907-1918`，#4336）。三次运行分别在被拒 3、9、9 次后停止。l6-TN1 的摘要没有调用 ask。
 - **`strict: false`**（T2 组，提交 `e0394c5`）：gpt-5.6-luna 和 gpt-6.1-terra 第一次调用就打开了 4 题和 6 题的一轮。gpt-6-luna 第四次调用才打开 5 题的一轮：第一次是 `lines: "7-8,16-17"`，即 deepseek 也犯过的多段写法；后两次在数组里多了第六项，内容是推理文字而不是问题（`"recommended:0}]}]} c? Syntax perhaps JSON invalid? …"`），被 omp 的参数检查拒绝。不用严格模式后，参数不再受语法约束，可能出现格式错乱的调用。
 - **为严格模式写的参数，`strict: true`**（U 组，提交 `79c65cc`）：问题出在参数设计，而不在严格模式。演示原本是一个带两个可选来源的对象，外加“只能给一个”的规则，必须生成每个字段的模型在另一个字段里填不出合法值；证据行号是自由文本。现在演示是以 `kind` 区分的联合，证据行号是整数 `start`、`end`，每个可选字符串都拒绝 `""`，`multi` 已删除；omp 把每个可选字段改成可为 null，并在校验前去掉 null。gpt-5.6-luna、gpt-6-luna、gpt-6.1-terra 第一次调用就各打开了 7 题的一轮，deepseek 打开了 6 题的一轮。它们的参数里，没用到的 `demo` 是 `null`，证据写成 `{"path": "src/server.ts", "start": 7, "end": 8, …}`。
+
+### `opencode-go` 渠道的其他模型
+
+`opencode-go/qwen3.8-flash`、`minimax-m3.1-flash`、`glm-5.3-flash`，用现行说明和为严格模式写的参数（提交 `bb9e719`），各跑一次 grilling。
+
+- **qwen3.8-flash** 第二次调用打开了 7 题的一轮。第一次被拒，因为有一题只给了一个选项（`questions[6].options must be at least length 2`）：那是一道请用户给出数字的题，只列了一个选择；重发时补了第二个。
+- **minimax-m3.1-flash** 先在回复里按 skill 的模板写完整轮，八道 `❓` 题，每道带 `➡️` 推荐，随后写道 “Now the same round through the dialog, so you can answer in one pass”，第一次调用就在 ask 里打开了同样的八题。问题到了人面前两次；说明里的 “NEVER write such questions in your reply” 在走 ask 这件事上被遵守了，在回复里没被遵守。
+- **glm-5.3-flash** 第四次调用打开了 9 题的一轮。有两次它把 `questions` 发成了一个字符串，而且不是合法 JSON；它的推理把原因归于自己写坏了数组（“I put recommended outside the object”）。还有一次每道题都缺 `question` 字段。在这个渠道上，参数显然没有按 schema 的语法约束：严格解码下，需要数组的位置不可能出现字符串；omp 这里是否发出了 `strict` 没有核实。
+- **拒绝信息的措辞。** omp 把类型错误写成 `<路径> must be <该字段的说明> (was …)`，所以 glm 读到的是 “questions must be independent decisions, one tab each; a decision that depends on another answer goes in a later call (was a string)”，里面没说需要的是数组。`src/schema.ts` 里的字段说明是按用法写的，不是按期望的值写的。
 
 ### 在第一版说明上试过的改动
 

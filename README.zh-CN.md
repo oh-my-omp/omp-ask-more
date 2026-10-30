@@ -242,7 +242,7 @@ ask({
 
 ## 已知限制
 
-- **规定在 chat 里提问的 skill 在部分模型上仍可能占上风。** 以 `/skill:grilling` 调用 `grilling` skill、使用现行说明时，`opencode-go/deepseek-v4.1-flash` 以及 `openai-codex` 的 `gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 都把第一轮问题放进了 `ask`，`opencode-go/kimi-k2.7-code` 则在 chat 里问，推理里从未想到这个工具（各跑一次）。测过的四版说明合计，deepseek 8/8 次经 `ask` 提问，kimi 2/8 次，这两次都出自一版因复述该 skill 模板而被替换的说明。不加载本插件时两者都在 chat 里问，有原生 `ask` 也一样。运行记录、对话记录、早先的说明和试过的改动见[验证](docs/verification.zh-CN.md#要求在对话中提问的-skill)。
+- **规定在 chat 里提问的 skill 在部分模型上仍可能占上风。** 以 `/skill:grilling` 调用 `grilling` skill、使用现行说明时，`opencode-go/deepseek-v4.1-flash`、`qwen3.8-flash`、`glm-5.3-flash` 以及 `openai-codex` 的 `gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 都把第一轮问题放进了 `ask`；`opencode-go/minimax-m3.1-flash` 先在回复里写了这一轮，再把同样的问题放进 `ask`；`opencode-go/kimi-k2.7-code` 则在 chat 里问，推理里从未想到这个工具（各跑一次）。测过的四版说明合计，deepseek 9/9 次经 `ask` 提问，kimi 2/8 次，这两次都出自一版因复述该 skill 模板而被替换的说明。不加载本插件时两者都在 chat 里问，有原生 `ask` 也一样。运行记录、对话记录、早先的说明和试过的改动见[验证](docs/verification.zh-CN.md#要求在对话中提问的-skill)。
 - **`/tree` 重答**会在原生对话框里重新打开带扩展字段的 ask，只显示原生字段。
 - **协作 guest** 在 ask-more 面板打开期间无法作答。
 - **print 与没有原生 ask 的 RPC** 收到拒绝；原生工具会中止整个操作。
