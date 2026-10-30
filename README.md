@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 An OMP plugin that shadows the native `ask` tool and makes it the one place where the agent puts a decision to the user. Its parameters are the native ones **plus** extension fields: the native component renders the native part and ignores the rest; the ask-more component renders both. The answer shape, the result renderer and the persisted-call contract stay native.
 
-Status: **implemented, v0.1.0**. Verified with Tern 0.9.6. On omp 18.14.0: unit tests, the Tern sheet under all 102 embedded color themes in the Reader, Spine and Console chat styles, its button acts, and a real ask end to end. On omp 18.13.3: the ANSI page, the Tern sheet's batch, long-brief and demo flows (frames, a GIF and an mp4), and the no-UI path. See [Verification](#verification).
+Status: **implemented, v0.1.0**. Verified with Tern 0.9.6. On omp 18.14.0: unit tests, the Tern sheet under all 102 embedded color themes in the Reader, Spine and Console chat styles, its button acts, a real ask end to end, and the ask timeout with its notifications on the ANSI page and in Tern. On omp 18.13.3: the ANSI page, the Tern sheet's batch, long-brief and demo flows (frames, a GIF and an mp4), and the no-UI path. See [Verification](#verification).
 
 ## Why
 
@@ -21,7 +21,7 @@ This plugin requires every question to carry where/what/how and every option its
 omp plugin install https://github.com/oh-my-omp/omp-ask-more
 ```
 
-For local development, `omp plugin link /path/to/omp-ask-more`. The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`; no config section is needed, and the native `ask` must stay enabled so the no-UI path can delegate to it.
+For local development, `omp plugin link /path/to/omp-ask-more`. The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`; nothing needs configuring (the timeout settings have defaults, see [Timeout and notifications](#timeout-and-notifications)), and the native `ask` must stay enabled so the no-UI path can delegate to it.
 
 In Tern, also install the styles-only Tern plugin in `tern/`:
 
@@ -52,6 +52,7 @@ The tool description (`src/description.ts`) tells the model:
 - It cites the real code lines a decision is about and draws a Mermaid diagram whenever a flow, sequence, states, dependencies or a structure is involved. Both stay optional in the schema.
 - It shows a demo whenever the decision is about behaviour over time — a UI interaction, the states a request goes through, before and after a change: on the question for how things behave now, on an option for the result of picking it. A demo is frames it writes, or an animation or video file, which may be a recording it made for this ask.
 - Independent decisions go in one call, one question each; a decision whose options depend on another answer goes in a later call.
+- A question that reads `id: (timed out: …)` in the result was not answered before the ask's timeout: it decides that question itself with its best judgment, says what it chose, and continues.
 
 `question` stays a question: one or two sentences. The brief is its own field.
 
@@ -147,9 +148,9 @@ flowchart LR
 
 One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`extension-ui-controller.ts:1283-1369`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself.
 
-**ANSI.** `fullscreen` puts the page on the alternate screen. The title and, for a batch, a tab row (`✓` on answered questions, then `Review`) stay at the top; the key hints stay at the bottom; the body between them is a pi-tui `ScrollView` sized from the live terminal height, with a scrollbar, scrolled by `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` and the mouse wheel, and pulled to the focused option when `↑↓` moves it.
+**ANSI.** `fullscreen` puts the page on the alternate screen. The title and, for a batch, a tab row (`✓` on answered questions, then `Review`) stay at the top; the key hints, and above them the countdown line when the ask has one, stay at the bottom; the body between them is a pi-tui `ScrollView` sized from the live terminal height, with a scrollbar, scrolled by `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` and the mouse wheel, and pulled to the focused option when `↑↓` moves it.
 
-**Tern.** The component declares `nativeOverlay` (`role: "omp.askMore"`, `size: "full"`, `head`: the question's `header`, or "N decisions" for a batch), so the backend wraps it in one opaque sheet filling the pane (`packages/tui/src/native/backend.ts:873-900`), and `describe()` returns the content in the native ask's roles, which Tern's color themes and its Reader, Spine and Console chat styles already style: for a batch an `omp.ask.head` row holding the `omp.ask.questions` tabs (positional ids, `✓` on answered questions, `Review` last; click switches), the question (`omp.ask.question`) and Where/What/How, then the decision — the options as an `omp.ask.options` list keyed `qN` per question, rows `omp.ask.option` and a last `omp.ask.other` (`click` selects, `dblclick` answers; the answered row carries the accent tone, which Tern draws as the filled radio mark, `(•)` in Console, while the cursor is the list's highlighted row), the focused option's tradeoff card, the Other field and the action bar (`Cancel all`, and `Next` / `Submit` / `Save answer`) — then the evidence `code` nodes (folded to 12 lines behind Tern's own "more lines" control), the Mermaid `md` and the risks. The Review page is an `omp.ask.notice` line and one row per question, label then answer: Reader gives the native answers grid (`omp.ask.answers`) a fixed key column, and a long CJK chip runs into its answer there. The sheet role stays outside `omp.overlay.*` on purpose: Tern's list rule for those overlays (`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`) outranks the ask list styling and draws each option's mark over its label. Tern scrolls a sheet body as one column and brings a list's selection into view against the body's bottom edge, so the action bar sits right after the decision and reveals itself when a page opens: after a long brief the whole decision is in view. Keyboard scrolling reaches Tern as `scroll` requests on the body.
+**Tern.** The component declares `nativeOverlay` (`role: "omp.askMore"`, `size: "full"`, `head`: the question's `header`, or "N decisions" for a batch), so the backend wraps it in one opaque sheet filling the pane (`packages/tui/src/native/backend.ts:873-900`), and `describe()` returns the content in the native ask's roles, which Tern's color themes and its Reader, Spine and Console chat styles already style: for a batch an `omp.ask.head` row holding the `omp.ask.questions` tabs (positional ids, `✓` on answered questions, `Review` last; click switches), the question (`omp.ask.question`) and Where/What/How, then the decision — the options as an `omp.ask.options` list keyed `qN` per question, rows `omp.ask.option` and a last `omp.ask.other` (`click` selects, `dblclick` answers; the answered row carries the accent tone, which Tern draws as the filled radio mark, `(•)` in Console, while the cursor is the list's highlighted row), the focused option's tradeoff card, the Other field and the action bar (the countdown line on its left when the ask has one, then `Cancel all`, and `Next` / `Submit` / `Save answer`) — then the evidence `code` nodes (folded to 12 lines behind Tern's own "more lines" control), the Mermaid `md` and the risks. The Review page is an `omp.ask.notice` line and one row per question, label then answer: Reader gives the native answers grid (`omp.ask.answers`) a fixed key column, and a long CJK chip runs into its answer there. The sheet role stays outside `omp.overlay.*` on purpose: Tern's list rule for those overlays (`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`) outranks the ask list styling and draws each option's mark over its label. Tern scrolls a sheet body as one column and brings a list's selection into view against the body's bottom edge, so the action bar sits right after the decision and reveals itself when a page opens: after a long brief the whole decision is in view. Keyboard scrolling reaches Tern as `scroll` requests on the body.
 
 Every button's action id names the page and the state it was drawn for (`answer:<page>:<option>`, `other:<page>`, `save:<page>`, `demo:<page>:question:<move>`, `demo:<page>:option:<option>:<move>`, `submit`, `cancel`; `src/nodes.ts#SheetAct`). Tern keeps routing a click to a node the sheet has since redrawn, so a click that arrives after its page, its cursor row or the Other field changed — a second click on `Next`, a demo control of an option the cursor left, `Submit` after leaving Review — is dropped instead of acting on the new state. The options list is keyed per question for the same reason.
 
@@ -182,15 +183,54 @@ The Other field is a pi-tui `Input`, one per question: its value is the only cop
 
 When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with the native subset of every question (`src/schema.ts#nativeQuestion`), so the native dialog renders the native fields; without a native resolver — print mode, for instance — it returns a structured rejection instead of hanging.
 
+## Timeout and notifications
+
+An open ask counts down while nobody touches it. The settings are omp settings the plugin registers (`src/settings.ts`), read like native ones from `~/.omp/agent/config.yml`, a project's `.omp/config.yml`, `--config` or `cfg://`. They are snapshotted from the asking session when the ask opens, so a change applies from the next ask.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `askMore.timeout` | `1800` | seconds without input before the first step; `0` turns timing off |
+| `askMore.notify.terminal` | `true` | at that step, a terminal notification through omp's `TERMINAL.sendNotification` (`@oh-my-pi/pi-tui`), which writes OSC 99, OSC 9 or BEL depending on the terminal |
+| `askMore.notify.command` | unset | at that step, a shell command run as `sh -c`; also `OMP_ASK_MORE_NOTIFY_COMMAND`. Ignored, with a warning, when it comes from a project config |
+| `askMore.returnTimeout` | `1200` | seconds after the notification for the user to come back |
+| `askMore.onExpiry` | `decide` | when the last countdown ends: `decide` hands the unanswered questions to the model, `wait` keeps the ask open |
+
+```mermaid
+stateDiagram-v2
+  Open --> Answered: the user answers
+  Open --> Notified: askMore.timeout without input, a channel on
+  Open --> Expired: askMore.timeout without input, no channel on
+  Notified --> Open: any input
+  Notified --> Expired: askMore.returnTimeout without input
+  Expired --> Decided: onExpiry decide
+  Expired --> Waiting: onExpiry wait
+```
+
+- Any key, click, wheel notch on the ANSI page, or the terminal's own edit in the Other field starts the first countdown over; Tern scrolls the sheet itself and does not report it. Coming back after a notification does too, so a later idle stretch notifies again.
+- With both channels off, the first countdown ends the ask (`decide`), or nothing happens (`wait`).
+- A timed-out ask returns like a submitted one with the answers given so far; each unanswered question reads `id: (timed out: the user did not answer; decide it yourself with your best judgment)`. It does not call `ctx.abort()`: the turn goes on, and the tool description tells the model to decide those questions, say what it chose, and continue. An unsaved Other text is not an answer.
+- The sheet shows one countdown line, which changes only at these steps: `No input for 30 min: you get notified, and 20 min later the model decides`, then `Notified at 14:03; the model decides at 14:23 unless you act`. The clock lives in the component (`src/component.ts`, the render clock's `scheduleAfter`), starts when the sheet is built and stops when it closes.
+- A notification carries no question text, evidence or answers. The terminal one reads `omp: <title>: waiting for your answer; the model decides at 14:23`. The command runs in the session's working directory with its own environment plus `OMP_ASK_MORE_EVENT` (`timeout`), `OMP_ASK_MORE_TITLE` (the sheet title), `OMP_ASK_MORE_BODY` (the terminal notification's text), `OMP_ASK_MORE_QUESTIONS` (the count), `OMP_ASK_MORE_CWD` and `OMP_ASK_MORE_DUE` (ISO 8601 handover time, empty with `wait`). Its output is ignored; it is killed after 30 seconds; a non-zero exit, a kill or a failed start becomes a session warning that names only the outcome, since the command may carry a token. Nothing is retried, and a failure never changes the ask.
+- Keep secrets in the environment the command reads, not in the command text. For example, with `NTFY_TOPIC` exported by whoever starts omp:
+
+  ```yaml
+  askMore:
+    notify:
+      command: 'curl -fsS -d "$OMP_ASK_MORE_BODY" "https://ntfy.sh/$NTFY_TOPIC"'
+  ```
+
+- A project config may not set the command: a cloned repository's `.omp/config.yml` could otherwise run a program on the first idle ask and decide where its notifications go. The plugin reads the layer that supplied the value (`Setting.provenance`) and accepts the environment, `--config`, runtime overrides and the global config.
+- Native `ask.timeout` and `ask.notify` are not read: they belong to the native dialog, where `ask.timeout` auto-selects the recommended option and also bounds `cfg://` approvals. The native ask still applies them when ask-more delegates to it.
+
 ## Answer and lifecycle
 
 | Concern | Behavior |
 |---|---|
-| Answer | native `AskToolDetails`: `results[{id, question, options, multi, selectedOptions, customInput}]`, one entry per question in input order; text `User answers:` then `id: label`, `id: "own text"` or `id: (cancelled)` per line, matching the native multi-question wording. Rendered by `askToolRenderer` because renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`) |
+| Answer | native `AskToolDetails`: `results[{id, question, options, multi, selectedOptions, customInput}]`, one entry per question in input order; text `User answers:` then `id: label`, `id: "own text"`, `id: (cancelled)` or `id: (timed out: …)` per line, matching the native multi-question wording. Rendered by `askToolRenderer` because renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`) |
 | Unanswered questions | the Review page lists them; submitting still sends the rest, an unanswered question reads `id: (cancelled)` (as in the native dialog) |
 | Cancel (`esc`, `Cancel all`, abort signal) | `ctx.abort()`, then every question as `(cancelled)`; nothing already answered is submitted |
 | Concurrent asks | one in flight; a second call is rejected instead of opening a second sheet |
-| Timeout | none; the native auto-select reads session settings an extension cannot reach (`ask.ts:742-745`) |
+| Timeout | the answers given so far, the rest as `(timed out: …)` for the model to decide; no `ctx.abort()` ([Timeout and notifications](#timeout-and-notifications)) |
 | Approval | `approval: "read"`, matching `ask.ts:544-551` |
 | Failure inside the surface | `ui.notify` warning, then delegation of the whole batch to the native dialog |
 | Demo playback | starts when its page opens; an option's demo restarts when the cursor moves onto that option; nothing plays while the Other field is open; no timer outlives the ask |
@@ -210,7 +250,10 @@ Both read the native result shape, so they work the same with the native `ask`.
 - **`/tree` re-answer** runs `new AskTool()` directly (`packages/coding-agent/src/modes/controllers/selector-controller.ts:1723-1748`). The extended arguments survive its schema check, so the ask reopens — in the native dock, with the native fields only.
 - **Collaborator guests** answer through the native mirroring channel (`extension-ui-controller.ts:923-1025`), which has no representation for a `ui.custom` surface: while the ask-more sheet is open, a guest cannot answer.
 - **Print and RPC without a native resolver** get a structured rejection; the native tool would abort the operation instead.
-- **No plan-mode timeout auto-select**, no `multi`, no notes.
+- **The timeout runs in plan mode too**; the native ask turns its own timeout off there. No `multi`, no notes.
+- **The transcript card shows a timed-out question as `Cancelled`.** The native renderer, which draws every `ask` result, has no state for "unanswered, left to the model"; the model-facing text says `(timed out: …)`.
+- **When ask-more delegates to the native ask** (no TUI, or after a surface failure), the native `ask.timeout` and `ask.notify` apply and the `askMore.*` settings do nothing.
+- **A terminal notification shows only where the terminal turns OSC 99, OSC 9 or BEL into one**; the notify command needs a POSIX `sh`.
 - **ANSI demos are coarse.** A file plays at 64 × 20 cells, two pixels per cell: motion reads, small text inside a recording does not, so the caption has to say what to watch. Each frame rewrites up to 20 rows of 24-bit color (about 16–17 KB per frame for a busy picture), which is noticeable over a slow SSH link. The raster width is fixed when the ask opens and is not redrawn on resize.
 - **Files need ffmpeg for the ANSI page and for videos.** Without `ffmpeg`/`ffprobe` on `PATH` such a demo is an error row; a GIF, APNG or WebP in Tern needs neither.
 - The tool is registered under the native name: the model reads this plugin's description, not `prompts/tools/ask.md`. Extensions that rewrite ask's prompt must target the final description.
@@ -224,15 +267,17 @@ src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question 
 src/brief.ts       path:lines resolution against the working directory, bounded reads
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
 src/state.ts       per-question state (cursor, answer, Other field, folding, scroll, demo playback) and the active tab
-src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events
+src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events, the countdown
 src/nodes.ts       the Tern content in the native ask roles, and the sheet's button acts (SheetAct)
-src/result.ts      Answer variants, AskToolDetails construction, cancelled and rejected results
+src/result.ts      Answer variants, AskToolDetails construction, cancelled, timed-out and rejected results
+src/settings.ts    the askMore.* settings in omp's registry, snapshotted from the asking session
+src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
+src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels from OMOMP_LANG / LC_*; protocol fields stay English
 src/description.ts the model-facing tool description
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
-test/              validation, native projection, demo loading, half-block rows, and the Tern sheet driven
-                   through pi-tui's reconciler and the reference TSP applier (bun test)
-```
+test/              validation, native projection, demo loading, half-block rows, the timeout policy and result, and the
+                   Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
 
 ## Verification
 
@@ -241,7 +286,7 @@ Tern 0.9.6 and `opencode-go/deepseek-v4.1-flash` throughout. Rows marked *18.14.
 | Check | Command | Observed |
 |---|---|---|
 | Types *18.14.0* | `bun run check` | `tsc --noEmit` clean |
-| Unit *18.14.0* | `bun test` | 38 pass, 0 fail: every rejection message, per-question indices and duplicate ids, evidence bounds, demo source and bounds rules, `nativeQuestion` projection, half-block colors, raster sizing, demo loading, and the Tern sheet: every frame accepted by pi-tui's reference applier, the native ask roles with the chosen row marked while the cursor rests elsewhere, click and double click, and stale clicks (a second `Next`, a `Next` drawn before the cursor moved or Other opened, a demo control of the option the cursor left, `Submit` off Review, repeated `Cancel all`) dropped. With the options list's role removed, the sheet role put back in `omp.overlay.*`, or the answer act's page and cursor checks removed, 5, 1 and 3 of these fail |
+| Unit *18.14.0* | `bun test` | 53 pass, 0 fail: every rejection message, per-question indices and duplicate ids, evidence bounds, demo source and bounds rules, `nativeQuestion` projection, half-block colors, raster sizing, demo loading, the timeout policy (the defaults, off at 0, no channel on, both channels with `wait`, a project command refused) and the timed-out result text, and the Tern sheet: every frame accepted by pi-tui's reference applier, the native ask roles with the chosen row marked while the cursor rests elsewhere, click and double click, stale clicks (a second `Next`, a `Next` drawn before the cursor moved or Other opened, a demo control of the option the cursor left, `Submit` off Review, repeated `Cancel all`) dropped, and the countdown on a test clock (the answers so far handed back when nobody acts; a restart on a key and on the terminal's edit in the Other field; one notification, a redraw and then the return window; a return after it starting over; `wait` never closing; an answer before the deadline as the only result; no countdown line with timing off). With the options list's role removed, the sheet role put back in `omp.overlay.*`, or the answer act's page and cursor checks removed, 5, 1 and 3 of these fail |
 | ANSI, batch | `omp --no-extensions -e …/index.ts` in a 130×40 PTY, a prompt asking for three independent questions | the alternate-screen page drew the title, the tab row `重试上限 日志级别 缓存 汇总`, a scrollbar and the hints; `enter` answered question 1 (`✓ 重试上限`) and opened question 2; `o`, `warn`, `enter` answered it; `PgDn` scrolled question 3; `tab` opened the review listing both answers and `1 题未回答`; `enter` returned `retry-limit: 固定 3 次，指数退避`, `log-level: "warn"`, `cache: (cancelled)` |
 | ANSI, one question | same session | no tab row; `↓`, `enter` submitted at once: `cap: 3 次` |
 | Tern, batch | headless `tern serve --control …`, omp run in its pane with `PI_TUI_TSP_RECORD`; `ctl shot`, `tree`, `click`, `dblclick`, `key`, `type` | one `sf-overlay sz-full at-center modal` sheet titled `3 decisions` with a `tabs` row; a row click sent `select … q0/option:2` and switched the tradeoff card; `Next` answered and opened the next tab; a tab click returned to question 2 with its answer kept; `Other…` opened a focused `sf-input`, typed text reached it and `Save answer` answered and advanced; `tab` opened Review; `enter` returned `retry-limit: 10 次(长退避)`, `log-level: "warn and above"`, `cache: 定时过期(TTL 固定)` and the sheet left `layer`. With `OMOMP_LANG=zh` the review rows and the tradeoff rows read label then value without overlap, `esc` returned all three as `(cancelled)` |
@@ -256,5 +301,8 @@ Tern 0.9.6 and `opencode-go/deepseek-v4.1-flash` throughout. Rows marked *18.14.
 | Tern, button acts *18.14.0* | same, recorded with `PI_TUI_TSP_RECORD`; clicks on the option demo's `Pause` and on `Next` | Tern sent `demo:0:option:0:toggle` (the button became `Play`) and `answer:0:0` (`✓ Storage`, Format opened) |
 | Tern, end to end *18.14.0* | headless Tern in Console, `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`, a prompt asking for two independent questions; keys only | the model's ask opened as the `2 decisions` sheet, `( )` marks and the `›` cursor on its recommended row; `enter`, `↓`, `enter` reached Review (`✓ 重试上限`, `✓ 日志级别`, `All answered · Submit sends them`); `enter` returned `retry: 固定 3 次`, `log_level: info`, which the model restated |
 | Tern plugin *18.14.0* | `tern plugin link …/tern`, then `tern plugin list --json`, first with `TERN_CONFIG_DIR` in a temporary directory, then in a running Tern; `tern ctl css` in that Tern's window | `omp-ask-more` 0.1.0, `window: true`, status `ready`, no problems, beside the plugins already there; without a restart the window's sheets included `plugin:local:omp-ask-more:styles` with its 3 rules |
+| ANSI, timeout *18.14.0* | 130×40 PTY in a directory whose `.omp/config.yml` sets `askMore.timeout: 20` and `askMore.returnTimeout: 15`, with `OMP_ASK_MORE_NOTIFY_COMMAND='env \| grep ^OMP_ASK_MORE_ > …/notice.txt'`; a prompt asking for two independent questions | the page showed `无操作 20 秒 后通知你，再过 15 秒 交给模型决定` above the hints; `enter` answered question 1; 20 s later the line read `13:31 已通知；13:31 前无操作则交给模型决定`, `notice.txt` held `OMP_ASK_MORE_EVENT=timeout`, `OMP_ASK_MORE_TITLE=2 个决定`, `OMP_ASK_MORE_QUESTIONS=2`, `OMP_ASK_MORE_DUE=2026-10-30T04:31:50.015Z` and the body, and the PTY output carried an OSC notification with the body text, which the screen never shows; at 13:31:50 the result read `retry: 3 attempts`, `loglevel: (timed out: …)`, and the model went on in the same turn: `日志级别你未作答，我按诊断价值优先定为 info` |
+| ANSI, project command *18.14.0* | same, in a directory whose `.omp/config.yml` sets `askMore.notify.terminal: false` and `askMore.notify.command: "touch …/ran.txt"`; one question | the line read `无操作 20 秒 后，未答的问题交给模型决定`; the session showed `Warning: ask-more: askMore.notify.command is ignored in a project config; …`; 20 s later `ttl: (timed out: …)` and the model picked 300 秒 itself; `ran.txt` was never created |
+| Tern, timeout *18.14.0* | headless `tern serve --control …` with `PI_TUI_TSP_RECORD`, the config, command and prompt of the ANSI timeout row; `ctl tree`, `ctl shot`, `ctl type` | the `omp.actions` row began with `No input for 20 s: you get notified, and 15 s later the model decides`; `ctl type "abc"` into question 2's Other field moved the notification to 20 s after that edit. The first run left the idle line standing after the notification (a change made by the timer asked for no redraw; fixed in `src/component.ts`). After the fix, 20.03 s after the last input the TSP stream changed the line to `Notified at 13:43; the model decides at 13:43 unless you act` and Tern showed the toast `omp 2 decisions: waiting for your answer; the model decides at 13:43`; 15 s later the sheet left `layer`, the result kept `retry_limit: 3 attempts` beside `log_level: (timed out: …)`, and the model picked `info` |
 
-Not yet exercised at runtime: the native-delegation path itself (needs an environment where `ctx.invokeTool` exists but `ui.custom` does not), collaborator guests, `/tree` re-answer with an extended call, terminal resize while the ANSI page is open (each row is cut to the current width, the raster is not redrawn), a screenshot of an ask in a Tern window styled by the installed plugin (the shots above load the same `tern/ask-more.css` with `ctl css`, since headless Tern loads plugins only as fixtures), and `tern plugin install` from GitHub.
+Not yet exercised at runtime: the native-delegation path itself (needs an environment where `ctx.invokeTool` exists but `ui.custom` does not), collaborator guests, `/tree` re-answer with an extended call, terminal resize while the ANSI page is open (each row is cut to the current width, the raster is not redrawn), a screenshot of an ask in a Tern window styled by the installed plugin (the shots above load the same `tern/ask-more.css` with `ctl css`, since headless Tern loads plugins only as fixtures), `tern plugin install` from GitHub, a notify command that fails or outlives 30 seconds, and a desktop notification from a plain terminal (the PTY run shows the OSC bytes, not the toast).
