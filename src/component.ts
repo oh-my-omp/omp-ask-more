@@ -99,6 +99,18 @@ const DOCUMENT_SCROLL = 10;
 const WHEEL_ROWS = 3;
 const FAST_ROWS = 5;
 
+/**
+ * An evidence line cut to `width` columns, ending in how many characters were left out; the ScrollView
+ * would otherwise cut it at the box edge without a trace.
+ */
+function cutLine(line: string, width: number): string {
+	if (visibleWidth(line) <= width) return line;
+	const marker = (left: number) => tr(` … ${left} more characters`, ` … 还有 ${left} 个字符`);
+	const total = Array.from(line).length;
+	const kept = truncateToWidth(line, Math.max(0, width - visibleWidth(marker(total))), Ellipsis.Omit);
+	return kept + theme.fg("muted", marker(total - Array.from(kept).length));
+}
+
 function newView(): ScrollView {
 	return new ScrollView([], {
 		height: 1,
@@ -339,16 +351,28 @@ export class AskMoreComponent implements Component {
 		if (state.evidence.length > 0) {
 			heading(tr("Evidence", "证据"));
 			for (const entry of state.evidence) {
-				if (!entry.ok) {
-					rows.push(theme.fg("error", `${entry.path}: ${entry.error}`));
-					continue;
+				switch (entry.kind) {
+					case "unreadable":
+						rows.push(theme.fg("error", `${entry.path}: ${entry.error}`));
+						if (entry.note) rows.push(theme.fg("muted", entry.note));
+						continue;
+					case "directory":
+						rows.push(theme.fg("muted", `${entry.path} ${tr("(directory)", "（目录）")}`));
+						if (entry.note) rows.push(theme.fg("muted", entry.note));
+						continue;
+					case "file":
+						rows.push(theme.fg("muted", `${entry.path}:${entry.start}-${entry.end}`));
+						break;
+					case "text":
+						rows.push(`${theme.fg("muted", entry.source)}${theme.fg("warning", tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"))}`);
+						break;
 				}
-				const location = entry.start > 0 ? `${entry.path}:${entry.start}-${entry.end}` : entry.path;
-				rows.push(theme.fg("muted", location));
 				if (entry.note) rows.push(theme.fg("muted", entry.note));
-				if (entry.start === 0) continue;
 				const visible = state.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
-				visible.forEach((line, offset) => rows.push(`${theme.fg("dim", String(entry.start + offset).padStart(4))}  ${line}`));
+				visible.forEach((line, offset) => {
+					const gutter = entry.kind === "file" ? `${theme.fg("dim", String(entry.start + offset).padStart(4))}  ` : "  ";
+					rows.push(gutter + cutLine(line, width - visibleWidth(gutter)));
+				});
 				if (visible.length < entry.lines.length) {
 					rows.push(theme.fg("muted", tr(`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
 				}

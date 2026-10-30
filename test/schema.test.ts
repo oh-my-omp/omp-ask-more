@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { demoSchema, nativeQuestion, parametersSchema, validate, type AskParams } from "../src/schema.ts";
+import { demoSchema, evidenceSchema, nativeQuestion, parametersSchema, validate, type AskParams } from "../src/schema.ts";
 
 function payload(overrides: (params: AskParams) => void = () => {}): AskParams {
 	const params = parametersSchema.parse({
@@ -76,30 +76,20 @@ describe("validate", () => {
 		if (!checked.ok) expect(checked.problems.join("\n")).toContain("recommended");
 	});
 
-	it("rejects more evidence references than the surface can show", () => {
-		const params = payload();
-		params.questions[0]!.brief.evidence = Array.from({ length: 7 }, (_, index) => ({ path: `src/f${index}.ts`, start: undefined, end: undefined, note: undefined }));
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("at most 6");
-	});
-
-	it("accepts an evidence window of 80 lines and rejects one of 81", () => {
+	it("accepts any number of evidence references and windows of any length", () => {
 		const params = payload();
 		params.questions[0]!.brief.evidence = [
-			{ path: "src/retry.ts", start: 1, end: 80, note: undefined },
-			{ path: "src/retry.ts", start: 1, end: 81, note: undefined },
+			...Array.from({ length: 8 }, (_, index) => evidenceSchema.parse({ kind: "file", path: `src/f${index}.ts` })),
+			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", start: 1, end: 3000 }),
 		];
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(["questions[0].brief.evidence[1]: lines 1-81 span 81 lines; narrow it to 80 or fewer."]);
+		expect(validate(params).ok).toBe(true);
 	});
 
 	it("rejects an evidence end without a start, or before it", () => {
 		const params = payload();
 		params.questions[0]!.brief.evidence = [
-			{ path: "src/retry.ts", start: undefined, end: 58, note: undefined },
-			{ path: "src/retry.ts", start: 58, end: 41, note: undefined },
+			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", end: 58 }),
+			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", start: 58, end: 41 }),
 		];
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
@@ -109,6 +99,29 @@ describe("validate", () => {
 				"questions[0].brief.evidence[1].end: 41 is before start 58",
 			]);
 		}
+	});
+
+	it("rejects quoted text without a one-line source, or without text", () => {
+		const params = payload();
+		params.questions[0]!.brief.evidence = [
+			evidenceSchema.parse({ kind: "text", source: "bun test\n(run 2)", text: "3 pass" }),
+			evidenceSchema.parse({ kind: "text", source: "  ", text: "  " }),
+		];
+		const checked = validate(params);
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) {
+			expect(checked.problems).toEqual([
+				"questions[0].brief.evidence[0].source: more than one line; name where the text came from in one line and put the text in text",
+				"questions[0].brief.evidence[1].source: empty",
+				"questions[0].brief.evidence[1].text: empty",
+			]);
+		}
+	});
+
+	it("does not parse evidence without its kind, or carrying the other kind's fields", () => {
+		expect(evidenceSchema.safeParse({ path: "src/retry.ts", start: 1 }).success).toBe(false);
+		expect(evidenceSchema.safeParse({ kind: "text", path: "src/retry.ts" }).success).toBe(false);
+		expect(evidenceSchema.safeParse({ kind: "file", source: "bun test", text: "ok" }).success).toBe(false);
 	});
 
 	it("accepts a question demo of frames and an option demo of a file", () => {

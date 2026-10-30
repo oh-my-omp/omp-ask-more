@@ -29,12 +29,24 @@ export const DEFAULT_FRAME_MS = 1200;
 export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const;
 export const DEMO_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v"] as const;
 
-export const evidenceSchema = z.object({
+export const fileEvidenceSchema = z.object({
+	kind: z.literal("file"),
 	path: z.string().min(1).describe("a non-empty path to a file or directory, relative to the working directory unless absolute"),
 	start: z.number().int().min(1).optional().describe("a 1-based line number where the window starts; without it the file's first lines are shown"),
 	end: z.number().int().min(1).optional().describe("a 1-based line number where the window ends, inclusive; needs start, and omitted means start alone. For lines that are not adjacent, cite each window as its own entry"),
 	note: z.string().min(1).optional().describe("text saying why this evidence matters"),
 });
+
+export const textEvidenceSchema = z.object({
+	kind: z.literal("text"),
+	source: z.string().min(1).describe("one non-empty line naming where the text was taken from: a command, a URL, a log, a tool result; shown as your claim, not checked"),
+	text: z.string().min(1).describe("the non-empty text quoted as it appeared there"),
+	lang: z.string().min(1).optional().describe("a highlight language for the text, such as bash, json, diff"),
+	note: z.string().min(1).optional().describe("text saying why this evidence matters"),
+});
+
+/** Lines ask-more reads from a file itself, or text the model quotes from elsewhere. */
+export const evidenceSchema = z.union([fileEvidenceSchema, textEvidenceSchema]);
 
 export const demoFrameSchema = z.object({
 	body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
@@ -61,7 +73,7 @@ export const briefSchema = z.object({
 	where: z.string().min(1).describe("non-empty text saying what exists now: paths, symbols, the observation that forces the decision"),
 	what: z.string().min(1).describe("non-empty text naming the decision, and why code, docs and conventions cannot make it"),
 	how: z.string().min(1).describe("non-empty text saying what happens after each answer, and which constraint decides it"),
-	evidence: z.array(evidenceSchema).optional(),
+	evidence: z.array(evidenceSchema).optional().describe("an array of evidence tagged by kind: file lines ask-more reads itself, or text you quote"),
 	diagram: z.string().min(1).optional().describe("Mermaid source of a flowchart, sequence diagram or state diagram"),
 	demo: demoSchema.optional().describe("a demo tagged by kind: an animation of how things behave now"),
 	risks: z.array(z.string().min(1)).optional(),
@@ -91,6 +103,8 @@ export const parametersSchema = z.object({
 });
 
 export type EvidenceRef = z.infer<typeof evidenceSchema>;
+export type FileEvidence = z.infer<typeof fileEvidenceSchema>;
+export type TextEvidence = z.infer<typeof textEvidenceSchema>;
 export type DemoParams = z.infer<typeof demoSchema>;
 export type Brief = z.infer<typeof briefSchema>;
 export type AskOption = z.infer<typeof optionSchema>;
@@ -102,10 +116,6 @@ export type Validated = { readonly ok: true; readonly questions: readonly AskQue
 
 export type FramesDemo = z.infer<typeof framesDemoSchema>;
 export type FileDemo = z.infer<typeof fileDemoSchema>;
-
-/** Bounds the surface can show without folding away what the model cited. */
-export const MAX_EVIDENCE_REFS = 6;
-export const MAX_EVIDENCE_LINES = 80;
 
 /**
  * Semantic checks the schema cannot state. They run before any UI opens and never degrade
@@ -149,32 +159,38 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 	});
 	if (question.brief.demo !== undefined) problems.push(...validateDemo(question.brief.demo, `${at}.brief.demo`));
 
-	const evidence = question.brief.evidence ?? [];
-	if (evidence.length > MAX_EVIDENCE_REFS) {
-		problems.push(`${at}.brief.evidence: ${evidence.length} references; the surface shows at most ${MAX_EVIDENCE_REFS}. Cite the ones that decide it.`);
-	}
-	evidence.forEach((ref, index) => {
-		const refAt = `${at}.brief.evidence[${index}]`;
-		if (ref.path.trim().length === 0) problems.push(`${refAt}.path: empty`);
-		if (ref.end === undefined) return;
-		if (ref.start === undefined) {
-			problems.push(`${refAt}.end: ${ref.end} without start; give start too, or leave both out for the file's first lines`);
-			return;
-		}
-		if (ref.end < ref.start) {
-			problems.push(`${refAt}.end: ${ref.end} is before start ${ref.start}`);
-			return;
-		}
-		const span = ref.end - ref.start + 1;
-		if (span > MAX_EVIDENCE_LINES) {
-			problems.push(`${refAt}: lines ${ref.start}-${ref.end} span ${span} lines; narrow it to ${MAX_EVIDENCE_LINES} or fewer.`);
-		}
-	});
+	(question.brief.evidence ?? []).forEach((ref, index) => problems.push(...validateEvidence(ref, `${at}.brief.evidence[${index}]`)));
 
 	const recommended = question.recommended;
 	if (recommended !== undefined && (!Number.isInteger(recommended) || recommended < 0 || recommended >= question.options.length)) {
 		problems.push(`${at}.recommended: ${recommended} is not an index into ${question.options.length} options`);
 	}
+	return problems;
+}
+
+function validateEvidence(ref: EvidenceRef, at: string): string[] {
+	switch (ref.kind) {
+		case "file":
+			return validateFileEvidence(ref, at);
+		case "text":
+			return validateTextEvidence(ref, at);
+	}
+}
+
+function validateFileEvidence(ref: FileEvidence, at: string): string[] {
+	if (ref.path.trim().length === 0) return [`${at}.path: empty`];
+	if (ref.end === undefined) return [];
+	if (ref.start === undefined) return [`${at}.end: ${ref.end} without start; give start too, or leave both out for the file's first lines`];
+	if (ref.end < ref.start) return [`${at}.end: ${ref.end} is before start ${ref.start}`];
+	return [];
+}
+
+function validateTextEvidence(ref: TextEvidence, at: string): string[] {
+	const problems: string[] = [];
+	const source = ref.source.trim();
+	if (source.length === 0) problems.push(`${at}.source: empty`);
+	else if (/[\r\n]/.test(source)) problems.push(`${at}.source: more than one line; name where the text came from in one line and put the text in text`);
+	if (ref.text.trim().length === 0) problems.push(`${at}.text: empty`);
 	return problems;
 }
 

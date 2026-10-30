@@ -195,17 +195,29 @@ export function answerLabel(question: AskQuestion, answer: Answer): string | und
 const EVIDENCE_ROWS = 12;
 
 function evidenceCards(evidence: readonly ResolvedEvidence[], expanded: boolean): NativeChild[] {
+	const preview = expanded ? {} : { preview: { lines: EVIDENCE_ROWS } };
 	return evidence.map((entry, index) => {
 		const note = entry.note ? [text([span(entry.note, "muted")], { wrap: "word" })] : [];
-		if (!entry.ok) {
-			return node("card", { head: [span(entry.path, "muted")], tone: "error" }, [text([span(entry.error, "error")], { wrap: "word" }), ...note], `ev${index}`);
+		switch (entry.kind) {
+			case "unreadable":
+				return node("card", { head: [span(entry.path, "muted")], tone: "error" }, [text([span(entry.error, "error")], { wrap: "word" }), ...note], `ev${index}`);
+			case "directory":
+				return node("card", { head: [span(entry.path, "muted")] }, [text([span(tr("directory", "目录"), "muted")]), ...note], `ev${index}`);
+			case "file":
+				return node(
+					"card",
+					{ head: [span(`${entry.path}:${entry.start}-${entry.end}`, "muted")] },
+					[code(entry.lines.join("\n"), { path: entry.path, start: entry.start, numbers: true, ...preview }), ...note],
+					`ev${index}`,
+				);
+			case "text":
+				return node(
+					"card",
+					{ head: [span(entry.source, "muted"), span(tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"), "warning")] },
+					[code(entry.lines.join("\n"), { ...(entry.lang ? { lang: entry.lang } : {}), ...preview }), ...note],
+					`ev${index}`,
+				);
 		}
-		const head = entry.start > 0 ? `${entry.path}:${entry.start}-${entry.end}` : entry.path;
-		const content =
-			entry.start > 0
-				? code(entry.lines.join("\n"), { path: entry.path, start: entry.start, numbers: true, ...(expanded ? {} : { preview: { lines: EVIDENCE_ROWS } }) })
-				: text([span(tr("directory", "目录"), "muted")]);
-		return node("card", { head: [span(head, "muted")] }, [content, ...note], `ev${index}`);
 	});
 }
 

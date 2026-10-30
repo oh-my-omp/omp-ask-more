@@ -57,10 +57,13 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 各字段的画法：
 
 - `brief.where/what/how` 画在选项上方，不折叠。
-- `evidence[].path` 加可选的 `start`、`end` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path` 与 `start` 的 `code` 节点，`packages/wire/src/tsp.ts:222-236`），而不是模型敲进去的代码。两个都不给显示文件前 40 行，只给 `start` 是一行，都给是一段闭区间；超出文件末尾的部分被截掉，起点就在文件之外则报错。不相邻的几段各写一条引用。读不到的引用用错误色画出原因，不阻塞这次 ask。
+- `evidence[]` 是两种之一，每条画成一张卡片，先显示前 10 行（ANSI 页面，`ctrl+o` 一次展开全部）或前 12 行（Tern，带 `preview` 的 `code` 节点，每张卡片由自己的 `N more lines` 展开）。两个界面都不限制条数和行数。
+  - `{kind: "file", path, start?, end?}` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path`、`start` 和行号的 `code` 节点，`packages/wire/src/tsp.ts:225-237`），而不是模型敲进去的代码。`start`、`end` 都不给显示文件前 40 行，只给 `start` 是一行，都给是一段闭区间。文件经 `readline` 逐行读取，读到行段最后一行就停，所以大文件里的几行和小文件一样便宜；超出文件末尾的部分被截掉，起点就在文件之外则报错。不相邻的几段各写一条。路径不存在或读不了时用错误色画出原因，不阻塞这次 ask；目录画成目录。
+  - `{kind: "text", source, text, lang?}` 是模型从别处引用的文字——命令输出、网页、日志。ask-more 无法核对，所以卡片标题是模型写的 `source`，后面跟着“模型引用，ask-more 未读取核对”，各行不带行号；Tern 里由 `lang` 决定高亮。
+  - 两种证据里的制表符都换成两个空格，并去掉行尾空白。ANSI 页面上比正文宽的行末尾显示 `… 还有 N 个字符`，而不是在边框处无声截断；Tern 一行最多画约 4000 个字符，后面是它自己的计数，长行可横向滚动。
 - `diagram` 是 Mermaid 源码：Tern 由 `md` 节点原生绘制，TUI 由 Markdown 渲染器画成 ASCII（`packages/tui/src/theme/mermaid-cache.ts:66,100`）。
 - `tradeoff` / `holds_when` / `cost` 各一行，画在聚焦选项下方。
-- `demo` 是两种之一。`{kind: "frames", frames[{body, caption?}], interval_ms?}` 是面板循环播放的 Markdown 帧（文字、` ```mermaid ` 图或代码块里的字符画），每帧补齐到最高一帧的高度，下面的内容不会跳动。`{kind: "file", path}` 指向动画（GIF、APNG、WebP）或视频（mp4、mov、webm、mkv、m4v），和证据一样按会话工作目录解析。问题的演示在决定区下方；选项的演示在它的取舍卡里，光标每次移到该选项都从头播放。`caption` 写看什么。
+- `demo` 是两种之一。`{kind: "frames", frames[{body, caption?}], interval_ms?}` 是面板循环播放的 Markdown 帧（文字、` ```mermaid ` 图或代码块里的字符画），每帧补齐到最高一帧的高度，下面的内容不会跳动。`{kind: "file", path}` 指向动画（GIF、APNG、WebP）或视频（mp4、mov、webm、mkv、m4v），和文件证据一样按会话工作目录解析。问题的演示在决定区下方；选项的演示在它的取舍卡里，光标每次移到该选项都从头播放。`caption` 写看什么。
 
 ## 校验
 
@@ -75,7 +78,8 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 | 至少两个选项 | 决定至少需要两个选项 |
 | 同一题内标签唯一且不是保留标签（`Other (type your own)`、`Chat about this`、`Next →`） | 逐项指明 |
 | `recommended` 是选项下标 | 指明非法值 |
-| 证据 ≤ 6 条；`end` 只能配 `start`、不能在它之前，且一段 ≤ 80 行 | 指明第几条、行号与跨度 |
+| 文件证据：`end` 只能配 `start`、不能在它之前 | 指明第几条与行号 |
+| 文字证据：`source` 是一行且非空，`text` 非空 | 指明第几条与字段 |
 | 2–12 帧且没有空帧；`interval_ms` 在 300 到 5000 之间 | 指明帧数、第几帧或间隔 |
 | 文件演示的 `path` 以 `.gif`、`.png`、`.apng`、`.webp`、`.mp4`、`.mov`、`.webm`、`.mkv` 或 `.m4v` 结尾 | 指明路径与可用扩展名 |
 
@@ -162,7 +166,7 @@ sequenceDiagram
 ```
 index.ts           插件入口：注册 ask、校验、挂载全屏 overlay、委托；给调用的 skill 加上规则
 src/schema.ts      原生字段 + brief/tradeoff、zod 参数、逐题校验
-src/brief.ts       按工作目录读取证据行段（path、start、end），限界读取
+src/brief.ts       证据：按工作目录读取文件行段、读到最后一行即停，文字证据切成行
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
 src/state.ts       每题状态（光标、答案、Other 输入框、折叠、滚动、演示播放）与当前标签
 src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（describe）、按键与事件、倒计时
@@ -175,6 +179,6 @@ src/i18n.ts        界面标签取自 OMOMP_LANG / LC_*；协议字段保持英�
 src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾的规则
 src/description.ts 面向模型的工具描述
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
-test/              校验、原生投影、演示加载、半块画面、超时策略与结果、skill 规则，以及经 pi-tui reconciler
-                   与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
+test/              校验、原生投影、证据行段与文字证据、ANSI 长行截断、演示加载、半块画面、超时策略与结果、
+                   skill 规则，以及经 pi-tui reconciler 与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
 ```

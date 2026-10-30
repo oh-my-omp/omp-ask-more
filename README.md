@@ -10,7 +10,7 @@ Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verif
 
 The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
 
-This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
+This plugin requires every question to carry where/what/how and every option its tradeoff, invites real file lines, quoted output, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
 
 ## Demo videos
 
@@ -59,7 +59,7 @@ One page per question:
 - the question, then **Where** (what exists now), **What** (what is being decided) and **How** (what follows from each answer), never folded;
 - the options, the recommended one marked, then `Other…` for your own answer;
 - under the focused option its **Tradeoff**, **Holds when** and **Cost**, and its demo if it has one;
-- the question's demo, the **Evidence** — real lines read from the files when the ask opens, so what you read is the code, not the model's copy of it; an unreadable reference shows its reason and does not block the ask — the Mermaid diagram and the risks;
+- the question's demo, the **Evidence**, the Mermaid diagram and the risks. Evidence is of two kinds: lines of a file, which ask-more reads itself when the ask opens, so what you read is the file, not the model's copy of it; and text the model quotes from elsewhere (a command's output, a page, a log), headed by the source the model names and marked as not read by ask-more. A file that cannot be read shows its reason and does not block the ask. Each entry shows its first 10 lines in a plain terminal and 12 in Tern, the rest behind `ctrl+o` or Tern's `N more lines`; a line wider than the plain-terminal page ends in `… N more characters`;
 - a countdown line when the ask times out ([Timeout and notifications](#timeout-and-notifications)).
 
 Several independent questions come as one batch: a tab row (`✓` on answered questions) and a last **Review** page listing every answer and how many are unanswered. A cursor resting on an option is not an answer; switching tabs loses nothing.
@@ -87,7 +87,7 @@ The plain-terminal page and videos need `ffmpeg`/`ffprobe` on `PATH`; a missing 
 | `o` / click `Other…` | open the Other field; `enter` saves a non-blank text as the answer, `esc` closes the field | — |
 | `tab` `→` / `shift+tab` `←` / tab click | next / previous question (batch only) | same |
 | `PgUp` `PgDn` `Home` `End` `Shift+↑↓` / wheel | scroll the page | same |
-| `ctrl+o` | unfold evidence lines in the plain-terminal page | — |
+| `ctrl+o` | unfold every evidence entry of the page in the plain terminal; in Tern each entry has its own `N more lines` | — |
 | `p` / `Pause`, `Play` | pause or play the page's demos | — |
 | `[` `]` / `Previous`, `Next` | step the page's demos back or forward one frame | — |
 | `esc` / `Cancel all` | cancel the whole call | same |
@@ -151,7 +151,7 @@ The parameters are the native ones, without `multi`, plus extension fields:
 |---|---|
 | tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
 
-The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The shapes are written for it: a demo is one of two kinds, `{kind: "frames", frames, interval_ms?}` or `{kind: "file", path}`, and an evidence entry names its lines as numbers, `start` and `end`, never as text. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
+The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The shapes are written for it: a demo is one of two kinds, `{kind: "frames", frames, interval_ms?}` or `{kind: "file", path}`, and so is an evidence entry, `{kind: "file", path, start?, end?}`, whose lines are numbers, never text, or `{kind: "text", source, text, lang?}`. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
 
 The tool description says what `ask` does and when to use it:
 
@@ -180,8 +180,9 @@ ask({
       what: "选择失败后的重试策略，决定是否引入幂等键。",
       how: "选 A 要加迁移；选 B 只改 retry() 内部，不动调用方。",
       evidence: [
-        { path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
-        { path: "src/order/paid.ts", start: 88, end: 96 }
+        { kind: "file", path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
+        { kind: "file", path: "src/order/paid.ts", start: 88, end: 96 },
+        { kind: "text", source: "server.log, 2026-10-30 14:02", text: "POST /orders 429\nPOST /orders 200\nPOST /orders 200", note: "同一笔订单写了两次" }
       ],
       diagram: "flowchart LR\n  client --> retry --> write",
       demo: {
@@ -215,7 +216,7 @@ ask({
 })
 ```
 
-Limits: 2–5 options per question; at most 6 evidence references per question, each one window of at most 80 lines (`start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate references); no `multi`. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
+Limits: 2–5 options per question; no `multi`. Evidence has no count or length limit: a file entry's window is read up to its `end` and no further, so a few lines of a large file cost no more than a small file; `start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate entries. A text entry's `source` is one line. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
 
 The result is the native one: `User answers:` and one line per question, in the order asked:
 
@@ -253,5 +254,7 @@ They read the native result shape, so they work the same with the native `ask`.
 - **In sessions without the TUI** the native `ask.timeout` and `ask.notify` apply and the `askMore.*` settings do nothing.
 - **A terminal notification shows only where the terminal turns OSC 99, OSC 9 or BEL into one**; the notify command needs a POSIX `sh`.
 - **Plain-terminal demos are coarse.** A file plays at 64 × 20 cells, two pixels per cell: motion reads, small text inside a recording does not, so the caption says what to watch. Each frame rewrites up to 20 rows of 24-bit color (about 16–17 KB for a busy picture), noticeable over a slow SSH link. The picture's width is fixed when the ask opens and does not follow a resize.
+- **Quoted text evidence is unchecked.** ask-more draws it as the model wrote it, under the source the model names; only file evidence is read by ask-more itself.
+- **Evidence has no size bound, and Tern gets all of it at once.** The sheet carries every cited line when it opens, folded or not: 211 KB for one 3,000-line entry and 1.24 MB for six, which a headless Tern 0.9.8 opened with no frame over 17 ms; a real window or a remote link was not measured. Tern shows about 4,000 characters of one line, then its own `… N more characters`; scrolling a long line sideways moves the line numbers out of view too.
 - **Without the Tern stylesheet plugin** the sheet shows the brief in the terminal face under Reader and Spine, and in Console the question's `?` marker sits on the sheet's left edge.
 - The model reads this plugin's tool description, not the native `ask` prompt; an extension that rewrites the ask prompt must target the final description.

@@ -57,10 +57,13 @@ omp's parameter check words a rejection as `<path> must be <the field's descript
 How the fields are drawn:
 
 - `brief.where/what/how` are drawn above the options and never collapsed.
-- `evidence[].path` with optional `start` and `end` is resolved against the session's working directory and read when the ask opens, so the page shows the real lines (in Tern a `code` node with `path` and `start`, `packages/wire/src/tsp.ts:222-236`) instead of model-typed code. Neither line shows the file's first 40 lines, `start` alone one line, both an inclusive window; a window past the end of the file is cut there, and one starting past it is an error. Lines that are not adjacent are separate references. An unreadable reference is drawn in an error tone with the reason and never blocks the ask.
+- `evidence[]` is one of two kinds, each drawn as a card whose first 10 rows (ANSI page, all unfolded together by `ctrl+o`) or 12 lines (Tern, a `code` node with `preview`, each card unfolded by its own `N more lines`) show before the rest. Neither surface caps how many entries or lines there are.
+  - `{kind: "file", path, start?, end?}` is resolved against the session's working directory and read when the ask opens, so the page shows the real lines (in Tern a `code` node with `path`, `start` and line numbers, `packages/wire/src/tsp.ts:225-237`) instead of model-typed code. With neither `start` nor `end` it shows the file's first 40 lines, with `start` alone one line, with both an inclusive window. The file is read line by line through `readline` and the read stops at the window's last line, so a few lines out of a large file cost what they would in a small one; a window past the end of the file is cut there, and one starting past it is an error. Lines that are not adjacent are separate entries. A path that is missing or unreadable is drawn in an error tone with the reason and never blocks the ask; a directory is drawn as one.
+  - `{kind: "text", source, text, lang?}` is text the model quotes from elsewhere — a command's output, a page, a log. ask-more cannot check it, so the card's head is the `source` the model names followed by "quoted by the model, not read by ask-more", the lines carry no numbers, and in Tern `lang` picks the highlighting.
+  - Tabs become two spaces and trailing whitespace is dropped in both kinds. On the ANSI page a line wider than the body ends in `… N more characters` instead of being cut at the box edge without a trace; Tern draws about 4,000 characters of a line, then its own count, and scrolls a long line sideways.
 - `diagram` is Mermaid source: the `md` node draws it natively in Tern, and the TUI Markdown renderer draws it as ASCII (`packages/tui/src/theme/mermaid-cache.ts:66,100`).
 - `tradeoff` / `holds_when` / `cost` are one line each and are drawn under the focused option.
-- `demo` is one of two kinds. `{kind: "frames", frames[{body, caption?}], interval_ms?}` are Markdown frames the sheet steps through in a loop (text, a ` ```mermaid ` diagram, a fenced text drawing), every frame padded to the tallest so nothing below moves. `{kind: "file", path}` names an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), resolved against the session's working directory like evidence. A question's demo sits under the decision; an option's demo sits in its tradeoff card and restarts whenever the cursor moves onto that option. `caption` says what to watch.
+- `demo` is one of two kinds. `{kind: "frames", frames[{body, caption?}], interval_ms?}` are Markdown frames the sheet steps through in a loop (text, a ` ```mermaid ` diagram, a fenced text drawing), every frame padded to the tallest so nothing below moves. `{kind: "file", path}` names an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), resolved against the session's working directory like file evidence. A question's demo sits under the decision; an option's demo sits in its tradeoff card and restarts whenever the cursor moves onto that option. `caption` says what to watch.
 
 ## Validation
 
@@ -75,7 +78,8 @@ Validation runs at the tool boundary, before any UI opens, checks every question
 | ≥ 2 options | a decision needs at least two options |
 | labels unique within a question and not reserved (`Other (type your own)`, `Chat about this`, `Next →`) | named per option |
 | `recommended` is an index into the options | names the bad value |
-| ≤ 6 evidence references; `end` only with `start`, not before it, and the window ≤ 80 lines | names the reference, the lines and the span |
+| file evidence: `end` only with `start`, not before it | names the entry and the lines |
+| text evidence: `source` one non-empty line, `text` non-empty | names the entry and the field |
 | 2–12 frames, none blank; `interval_ms` from 300 to 5000 | names the count, the frame or the interval |
 | a file demo's `path` ends in `.gif`, `.png`, `.apng`, `.webp`, `.mp4`, `.mov`, `.webm`, `.mkv` or `.m4v` | names the path and the accepted extensions |
 
@@ -162,7 +166,7 @@ sequenceDiagram
 ```
 index.ts           plugin entry: registers ask, validates, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
 src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question validation
-src/brief.ts       evidence windows (path, start, end) read against the working directory, bounded reads
+src/brief.ts       evidence: file windows read up to their last line against the working directory, quoted text as lines
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
 src/state.ts       per-question state (cursor, answer, Other field, folding, scroll, demo playback) and the active tab
 src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events, the countdown
@@ -175,7 +179,7 @@ src/i18n.ts        UI labels from OMOMP_LANG / LC_*; protocol fields stay Englis
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/description.ts the model-facing tool description
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
-test/              validation, native projection, demo loading, half-block rows, the timeout policy and result, the skill
-                   rule, and the Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown
-                   included (bun test)
+test/              validation, native projection, evidence windows and quoted text, the ANSI long-line cut, demo loading,
+                   half-block rows, the timeout policy and result, the skill rule, and the Tern sheet driven through
+                   pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
 ```
