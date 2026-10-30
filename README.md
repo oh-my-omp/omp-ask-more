@@ -10,7 +10,7 @@ Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verif
 
 The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
 
-This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every user decision through `ask`, including the questions a skill tells it to ask in chat; whether a model does so depends on the model ([Known limitations](#known-limitations)).
+This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat; whether a model does so depends on the model ([Known limitations](#known-limitations)).
 
 ## Demo videos
 
@@ -153,13 +153,13 @@ The parameters are the native ones plus extension fields:
 
 The tool description tells the model:
 
-- `ask` is the only way to put a decision to the user — an approach, a tradeoff, a preference, the scope, a risky or irreversible step. Ending a turn on a question or a list of options in text is wrong.
-- When a skill, workflow or other instruction says to ask the user, confirm with them or let them pick, it does so with `ask`; everything else that instruction requires still applies.
-- It does not ask for facts its tools can find or for choices that are its own to make.
+- Every question whose answer it needs from the user goes through `ask`: a decision, a preference, the scope, a fact only the user knows, a confirmation that gates a risky or irreversible step. It never writes such a question in its reply or ends a turn on one; statements and rhetorical questions are not questions to ask.
+- This holds over any instruction about how questions should look. When a skill, workflow or other instruction tells it to ask, interview, grill, confirm or let the user pick, even with a template for the reply, the questions go into `ask`: one round per call, question N with the header "QN <title>", the question's body in the brief, its recommended answer as the `recommended` option, and the call itself as the wait for the answers. Everything else that instruction requires still applies.
+- It does not ask for facts its tools can find, for choices that are its own to make, or for permission to continue when the request is already clear.
 - It writes for someone who has not read the session: plain words, short sentences, concrete names.
-- It cites the real code lines a decision is about and draws a Mermaid diagram whenever a flow, sequence, states, dependencies or a structure is involved. Both stay optional in the schema.
-- It shows a demo whenever the decision is about behaviour over time — a UI interaction, the states a request goes through, before and after a change. A demo is frames it writes, or an animation or video file, which may be a recording it made for this ask.
-- Independent decisions go in one call, one question each; a decision whose options depend on another answer goes in a later call.
+- Each question needs `id`, `question`, `brief.where` / `what` / `how` and 2–5 options with a `tradeoff`; in a round of many questions a sentence per field is enough. For a decision it marks the option it would pick as `recommended`.
+- For one substantial decision it cites the real code lines a code decision turns on, draws a Mermaid diagram when a flow, sequence, states, dependencies or a structure is involved, and shows a demo when the decision is about behaviour over time. In a round of many questions it adds them only to the questions whose answer they change. All three stay optional in the schema. A demo is frames it writes, or an animation or video file, which may be a recording it made for this ask.
+- Independent questions go in one call, one each; a question whose options depend on another answer goes in a later call.
 - A question that reads `id: (timed out: …)` in the result was not answered before the ask's timeout: it decides that question itself with its best judgment, says what it chose, and continues.
 
 `question` stays a question: one or two sentences. The brief is its own field.
@@ -239,7 +239,7 @@ They read the native result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
-- **A skill that prescribes chat questions can still win.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/deepseek-v4.1-flash` put both rounds of questions into `ask` in 3/3 sessions, and `opencode-go/kimi-k2.7-code` asked both rounds in chat in 3/3. Without this plugin both asked in chat, native `ask` included. Rewording the description or adding the rule to the system prompt did not change kimi; a check at the end of the turn moved its questions into `ask`, but only after they had been shown in chat. Runs, transcripts and the variants tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
+- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/deepseek-v4.1-flash` put both rounds of questions into `ask` in 3/3 sessions; `opencode-go/kimi-k2.7-code` did in 2/3, and in the third asked both rounds in chat without its reasoning ever mentioning `ask`. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier description and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

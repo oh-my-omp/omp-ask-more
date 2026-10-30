@@ -2,7 +2,8 @@
 # One recorded run: omp in the fixture project with the arm's tools, the stock 18.14.0 system
 # prompt, no rules, context files or ambient plugins, and its session written to $RUNS/<run-id>.
 # usage: run.sh <arm A|B|C|N|V1|V2|V3> <model> <run-id>
-#   A, N  this plugin (REPO/index.ts)      B  no ask tool      C  omp's native ask
+#   A, N  this plugin (REPO/index.ts); the R and RN runs are A and N with REPO at the current
+#         description, the A and N runs with REPO at commit e50dc7b      B  no ask tool      C  omp's native ask
 #   V1..V3  a copy of this plugin with variants/<n>-*.diff applied, at /tmp/askmore-v<n>
 set -eu
 arm=$1 model=$2 id=$3
