@@ -151,16 +151,16 @@ The parameters are the native ones plus extension fields:
 |---|---|
 | tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `multi?`, `recommended?` | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
 
-The tool description tells the model:
+The tool description says what `ask` does and when to use it:
 
-- Every question whose answer it needs from the user goes through `ask`: a decision, a preference, the scope, a fact only the user knows, a confirmation that gates a risky or irreversible step. It never writes such a question in its reply or ends a turn on one; statements and rhetorical questions are not questions to ask.
-- This holds over any instruction about how questions should look. When a skill, workflow or other instruction tells it to ask, interview, grill, confirm or let the user pick, even with a template for the reply, the questions go into `ask`: one round per call, question N with the header "QN <title>", the question's body in the brief, its recommended answer as the `recommended` option, and the call itself as the wait for the answers. Everything else that instruction requires still applies.
-- It does not ask for facts its tools can find, for choices that are its own to make, or for permission to continue when the request is already clear.
-- It writes for someone who has not read the session: plain words, short sentences, concrete names.
-- Each question needs `id`, `question`, `brief.where` / `what` / `how` and 2–5 options with a `tradeoff`; in a round of many questions a sentence per field is enough. For a decision it marks the option it would pick as `recommended`.
-- For one substantial decision it cites the real code lines a code decision turns on, draws a Mermaid diagram when a flow, sequence, states, dependencies or a structure is involved, and shows a demo when the decision is about behaviour over time. In a round of many questions it adds them only to the questions whose answer they change. All three stay optional in the schema. A demo is frames it writes, or an animation or video file, which may be a recording it made for this ask.
-- Independent questions go in one call, one each; a question whose options depend on another answer goes in a later call.
-- A question that reads `id: (timed out: …)` in the result was not answered before the ask's timeout: it decides that question itself with its best judgment, says what it chose, and continues.
+- `ask` opens a dialog that shows the questions with their briefs and waits; the answers come back as the tool result.
+- Every question whose answer the model needs from the user goes through `ask`, never into its reply: a decision, a preference, the scope, a fact only the user knows, a confirmation before a risky or irreversible step. It never ends a turn on a question in text.
+- This holds when a skill, workflow or other instruction tells it to ask, confirm or let the user pick, whatever that instruction says about how the questions look in the reply; the rest of the instruction still applies.
+- It does not ask for facts its tools can find or for choices that are its own to make.
+- It writes for someone who has not read the session; independent questions go in one call, a question whose options depend on another answer in a later call; a rejected call lists every problem, and the model fixes them and calls again.
+- How to read the result, and that a question reading `id: (timed out: …)` is the model's to decide, saying what it chose.
+
+What each field means is in the parameter schema. The limits below are not in the description: a call that breaks one is rejected with a message naming it, and a demo file the page cannot play shows an error row there instead.
 
 `question` stays a question: one or two sentences. The brief is its own field.
 
@@ -239,7 +239,7 @@ They read the native result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
-- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/deepseek-v4.1-flash` put both rounds of questions into `ask` in 3/3 sessions; `opencode-go/kimi-k2.7-code` did in 2/3, and in the third asked both rounds in chat without its reasoning ever mentioning `ask`. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier description and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
+- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling` and the current description, `opencode-go/deepseek-v4.1-flash` put its first round into `ask` and `opencode-go/kimi-k2.7-code` asked it in chat, its reasoning never considering the tool (one run each). Across the three descriptions tested, deepseek asked through `ask` in 7/7 runs and kimi in 2/7, both of those under a description since replaced because it restated that skill's template. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

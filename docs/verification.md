@@ -31,37 +31,40 @@ Not yet exercised at runtime: the native-delegation path itself (needs an enviro
 
 ## A skill that asks in chat
 
-Does a model follow a skill that prescribes its questions as chat text, or this plugin's description? Two descriptions were tested: the previous one, whose only rule for skills was one sentence ("When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask"), and the current one, rewritten after those runs (`variants/description-rewrite.diff`). Run on 2026-10-30 with omp 18.14.0 in a 130×40 PTY (the classic renderer's alternate-screen page), with `opencode-go/deepseek-v4.1-flash` and `opencode-go/kimi-k2.7-code`. Everything below is in [`skill-priority/`](skill-priority/).
+Does a model follow a skill that prescribes its questions as chat text, or this plugin's description? Three descriptions were tested in turn: the first, whose only rule for skills was one sentence ("When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask"); the second, rewritten after those runs around the skill's template (`variants/description-rewrite.diff`); and the current one, which replaced the second. Run on 2026-10-30 with omp 18.14.0 in a PTY (the classic renderer's alternate-screen page), with `opencode-go/deepseek-v4.1-flash` and `opencode-go/kimi-k2.7-code`. Everything below is in [`skill-priority/`](skill-priority/).
 
 - **Fixture** (`fixture/`): a `PLAN.md` for rate-limiting an orders API with seven open decisions, three source files, and `grilling-SKILL.md`, the `grilling` skill copied from mattpocock/skills `main`. It says "Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>" and "wait for the user's answers before the next round".
-- **Launch** (`run.sh`): `--no-extensions --skills=grilling --no-rules --no-context-files`, omp's own 18.14.0 system template and an empty append prompt, so no installed plugin, rule, `SYSTEM_TEMPLATE.md` or `APPEND_SYSTEM.md` takes part. Arms A and R load this plugin with `-e index.ts --tools=ask,read` (A with the previous description, R with the current one), as do the negative arms N and RN; B has no ask tool (`--tools=read`); C has omp's native ask.
-- **Prompt**: `/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp sends the skill as a user-attributed message headed `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`. N and RN instead send `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
-- **Answers**: every recommended option in an ask (`enter` on each tab, then Submit), or `Yes to all your recommendations.` in chat. A and R runs stopped once their second round was on screen; B and C after the first.
+- **Launch** (`run.sh`): `--no-extensions --skills=grilling --no-rules --no-context-files`, omp's own 18.14.0 system template and an empty append prompt, so no installed plugin, rule, `SYSTEM_TEMPLATE.md` or `APPEND_SYSTEM.md` takes part. Arms A, R and S load this plugin with `-e index.ts --tools=ask,read` (A with the first description, R with the second, S with the current one), as do the negative arms N, RN and SN; B has no ask tool (`--tools=read`); C has omp's native ask.
+- **Prompt**: `/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp sends the skill as a user-attributed message headed `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`. N, RN and SN instead send `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
+- **Answers**: every recommended option in an ask (`enter` on each tab, then Submit), or `Yes to all your recommendations.` in chat. A and R runs stopped once their second round was on screen; B, C and S after the first, S without answering.
 - **Scoring**: `score.jq` over the session files in `sessions/`; `runs/` holds each session rendered by `transcript.jq` (the injected skill's first line, the model's reasoning and replies, every ask call and result). A round passes when its questions reach the person in an ask-more call and none is asked in the reply.
 - **Plumbing**: `probe-A`, arm A's flags with a prompt asking for options, opened the ask-more page (the `Counter store` sheet with Where/What/How, the tradeoff card and a frames demo). `probe-V2` is in the variants below.
 
 | Run | Model | Arm | Rounds in order |
 |---|---|---|---|
-| ds-A1 | deepseek | A previous description | `ask(3)` → `ask(6)` rejected → `ask(6)` |
-| ds-A2 | deepseek | A previous description | `ask(6)` rejected → `ask(6)` → `ask(5)` |
-| ds-A3 | deepseek | A previous description | `ask(6)` rejected → `ask(6)` → `ask(8)` |
-| km-A1 | kimi | A previous description | `chat(4)` → `chat(2)` |
-| km-A2 | kimi | A previous description | `chat(4)` → `chat(2)` |
-| km-A3 | kimi | A previous description | `chat(4)` → `chat(2)` |
-| km-R1 | kimi | R current description | `ask(4)` → `ask(2)` |
-| km-R2 | kimi | R current description | `chat(4)` → `chat(2)` |
-| km-R3 | kimi | R current description | `ask(5)` → `ask(5)` |
-| ds-R1 | deepseek | R current description | `ask(3)` → `ask(6)` |
-| ds-R2 | deepseek | R current description | `ask(4)` → `ask(6)` rejected → `ask(6)` |
-| ds-R3 | deepseek | R current description | `ask(8)` → `ask(9)` rejected → `ask(9)` |
+| ds-A1 | deepseek | A first description | `ask(3)` → `ask(6)` rejected → `ask(6)` |
+| ds-A2 | deepseek | A first description | `ask(6)` rejected → `ask(6)` → `ask(5)` |
+| ds-A3 | deepseek | A first description | `ask(6)` rejected → `ask(6)` → `ask(8)` |
+| km-A1 | kimi | A first description | `chat(4)` → `chat(2)` |
+| km-A2 | kimi | A first description | `chat(4)` → `chat(2)` |
+| km-A3 | kimi | A first description | `chat(4)` → `chat(2)` |
+| km-R1 | kimi | R second description | `ask(4)` → `ask(2)` |
+| km-R2 | kimi | R second description | `chat(4)` → `chat(2)` |
+| km-R3 | kimi | R second description | `ask(5)` → `ask(5)` |
+| ds-R1 | deepseek | R second description | `ask(3)` → `ask(6)` |
+| ds-R2 | deepseek | R second description | `ask(4)` → `ask(6)` rejected → `ask(6)` |
+| ds-R3 | deepseek | R second description | `ask(8)` → `ask(9)` rejected → `ask(9)` |
+| ds-S1 | deepseek | S current description | `ask(5)` |
+| km-S1 | kimi | S current description | `chat(5)` |
 | ds-B1 | deepseek | B no ask | `chat(7)` |
 | km-B1 | kimi | B no ask | `chat(6)` |
 | ds-C1 | deepseek | C native ask | `chat(6)` |
 | km-C1 | kimi | C native ask | `chat(7)` |
-| ds-N1 | deepseek | N negative, previous | three bullets, no ask |
-| km-N1 | kimi | N negative, previous | three bullets, no ask |
-| ds-RN1 | deepseek | RN negative, current | three bullets, no ask |
-| km-RN1 | kimi | RN negative, current | three bullets, no ask |
+| ds-N1 | deepseek | N negative, first | three bullets, no ask |
+| km-N1 | kimi | N negative, first | three bullets, no ask |
+| ds-RN1 | deepseek | RN negative, second | three bullets, no ask |
+| km-RN1 | kimi | RN negative, second | three bullets, no ask |
+| ds-SN1 | deepseek | SN negative, current | three bullets, no ask |
 | km-V1a | kimi | V1 wording | `chat(7)` |
 | km-V1b | kimi | V1 wording | `chat(4)` |
 | km-V2a | kimi | V2 system line | `chat(3)` |
@@ -70,11 +73,11 @@ Does a model follow a skill that prescribes its questions as chat text, or this 
 | km-V3b | kimi | V3 stop guard | `chat(7)` → guard → `ask(7)` → `ask(8)` |
 | ds-V3a | deepseek | V3 stop guard | `ask(6)` → `ask(7)` |
 
-`ask(N)` is an ask call with N questions that opened and was answered. `rejected` is a call the plugin refused before anything opened (a missing `question`, evidence without `path`, `lines: "3,10,19-20"` or `"8,17"`), which the model resent through ask; the person never saw it. `chat(N)` is a reply that ended the turn on N `❓` questions.
+`ask(N)` is an ask call with N questions that opened (and, in A and R runs, was answered). `rejected` is a call the plugin refused before anything opened (a missing `question`, evidence without `path`, `lines: "3,10,19-20"` or `"8,17"`), which the model resent through ask; the person never saw it. `chat(N)` is a reply that ended the turn on N `❓` questions.
 
-Without this plugin both models asked in chat, native ask included. With the previous description, deepseek asked through ask in 3/3 runs and kimi in chat in 3/3. With the current one, deepseek asked through ask in 3/3 and kimi in 2/3; km-R2 asked both rounds in chat. Neither model called ask for the summary under either description.
+Without this plugin both models asked in chat, native ask included. With the first description, deepseek asked through ask in 3/3 runs and kimi in chat in 3/3. With the second, deepseek asked through ask in 3/3 and kimi in 2/3; km-R2 asked both rounds in chat. With the current one, in one run each, deepseek asked through ask and kimi in chat. No model called ask for the summary under any description.
 
-### Why the previous description lost, and what the current one changes
+### Why the first description lost, and what the later ones changed
 
 The models' reasoning in the A runs names four causes:
 
@@ -83,12 +86,17 @@ The models' reasoning in the A runs names four causes:
 3. **A call looked expensive.** It asked every option for `holds_when` and `cost`, and evidence, diagrams and demos "whenever". deepseek called a six-question call "enormous" and said it "must be perfect" (ds-V3a), and each deepseek A run had one call rejected before it opened.
 4. **Nothing said where the template goes.** kimi expected ask to drop the numbering and recommendation: "The ask function would give a different UI" (km-A3).
 
-The current description opens with what ask does, in the template's own terms ("Shows the user your questions — one, or a whole numbered round, each with your recommended answer — and waits until they answer"), and says this holds over any instruction about how questions should look. It maps a round to one call, question N to the header "QN <title>", the body to the brief, the recommended answer to `recommended`, and "wait for the answers" to the call. It lists as required only what the schema requires, and keeps evidence, diagrams and demos for a single substantial decision while adding them in a large round only to the questions whose answer they change.
+The second description opened with what ask does, in the template's own terms ("Shows the user your questions — one, or a whole numbered round, each with your recommended answer — and waits until they answer"), and said this held over any instruction about how questions should look. It mapped a round to one call, question N to the header "QN <title>", the body to the brief, the recommended answer to `recommended`, and "wait for the answers" to the call. It listed as required only what the schema requires, and kept evidence, diagrams and demos for a single substantial decision while adding them in a large round only to the questions whose answer they change. It was replaced because its opening and mapping restate this one skill's template instead of stating a rule for any instruction.
 
 - **deepseek**: in ds-R1 the reasoning settles the conflict in one step: "put questions in ask, with header "QN <title>", body in brief…". Two of three runs still had one call rejected before it opened (ds-R2 `"8,17"`, ds-R3 evidence without `path`), as all three had before; each was resent through ask.
 - **kimi**: the reasoning of km-R1 and km-R3 mentions ask 29 and 12 times, km-R1's quoting the opening ("Never write such a question in your reply … So I should use the ask tool"); their tabs are labelled `Q1 - Key` and `Q1 Key`. km-R2's never mentions ask: "The skill says "Format a round like so" with the exact format. I should use that." What remains is kimi not considering the tool at all, the same as in km-A1 and km-A2.
 
-### Changes tried on the previous description
+The current description says what the tool does (a dialog that shows the questions with their briefs and waits for the answers, which come back as the result) and when to use it: every question the user must answer, also when a skill or other instruction says how the questions look in the reply. It names no skill and no template. It leaves each field's meaning to the parameter schema and every limit to the rejection that names it.
+
+- **deepseek**: ds-S1 put a five-question first round into ask, with code evidence on its questions; its first call opened, with no rejection.
+- **kimi**: km-S1 asked a five-question round in chat. Every "ask" in its reasoning is the verb ("then ask the frontier questions"), never the tool; it drafts the round straight from the template ("the format example shows <question body …> and then ➡️ <your recommended answer>"), as in km-A1–A3 and km-R2.
+
+### Changes tried on the first description
 
 Each is a copy of this plugin with one change (`variants/*.diff`), launched by `run.sh` with the A arm's flags, on kimi. Round 1 only, except V3. None was adopted.
 

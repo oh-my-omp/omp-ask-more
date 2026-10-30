@@ -32,9 +32,9 @@ export const demoFrameSchema = z.object({
 });
 
 export const demoSchema = z.object({
-	frames: z.array(demoFrameSchema).optional().describe(`${MIN_DEMO_FRAMES}-${MAX_DEMO_FRAMES} frames played in a loop; give either frames or path`),
-	interval_ms: z.number().optional().describe(`frames only: time per frame, ${MIN_FRAME_MS}-${MAX_FRAME_MS} ms, default ${DEFAULT_FRAME_MS}`),
-	path: z.string().optional().describe("an animation (GIF, APNG, WebP) or video (mp4, mov, webm, mkv, m4v); relative to the working directory or absolute"),
+	frames: z.array(demoFrameSchema).optional().describe("frames played in a loop; give either frames or path"),
+	interval_ms: z.number().optional().describe("frames only: time per frame in ms"),
+	path: z.string().optional().describe("an animation or video file; relative to the working directory or absolute"),
 	caption: z.string().optional().describe("one line saying what to watch"),
 });
 
