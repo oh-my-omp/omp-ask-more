@@ -2,7 +2,7 @@
 
 [English](verification.md) | 简体中文
 
-对 omp-ask-more 跑过什么、每次看到了什么。均使用 Tern 0.9.6 与 `opencode-go/deepseek-v4.1-flash`。标 *18.14.0* 的行于 2026-10-30 在 Tern 样式改动之后用 omp 18.14.0 执行；其余行于 2026-10-29 用 omp 18.13.3 执行。这里用到的说法（ANSI 页面、面板、role、动作）与[设计](design.zh-CN.md)一致。
+对 omp-ask-more 跑过什么、每次看到了什么。下表使用 Tern 0.9.6 与 `opencode-go/deepseek-v4.1-flash`；[要求在对话中提问的 skill](#要求在对话中提问的-skill) 一节另写了自己的环境。标 *18.14.0* 的行于 2026-10-30 在 Tern 样式改动之后用 omp 18.14.0 执行；其余行于 2026-10-29 用 omp 18.13.3 执行。这里用到的说法（ANSI 页面、面板、role、动作）与[设计](design.zh-CN.md)一致。
 
 | 检查 | 命令 | 观察结果 |
 |---|---|---|
@@ -28,3 +28,53 @@
 | 通知命令失败 *18.14.0* | 在仓库里用 `bun -e` 调用 `sendNotice`，命令为 `exit 3` 与 `sleep 40` | `sendNotice` 2 ms 后返回；7 ms 时警告 `通知命令退出码 3`；30012 ms 时警告 `通知命令运行超过 30 秒，已终止` |
 
 尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境；超时功能不改变它）、协作 guest、带扩展参数的 `/tree` 重答、ANSI 页面打开时调整终端大小（每行按当前宽度截断，画面不会重画）、由已安装插件提供样式的 Tern 窗口中一次 ask 的截图（上面的截图用 `ctl css` 加载同一份 `tern/ask-more.css`，因为无头 Tern 只以 fixture 方式加载插件）、从 GitHub `tern plugin install`，以及 Tern 以外终端里的桌面通知（PTY 运行看到的是 OSC 字节，不是弹窗）。
+
+## 要求在对话中提问的 skill
+
+skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？说明第 5 行写着 “When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”（`src/description.ts:5`）。2026-10-30 用 omp 18.14.0 在 130×40 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
+
+- **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
+- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A 组和反例 N 组用 `-e index.ts --tools=ask,read` 加载本插件；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
+- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
+- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A 组在第二轮出现后停止，B、C 组在第一轮出现后停止。
+- **判定**：用 `score.jq` 读 `sessions/` 里的会话文件；`runs/` 是 `transcript.jq` 渲染的每个会话（注入的 skill 第一行、模型的推理与回复、每次 ask 调用及结果）。一轮的问题经 ask-more 调用交到人手里、且回复里没有提问，这一轮才算通过。
+- **管道**：`probe-A` 用 A 组参数和一个要选项的提示词，打开了 ask-more 页面（`Counter store` 面板，带现状/决定/后果、取舍卡片和分帧演示）。`probe-V2` 见下面的变体。
+
+| 运行 | 模型 | 组 | 各轮依次 |
+|---|---|---|---|
+| ds-A1 | deepseek | A ask-more | `ask(3)` → `ask(6)` rejected → `ask(6)` |
+| ds-A2 | deepseek | A ask-more | `ask(6)` rejected → `ask(6)` → `ask(5)` |
+| ds-A3 | deepseek | A ask-more | `ask(6)` rejected → `ask(6)` → `ask(8)` |
+| km-A1 | kimi | A ask-more | `chat(4)` → `chat(2)` |
+| km-A2 | kimi | A ask-more | `chat(4)` → `chat(2)` |
+| km-A3 | kimi | A ask-more | `chat(4)` → `chat(2)` |
+| ds-B1 | deepseek | B 无 ask | `chat(7)` |
+| km-B1 | kimi | B 无 ask | `chat(6)` |
+| ds-C1 | deepseek | C 原生 ask | `chat(6)` |
+| km-C1 | kimi | C 原生 ask | `chat(7)` |
+| ds-N1 | deepseek | N 反例 | 三条要点，没有 ask |
+| km-N1 | kimi | N 反例 | 三条要点，没有 ask |
+| km-V1a | kimi | V1 措辞 | `chat(7)` |
+| km-V1b | kimi | V1 措辞 | `chat(4)` |
+| km-V2a | kimi | V2 系统提示行 | `chat(3)` |
+| km-V2b | kimi | V2 系统提示行 | `chat(6)` |
+| km-V3a | kimi | V3 收尾检查 | `chat(4)` → 检查 → `ask(4)` → `ask(2)` |
+| km-V3b | kimi | V3 收尾检查 | `chat(7)` → 检查 → `ask(7)` → `ask(8)` |
+| ds-V3a | deepseek | V3 收尾检查 | `ask(6)` → `ask(7)` |
+
+`ask(N)` 是一次打开并已作答、含 N 个问题的 ask 调用。`rejected` 是插件在打开任何界面之前拒绝的调用（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"`），模型随后经 ask 重发；人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
+
+加载本插件时，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。不加载时两个模型都在对话里提问，有原生 ask 也一样；因此对 deepseek 而言，改变来自本插件的说明，对 kimi 则没有改变。两个模型做摘要时都没有调用 ask。
+
+- **deepseek**：三次 A 组运行的推理都点出了这个冲突，并引用第 5 行来裁决。ds-A1 先决定 “honor the skill's explicit round format in text”，动笔前又改了主意。
+- **kimi**：km-A1、km-A2 记录下的推理打算 “format exactly as specified”，从未提到 ask。km-A3 考虑过 ask，仍选文字：“The skill is explicit about the format … The ask tool is for general decisions.”
+
+### 在 kimi 上试过的变体
+
+每个变体是本插件改了一处的副本（`variants/*.diff`），由 `run.sh` 以 A 组参数启动。除 V3 外只看第一轮。措辞与系统提示行是试探性的，两次都没有变化就停了。
+
+- **V1 措辞**：第 5 行补充说，指令为回复规定的格式 “describes the questions, not where they go”，标题、推荐项和轮次都放进 ask 字段，并以这次调用结束本轮。kimi 2/2 次在对话里提问，记录下的推理同样没有提到 ask。
+- **V2 系统提示行**：同一条规则经 `before_agent_start` 追加到系统提示末尾。让 kimi 复述时，它从 “the Critical section near the end” 一字不差地背出了这一句（`probe-V2`），随后 2/2 次仍在对话里提问。
+- **V3 收尾检查**：一个 `session_stop` 处理器。本轮即将以带 `❓` 或 `Q<n>` 行、或最后一段以 `?` 结尾的回复结束时，请求续一轮：“Your reply ended on questions for the user written in text. Questions for the user go through the ask tool: call ask now with those questions (same order, your recommended answer as the recommended option) and do not repeat them in text.” kimi 把它理解为 “The user is correcting me”，在对话回复之后 19 秒和 51 秒把这一轮移进 ask，第二轮 2/2 次直接经 ask 提问。说明未改的 ds-V3a 里检查从未触发；它的推理两次选了 skill 的格式，最后才定为 ask，所以 deepseek 的 3/3 并没有余量。
+
+V3 是试过的改动里唯一让 kimi 改变的，而且只是事后纠正：第一轮已经以对话形式出现在屏幕上，人会看到两遍，每次纠正要多一轮模型调用。按标记判断会漏掉没有 `❓`、`Q<n>` 或结尾 `?` 的提问格式，回复以反问句结尾时又会误触发；这类回复没有试过。

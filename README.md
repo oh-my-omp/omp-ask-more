@@ -10,7 +10,7 @@ Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verif
 
 The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
 
-This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description routes every user decision through `ask`, so nothing needs deciding in chat.
+This plugin requires every question to carry where/what/how and every option its tradeoff, invites real code lines, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every user decision through `ask`, including the questions a skill tells it to ask in chat; whether a model does so depends on the model ([Known limitations](#known-limitations)).
 
 ## Demo videos
 
@@ -239,6 +239,7 @@ They read the native result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
+- **A skill that prescribes chat questions can still win.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/deepseek-v4.1-flash` put both rounds of questions into `ask` in 3/3 sessions, and `opencode-go/kimi-k2.7-code` asked both rounds in chat in 3/3. Without this plugin both asked in chat, native `ask` included. Rewording the description or adding the rule to the system prompt did not change kimi; a check at the end of the turn moved its questions into `ask`, but only after they had been shown in chat. Runs, transcripts and the variants tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

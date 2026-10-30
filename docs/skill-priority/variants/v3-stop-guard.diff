@@ -1,0 +1,25 @@
+--- index.ts	2026-10-30 13:28:25.242187379 +0900
++++ /tmp/askmore-v3/index.ts	2026-10-30 16:33:08.614411208 +0900
+@@ -123,4 +123,22 @@
+ 		loadMode: "essential",
+ 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
+ 	});
++	// A turn that ends on questions written in the reply gets one continuation that moves them into ask.
++	pi.on("session_stop", event => {
++		if (event.stop_hook_active) return undefined;
++		const last = event.last_assistant_message;
++		if (!last || last.role !== "assistant") return undefined;
++		const text = last.content
++			.flatMap(block => (block.type === "text" ? [block.text] : []))
++			.join("\n")
++			.trim();
++		const numbered = /❓|^\s*\**Q\d+\b/m.test(text);
++		const endsOnQuestion = /\?\s*$/.test(text.split(/\n\s*\n/).at(-1) ?? "");
++		if (!numbered && !endsOnQuestion) return undefined;
++		return {
++			continue: true,
++			additionalContext:
++				"Your reply ended on questions for the user written in text. Questions for the user go through the ask tool: call ask now with those questions (same order, your recommended answer as the recommended option) and do not repeat them in text.",
++		};
++	});
+ }

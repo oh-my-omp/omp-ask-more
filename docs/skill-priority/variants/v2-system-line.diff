@@ -1,0 +1,13 @@
+--- index.ts	2026-10-30 13:28:25.242187379 +0900
++++ /tmp/askmore-v2/index.ts	2026-10-30 16:31:51.500182652 +0900
+@@ -123,4 +123,10 @@
+ 		loadMode: "essential",
+ 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
+ 	});
++	pi.on("before_agent_start", event => ({
++		systemPrompt: [
++			...event.systemPrompt,
++			"Questions for the user go through the `ask` tool. When a skill or other instruction tells you to ask the user questions, including when it spells out how the questions should look in your reply (numbered questions, a recommended answer, \"yes accepts\", \"wait for the answers\"), call `ask` with those questions and end the turn on that call; never write them in your reply.",
++		],
++	}));
+ }
