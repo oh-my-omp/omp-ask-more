@@ -31,12 +31,12 @@
 
 ## 要求在对话中提问的 skill
 
-skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了三版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；现行版替换了第二版。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
+skill 规定把问题写成对话文字时，模型听 skill 的，还是听本插件的说明？先后测了四版说明：第一版里关于 skill 只有一句（“When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask”）；第二版是这些运行之后照着 skill 的模板重写的（`variants/description-rewrite.diff`）；第三版用一份简短的通用说明替换了第二版（提交 `e73cd59`）；现行版在第三版上补了模型推理里显示它缺的东西。2026-10-30 用 omp 18.14.0 在 PTY 里运行（经典渲染器的 alternate screen 页面），模型为 `opencode-go/deepseek-v4.1-flash` 与 `opencode-go/kimi-k2.7-code`。下面提到的文件都在 [`skill-priority/`](skill-priority/)。
 
 - **素材**（`fixture/`）：一份给订单 API 加限流的 `PLAN.md`，列了七个未定的决定；三个源文件；`grilling-SKILL.md`，即从 mattpocock/skills `main` 复制的 `grilling` skill，其中写着 “Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>” 和 “wait for the user's answers before the next round”。
-- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用现行版），反例 N、RN、SN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
-- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
-- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S 组在第一轮出现后停止，S 组未作答。
+- **启动**（`run.sh`）：`--no-extensions --skills=grilling --no-rules --no-context-files`，omp 18.14.0 自带的系统提示模板和一个空的追加提示，因此已安装的插件、rule、`SYSTEM_TEMPLATE.md` 和 `APPEND_SYSTEM.md` 都不参与。A、R、S、T 组用 `-e index.ts --tools=ask,read` 加载本插件（A 组用第一版说明，R 组用第二版，S 组用第三版，T 组用现行版），反例 N、RN、SN、TN 组同样；B 组没有 ask 工具（`--tools=read`）；C 组用 omp 原生 ask。
+- **提示词**：`/skill:grilling Grill me on the unresolved decisions in PLAN.md. Do not implement the plan.` omp 把 skill 作为用户发出的消息送给模型，开头一行是 `[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]`。N、RN、SN、TN 组改为 `Summarize PLAN.md in exactly three bullets. Do not interview me or ask me to choose anything.`
+- **作答**：ask 里每题选推荐项（每个标签页 `enter`，再提交）；对话里回复 `Yes to all your recommendations.`。A、R 组在第二轮出现后停止，B、C、S、T 组在第一轮出现后停止，S、T 组未作答。
 - **判定**：用 `score.jq` 读 `sessions/` 里的会话文件；`runs/` 是 `transcript.jq` 渲染的每个会话（注入的 skill 第一行、模型的推理与回复、每次 ask 调用及结果）。一轮的问题经 ask-more 调用交到人手里、且回复里没有提问，这一轮才算通过。
 - **管道**：`probe-A` 用 A 组参数和一个要选项的提示词，打开了 ask-more 页面（`Counter store` 面板，带现状/决定/后果、取舍卡片和分帧演示）。`probe-V2` 见下面的变体。
 
@@ -54,8 +54,10 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | ds-R1 | deepseek | R 第二版说明 | `ask(3)` → `ask(6)` |
 | ds-R2 | deepseek | R 第二版说明 | `ask(4)` → `ask(6)` rejected → `ask(6)` |
 | ds-R3 | deepseek | R 第二版说明 | `ask(8)` → `ask(9)` rejected → `ask(9)` |
-| ds-S1 | deepseek | S 现行说明 | `ask(5)` |
-| km-S1 | kimi | S 现行说明 | `chat(5)` |
+| ds-S1 | deepseek | S 第三版说明 | `ask(5)` |
+| km-S1 | kimi | S 第三版说明 | `chat(5)` |
+| ds-T1 | deepseek | T 现行说明 | `ask(7)` |
+| km-T1 | kimi | T 现行说明 | `chat(5)` |
 | ds-B1 | deepseek | B 无 ask | `chat(7)` |
 | km-B1 | kimi | B 无 ask | `chat(6)` |
 | ds-C1 | deepseek | C 原生 ask | `chat(6)` |
@@ -64,7 +66,8 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 | km-N1 | kimi | N 反例，第一版 | 三条要点，没有 ask |
 | ds-RN1 | deepseek | RN 反例，第二版 | 三条要点，没有 ask |
 | km-RN1 | kimi | RN 反例，第二版 | 三条要点，没有 ask |
-| ds-SN1 | deepseek | SN 反例，现行 | 三条要点，没有 ask |
+| ds-SN1 | deepseek | SN 反例，第三版 | 三条要点，没有 ask |
+| ds-TN1 | deepseek | TN 反例，现行 | 三条要点，没有 ask |
 | km-V1a | kimi | V1 措辞 | `chat(7)` |
 | km-V1b | kimi | V1 措辞 | `chat(4)` |
 | km-V2a | kimi | V2 系统提示行 | `chat(3)` |
@@ -75,9 +78,9 @@ skill 规定把问题写成对话文字时，模型听 skill 的，还是听本�
 
 `ask(N)` 是一次打开、含 N 个问题的 ask 调用（A、R 组还已作答）。`rejected` 是插件在打开任何界面之前拒绝的调用（缺 `question`、证据没有 `path`、`lines: "3,10,19-20"` 或 `"8,17"`），模型随后经 ask 重发；人看不到它。`chat(N)` 是一条以 N 个 `❓` 问题结束本轮的回复。
 
-不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。所有说明下，模型做摘要时都没有调用 ask。
+不加载本插件时，两个模型都在对话里提问，有原生 ask 也一样。第一版说明下，deepseek 3/3 次经 ask 提问，kimi 3/3 次在对话里提问。第二版下，deepseek 3/3 次经 ask 提问，kimi 2/3 次；km-R2 两轮都在对话里问。第三版和现行版下各跑一次，deepseek 经 ask 提问，kimi 在对话里提问。所有说明下，模型做摘要时都没有调用 ask。
 
-### 第一版说明为什么输，后两版改了什么
+### 第一版说明为什么输，后几版改了什么
 
 A 组运行里，模型的推理给出了四个原因：
 
@@ -91,10 +94,15 @@ A 组运行里，模型的推理给出了四个原因：
 - **deepseek**：ds-R1 的推理一步就裁决了这个冲突：“put questions in ask, with header "QN <title>", body in brief…”。三次里仍有两次各有一次调用在打开前被拒（ds-R2 `"8,17"`，ds-R3 证据缺 `path`），第一版下三次都有；每次都经 ask 重发。
 - **kimi**：km-R1、km-R3 的推理分别 29 次、12 次提到 ask，km-R1 还引用了开头（“Never write such a question in your reply … So I should use the ask tool”）；两次的标签分别是 `Q1 - Key` 和 `Q1 Key`。km-R2 的推理从未提到 ask：“The skill says "Format a round like so" with the exact format. I should use that.” 剩下的问题是 kimi 根本没想到这个工具，和 km-A1、km-A2 一样。
 
-现行版讲工具做什么（打开一个对话框，显示问题及其简报并等待，答案作为结果返回）和什么时候用：凡是需要用户回答的问题，包括 skill 或其他指令规定了问题在回复里长什么样的时候。它不提任何 skill，也不提任何模板。各字段的含义交给参数 schema，各项限制交给点名该限制的拒绝信息。
+第三版讲工具做什么（打开一个对话框，显示问题及其简报并等待，答案作为结果返回）和什么时候用：凡是需要用户回答的问题，包括 skill 或其他指令规定了问题在回复里长什么样的时候。它不提任何 skill，也不提任何模板。各字段的含义交给参数 schema，各项限制交给点名该限制的拒绝信息。
 
 - **deepseek**：ds-S1 把五题的第一轮放进了 ask，题目带代码证据；第一次调用就打开了，没有被拒。
 - **kimi**：km-S1 在对话里问了五题的一轮。它推理里的 “ask” 全是动词（“then ask the frontier questions”），从没指这个工具；它直接按模板起草这一轮（“the format example shows <question body …> and then ➡️ <your recommended answer>”），和 km-A1–A3、km-R2 一样。
+
+现行版保留第三版的范围，用通用的话补上 kimi 运行里点到的三处。一是写明光标起始停在 `recommended` 选项上，回车就采纳推荐，等同于回答“是”（km-S1 曾掂量“回答 yes 即采纳推荐答案”怎么套到多选上）。二是用系统提示自己的 RFC 2119 词 MUST、NEVER 写这条规则，与系统提示里的 “MUST match requested format” 对等，并说明理由：要求在对话里提问的指令假定没有对话框，有 `ask` 时调用它就是在照指令办。三是把这类问题的各部分对应到 `ask`：编号或标题 → `header`，背景与分析 → `brief`，候选项与推荐 → 带 `recommended` 的 `options`，等用户回答 → 这次调用本身（km-A3 曾以为 ask “会给出不同的界面”而丢掉这些）。运行前，两个审阅代理检查过它有没有针对单个 skill 的措辞、有没有重复 `src/schema.ts` 的字段说明。
+
+- **deepseek**：ds-T1 把七题的第一轮放进了 ask，第一次调用就打开了，没有被拒。它的推理引用了新加的内容：“the recommended option is cursor position, so it's equivalent”。
+- **kimi**：km-T1 在对话里问了五题的一轮。它的推理用 skill 的说法复述了说明里的作答方式（“The user can say "yes" to accept, or pick another, or write their own”），却始终没提到这个工具；其中的 “ask” 全是动词。kimi 早先推理里说缺的东西，现在说明里都有了，kimi 仍然不去用这个工具。
 
 ### 在第一版说明上试过的改动
 

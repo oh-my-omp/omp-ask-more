@@ -153,11 +153,11 @@ The parameters are the native ones plus extension fields:
 
 The tool description says what `ask` does and when to use it:
 
-- `ask` opens a dialog that shows the questions with their briefs and waits; the answers come back as the tool result.
-- Every question whose answer the model needs from the user goes through `ask`, never into its reply: a decision, a preference, the scope, a fact only the user knows, a confirmation before a risky or irreversible step. It never ends a turn on a question in text.
-- This holds when a skill, workflow or other instruction tells it to ask, confirm or let the user pick, whatever that instruction says about how the questions look in the reply; the rest of the instruction still applies.
+- `ask` opens a full-screen dialog, one tab per question with its brief and options, and blocks until the user answers. The cursor starts on the `recommended` option, so Enter accepts the recommendation, the same as answering "yes". The answers come back as the tool result and the model goes on in the same turn.
+- The model MUST put every question whose answer it needs from the user through `ask`: a decision, a preference, the scope, a fact only the user knows, a confirmation before a risky or irreversible step. It NEVER writes such questions in its reply or ends a turn on one.
+- This holds when a skill, workflow or other instruction tells it to ask, interview, confirm or let the user choose, including when the instruction says to ask in chat or prescribes how the questions look in the reply: such instructions assume there is no dialog, and with `ask` available, calling it is how the model follows them. The description maps the parts of such a question onto `ask` in general terms (number or title → `header`, background and analysis → `brief`, choices and the recommendation → `options` with `recommended`, waiting for the answers → the call itself); everything else the instruction requires still applies.
 - It does not ask for facts its tools can find or for choices that are its own to make.
-- It writes for someone who has not read the session; independent questions go in one call, a question whose options depend on another answer in a later call; a rejected call lists every problem, and the model fixes them and calls again.
+- It writes for someone who has not read the session; the independent questions of a round go in one call, or one per call when the instruction asks one at a time, and a question whose options depend on an answer goes in a later call; a rejected call lists every problem, and the model fixes them and calls again.
 - How to read the result, and that a question reading `id: (timed out: …)` is the model's to decide, saying what it chose.
 
 What each field means is in the parameter schema. The limits below are not in the description: a call that breaks one is rejected with a message naming it, and a demo file the page cannot play shows an error row there instead.
@@ -239,7 +239,7 @@ They read the native result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
-- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling` and the current description, `opencode-go/deepseek-v4.1-flash` put its first round into `ask` and `opencode-go/kimi-k2.7-code` asked it in chat, its reasoning never considering the tool (one run each). Across the three descriptions tested, deepseek asked through `ask` in 7/7 runs and kimi in 2/7, both of those under a description since replaced because it restated that skill's template. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
+- **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling` and the current description, `opencode-go/deepseek-v4.1-flash` put its first round into `ask` and `opencode-go/kimi-k2.7-code` asked it in chat, its reasoning never considering the tool (one run each). Across the four descriptions tested, deepseek asked through `ask` in 8/8 runs and kimi in 2/8, both of those under a description since replaced because it restated that skill's template. Without this plugin both asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

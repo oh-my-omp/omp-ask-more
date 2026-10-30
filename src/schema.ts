@@ -64,7 +64,7 @@ export const questionSchema = z.object({
 	header: z.string().optional().describe("short tab label"),
 	options: z.array(optionSchema).min(2).max(5),
 	multi: z.boolean().optional().describe("not supported: one answer per question"),
-	recommended: z.number().optional().describe("0-based index of the option you would pick"),
+	recommended: z.number().optional().describe("0-based index of the option you would pick; the cursor starts there, so Enter accepts it"),
 	brief: briefSchema,
 });
 
