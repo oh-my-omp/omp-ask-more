@@ -300,9 +300,10 @@ function tabs(states: readonly QuestionState[], active: ActiveTab): NativeNode |
 	return node("row", { role: "omp.ask.head", align: "center" }, [strip], "head");
 }
 
-/** Cancel and the page's primary act: Submit for one question, Next in a batch, Submit on the review. */
-function actions(primary: { readonly label: string; readonly act: SheetAct }): NativeNode {
+/** Cancel and the page's primary act: Submit for one question, Next in a batch, Submit on the review; the countdown line on the left. */
+function actions(primary: { readonly label: string; readonly act: SheetAct }, status: string | undefined): NativeNode {
 	return actionBar([
+		...(status === undefined ? [] : [node("text", { spans: [span(status, "muted")], wrap: "word" }, undefined, "countdown")]),
 		null,
 		actionButton(tr("Cancel all", "全部取消"), encodeAct({ kind: "cancel" }), { keys: "escape" }),
 		actionButton(primary.label, encodeAct(primary.act), { keys: "enter", tone: "accent" }),
@@ -316,7 +317,7 @@ function primaryAct(states: readonly QuestionState[], state: QuestionState, page
 	return { label, act: onOther(state) ? { kind: "openOther", page } : { kind: "answer", page, option: state.cursor } };
 }
 
-function questionPage(states: readonly QuestionState[], index: number): NativeChild[] {
+function questionPage(states: readonly QuestionState[], index: number, status: string | undefined): NativeChild[] {
 	const state = states[index];
 	if (state === undefined) return [];
 	const demos = pageDemos(state);
@@ -328,14 +329,14 @@ function questionPage(states: readonly QuestionState[], index: number): NativeCh
 	// Tern scrolls a list's selection into view against the body's bottom edge, where a sticky last
 	// `omp.actions` row would cover it; so the bar sits in the decision column (not last) and reveals
 	// itself when a page opens, which pulls the whole decision into view after a long brief.
-	decision.push({ ...actions(primaryAct(states, state, index)), reveal: "nearest" });
+	decision.push({ ...actions(primaryAct(states, state, index), status), reveal: "nearest" });
 	const questionDemo = demos.find(demo => demo.slot === "question");
 	const demo = questionDemo === undefined ? [] : [block("demo", tr("Demo", "演示"), [demoNode(questionDemo, index)])];
 	return [...lead(state.question), node("col", { gap: "md" }, decision, `decision${index}`), ...demo, ...appendix(state)];
 }
 
 /** The review: the native ask's notice of unanswered questions, then each question's answer. */
-function reviewPage(states: readonly QuestionState[]): NativeChild[] {
+function reviewPage(states: readonly QuestionState[], status: string | undefined): NativeChild[] {
 	const unanswered = states.filter(state => state.answer.kind === "unanswered").length;
 	// Label then answer per row, not the native `kv` (`omp.ask.answers`): Reader gives that grid a
 	// fixed key column, and a long CJK chip runs into its answer.
@@ -355,14 +356,14 @@ function reviewPage(states: readonly QuestionState[]): NativeChild[] {
 	return [
 		node("text", { role: "omp.ask.notice", spans: notice, wrap: "word" }, undefined, "notice"),
 		node("col", { gap: "sm" }, rows, "answers"),
-		{ ...actions({ label: tr("Submit", "提交"), act: { kind: "submit" } }), reveal: "nearest" },
+		{ ...actions({ label: tr("Submit", "提交"), act: { kind: "submit" } }, status), reveal: "nearest" },
 	];
 }
 
-/** The sheet content for the active page. */
-export function describeSheet(states: readonly QuestionState[], active: ActiveTab, scroll: NativeScrollRequest | undefined): NativeNode {
+/** The sheet content for the active page; `status` is the countdown line, if the ask has one. */
+export function describeSheet(states: readonly QuestionState[], active: ActiveTab, scroll: NativeScrollRequest | undefined, status: string | undefined): NativeNode {
 	const head = tabs(states, active);
-	const page = active.kind === "review" ? reviewPage(states) : questionPage(states, active.index);
+	const page = active.kind === "review" ? reviewPage(states, status) : questionPage(states, active.index, status);
 	const root = col([...(head === undefined ? [] : [head]), ...page], { gap: "md" });
 	return scroll === undefined ? root : { ...root, scroll };
 }

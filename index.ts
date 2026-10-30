@@ -12,8 +12,12 @@ import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
 import { loadQuestionDemos } from "./src/demo.ts";
 import { DESCRIPTION } from "./src/description.ts";
-import { answerResult, cancelledResult, rejectedResult } from "./src/result.ts";
+import { sheetTitle } from "./src/nodes.ts";
+import { sendNotice } from "./src/notify.ts";
+import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
+import { readTimeoutSettings } from "./src/settings.ts";
+import { type TimeoutPolicy, timeoutPolicy } from "./src/timeout.ts";
 
 /** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
 let asking = false;
@@ -41,6 +45,19 @@ async function delegate(
  */
 const SHEET: OverlayOptions = { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0, anchor: "top-left" };
 
+/** Notify through the policy's channels; a failing channel is a warning and never touches the ask. */
+function notifier(ctx: ExtensionContext, policy: TimeoutPolicy, questions: readonly AskQuestion[]): (due: Date | undefined) => void {
+	const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
+	return due => {
+		if (policy.kind !== "notify") return;
+		try {
+			sendNotice(policy.channels, { title: sheetTitle(questions), questions: questions.length, cwd: ctx.cwd, due }, warn);
+		} catch (error) {
+			warn(error instanceof Error ? error.message : String(error));
+		}
+	};
+}
+
 async function ask(
 	ctx: ExtensionContext,
 	ui: ExtensionUIContext,
@@ -57,20 +74,32 @@ async function ask(
 
 	asking = true;
 	try {
+		// The settings as they are now; a config change applies from the next ask.
+		const { policy, problems } = timeoutPolicy(readTimeoutSettings(ctx));
+		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${problem}`, "warning");
 		const [evidence, demos] = await Promise.all([
 			Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd))),
 			// Tern plays image bytes itself; the ANSI page draws decoded frames as wide as the page.
 			loadQuestionDemos(questions, ctx.cwd, isNativeRendering() ? "native" : "ansi", (process.stdout.columns ?? 80) - 8, signal),
 		]);
+		const notify = notifier(ctx, policy, questions);
 		const submission = await ui.custom<Submission | undefined>(
-			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, demos, finish: done }),
+			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, demos, finish: done, timeout: policy, notify }),
 			{ overlay: true, overlayOptions: SHEET, ...(signal === undefined ? {} : { signal }) },
 		);
-		if (submission === undefined || submission.kind === "cancel") {
+		if (submission === undefined) {
 			ctx.abort();
 			return cancelledResult(questions);
 		}
-		return answerResult(questions, submission.answers);
+		switch (submission.kind) {
+			case "cancel":
+				ctx.abort();
+				return cancelledResult(questions);
+			case "submit":
+				return answerResult(questions, submission.answers);
+			case "timeout":
+				return timedOutResult(questions, submission.answers);
+		}
 	} catch (error) {
 		if (signal?.aborted) {
 			ctx.abort();

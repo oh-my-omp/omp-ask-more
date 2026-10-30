@@ -29,4 +29,4 @@ Rules:
 - Each question has 2–5 options and a unique \`id\`; no \`multi\`.
 - Reserved labels are rejected: "Other (type your own)", "Chat about this", "Next →". The user can always type their own answer.
 - A call missing a brief or any option's tradeoff is rejected with every problem listed; fix them and call again. Never replace it with a thinner question or a question in text.
-- Reading the result: \`id: label\` is a choice, \`id: "text"\` is the user's own answer, \`id: (cancelled)\` means that question was left unanswered.`;
+- Reading the result: \`id: label\` is a choice, \`id: "text"\` is the user's own answer, \`id: (cancelled)\` means that question was left unanswered. \`id: (timed out: …)\` means the user did not answer before the ask's timeout: decide that question yourself with your best judgment, say what you chose, and continue; the other lines still hold the user's answers.`;

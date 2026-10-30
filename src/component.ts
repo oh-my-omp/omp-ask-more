@@ -43,8 +43,13 @@ import {
 import { type Answer, UNANSWERED } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
 import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState, type ReviewState, startPlayback } from "./state.ts";
+import { countdownStatus, type Phase, type TimeoutPolicy } from "./timeout.ts";
 
-export type Submission = { readonly kind: "submit"; readonly answers: readonly Answer[] } | { readonly kind: "cancel" };
+/** How the sheet closed: the user's answers, a cancel, or the countdown handing the answers given so far to the model. */
+export type Submission =
+	| { readonly kind: "submit"; readonly answers: readonly Answer[] }
+	| { readonly kind: "cancel" }
+	| { readonly kind: "timeout"; readonly answers: readonly Answer[] };
 
 /** What the component needs from the TUI: its render clock and the terminal height. */
 export interface SheetHost {
@@ -61,6 +66,31 @@ export interface AskMoreOptions {
 	/** Loaded demos, one entry per question. */
 	readonly demos: readonly QuestionDemos[];
 	readonly finish: (submission: Submission) => void;
+	/** What happens while nobody answers; the clock runs from construction until the sheet closes. */
+	readonly timeout: TimeoutPolicy;
+	/** Called once when a notifying countdown runs out; `due` is when the model takes over, if it does. */
+	readonly notify: (due: Date | undefined) => void;
+}
+
+/** The countdown of an open sheet; every timer it holds is cancelled when the phase changes or the sheet closes. */
+type Countdown =
+	| { readonly kind: "stopped" }
+	| { readonly kind: "idle"; readonly timer: RenderTimer }
+	| { readonly kind: "notified"; readonly at: Date; readonly due: Date | undefined; readonly timer: RenderTimer | undefined };
+
+/** The Other field; in Tern the terminal edits it directly, which counts as the user being there. */
+class OtherInput extends Input {
+	readonly #onActivity: () => void;
+
+	constructor(onActivity: () => void) {
+		super();
+		this.#onActivity = onActivity;
+	}
+
+	override handleNativeEvent(event: NativeUiEvent): void {
+		this.#onActivity();
+		super.handleNativeEvent(event);
+	}
 }
 
 /** Evidence rows drawn per reference in the ANSI page before ctrl+o opens them. */
@@ -107,16 +137,21 @@ export class AskMoreComponent implements Component {
 	/** Rendered frames of each frames demo per width, padded to its tallest frame. */
 	readonly #frameLines = new WeakMap<LoadedDemo, { width: number; frames: readonly (readonly string[])[] }>();
 	#closed = false;
+	readonly #policy: TimeoutPolicy;
+	readonly #notify: (due: Date | undefined) => void;
+	#countdown: Countdown = { kind: "stopped" };
 
 	constructor(options: AskMoreOptions) {
 		this.#tui = options.tui;
 		this.#finish = options.finish;
+		this.#policy = options.timeout;
+		this.#notify = options.notify;
 		this.#title = sheetTitle(options.questions);
 		// Outside `omp.overlay.*`: Tern's overlay list rule there outranks the ask list styling the
 		// options use (`omp.ask.options`), and draws each option's mark over its label.
 		this.nativeOverlay = { role: "omp.askMore", size: "full", anchor: "center", head: this.#title };
 		this.#states = options.questions.map((question, index) => {
-			const input = new Input();
+			const input = new OtherInput(() => this.#activity());
 			input.placeholder = tr("Type your own answer", "自己写一个答案");
 			const state: QuestionState = {
 				question,
@@ -139,12 +174,14 @@ export class AskMoreComponent implements Component {
 			return state;
 		});
 		this.#arm();
+		this.#restartIdle();
 	}
 
 	dispose(): void {
 		this.#closed = true;
 		this.#timer?.cancel();
 		this.#timer = undefined;
+		this.#stopCountdown();
 		for (const state of this.#states) state.view.dispose?.();
 		this.#review.view.dispose?.();
 	}
@@ -155,8 +192,10 @@ export class AskMoreComponent implements Component {
 		const inner = Math.max(24, width - 4);
 		const bodyWidth = Math.max(1, inner - 1);
 		const tabRow = this.#tabRow(inner);
+		const status = this.#status();
+		const statusRow = status === undefined ? undefined : theme.fg("muted", truncateToWidth(status, inner));
 		const hint = theme.fg("muted", this.#hints());
-		const bodyHeight = Math.max(1, this.#tui.terminal.rows - 3 - (tabRow === undefined ? 0 : 1));
+		const bodyHeight = Math.max(1, this.#tui.terminal.rows - 3 - (tabRow === undefined ? 0 : 1) - (statusRow === undefined ? 0 : 1));
 
 		const view = this.#activeView();
 		const key = `${this.#version}|${bodyWidth}|${this.#active.kind === "review" ? "review" : this.#active.index}`;
@@ -182,6 +221,7 @@ export class AskMoreComponent implements Component {
 		const lines = [top];
 		if (tabRow !== undefined) lines.push(side(tabRow));
 		for (const row of view.render(inner)) lines.push(side(row));
+		if (statusRow !== undefined) lines.push(side(statusRow));
 		lines.push(side(hint));
 		lines.push(theme.fg("border", `╰${"─".repeat(inner + 2)}╯`));
 		return lines;
@@ -409,7 +449,7 @@ export class AskMoreComponent implements Component {
 		const scroll = this.#activeNativeScroll();
 		const memo = this.#native;
 		if (memo !== undefined && memo.version === this.#version && memo.frames === this.#frames && memo.scroll === scroll) return memo.node;
-		const node = describeSheet(this.#states, this.#active, scroll);
+		const node = describeSheet(this.#states, this.#active, scroll, this.#status());
 		this.#native = { version: this.#version, frames: this.#frames, scroll, node };
 		return node;
 	}
@@ -417,6 +457,7 @@ export class AskMoreComponent implements Component {
 	/** Pointer routes: a tab switches pages, a row click moves the cursor, a double click answers, the bar presses Enter or cancels. */
 	handleNativeEvent(event: NativeUiEvent): void {
 		if (this.#closed) return;
+		this.#activity();
 		const key = leafKey(event.key);
 		switch (event.type) {
 			case "select":
@@ -463,6 +504,7 @@ export class AskMoreComponent implements Component {
 
 	handleInput(data: string): void {
 		if (this.#closed) return;
+		this.#activity();
 		if (
 			routeSgrMouseInput(data, mouse => {
 				if (mouse.wheel === null) return false;
@@ -688,6 +730,7 @@ export class AskMoreComponent implements Component {
 		this.#closed = true;
 		this.#timer?.cancel();
 		this.#timer = undefined;
+		this.#stopCountdown();
 		this.#finish(submission);
 	}
 
@@ -695,6 +738,73 @@ export class AskMoreComponent implements Component {
 		mutate();
 		this.#version++;
 		this.#arm();
+	}
+
+	// ── Countdown ─────────────────────────────────────────────────────────
+
+	#status(): string | undefined {
+		const countdown = this.#countdown;
+		const phase: Phase = countdown.kind === "notified" ? { kind: "notified", at: countdown.at, due: countdown.due } : { kind: "idle" };
+		return countdownStatus(this.#policy, phase);
+	}
+
+	#stopCountdown(): void {
+		const countdown = this.#countdown;
+		switch (countdown.kind) {
+			case "stopped":
+				break;
+			case "idle":
+				countdown.timer.cancel();
+				break;
+			case "notified":
+				countdown.timer?.cancel();
+				break;
+		}
+		this.#countdown = { kind: "stopped" };
+	}
+
+	/** Start the first countdown over: on opening, and whenever the user does anything. */
+	#restartIdle(): void {
+		this.#stopCountdown();
+		if (this.#closed || this.#policy.kind === "off") return;
+		this.#countdown = { kind: "idle", timer: this.#tui.scheduleAfter(this.#policy.idleMs, () => this.#idleEnded()) };
+	}
+
+	/** Input of any kind: the user is here, so the countdown starts over (and a notified sheet says so). */
+	#activity(): void {
+		if (this.#closed || this.#policy.kind === "off") return;
+		const wasNotified = this.#countdown.kind === "notified";
+		this.#restartIdle();
+		if (wasNotified) this.#change(() => {});
+	}
+
+	#idleEnded(): void {
+		if (this.#closed) return;
+		const policy = this.#policy;
+		switch (policy.kind) {
+			case "off":
+				return;
+			case "decide":
+				this.#expire();
+				return;
+			case "notify": {
+				const at = new Date();
+				const then = policy.then;
+				const due = then.kind === "decide" ? new Date(at.getTime() + then.returnMs) : undefined;
+				const timer = then.kind === "decide" ? this.#tui.scheduleAfter(then.returnMs, () => this.#expire()) : undefined;
+				this.#change(() => {
+					this.#countdown = { kind: "notified", at, due, timer };
+				});
+				this.#notify(due);
+				return;
+			}
+		}
+	}
+
+	/** The last countdown ran out: the answers given so far go back with the rest left to the model. */
+	#expire(): void {
+		if (this.#closed) return;
+		this.#submit({ kind: "timeout", answers: this.#states.map(state => state.answer) });
 	}
 
 	// ── Demo playback ─────────────────────────────────────────────────────

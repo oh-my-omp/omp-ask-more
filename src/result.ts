@@ -29,19 +29,33 @@ function questionResult(question: AskQuestion, answer: Answer): QuestionResult {
 	}
 }
 
-function answerText(result: QuestionResult): string {
+/** What the model reads for a question left without an answer when the whole ask was submitted or cancelled. */
+const CANCELLED = "(cancelled)";
+/** What the model reads for a question left without an answer when the ask timed out. */
+const TIMED_OUT = "(timed out: the user did not answer; decide it yourself with your best judgment)";
+
+function answerText(result: QuestionResult, unanswered: string): string {
 	if (result.customInput !== undefined) return `${result.id}: "${result.customInput}"`;
 	const picked = result.selectedOptions[0];
-	return `${result.id}: ${picked ?? "(cancelled)"}`;
+	return `${result.id}: ${picked ?? unanswered}`;
+}
+
+function batchResult(questions: readonly AskQuestion[], answers: readonly Answer[], unanswered: string): AgentToolResult<AskToolDetails> {
+	const results = questions.map((question, index) => questionResult(question, answers[index] ?? UNANSWERED));
+	return {
+		content: [{ type: "text", text: `User answers:\n${results.map(result => answerText(result, unanswered)).join("\n")}` }],
+		details: { results },
+	};
 }
 
 /** The submitted batch: every question in input order, unanswered ones included. */
 export function answerResult(questions: readonly AskQuestion[], answers: readonly Answer[]): AgentToolResult<AskToolDetails> {
-	const results = questions.map((question, index) => questionResult(question, answers[index] ?? UNANSWERED));
-	return {
-		content: [{ type: "text", text: `User answers:\n${results.map(answerText).join("\n")}` }],
-		details: { results },
-	};
+	return batchResult(questions, answers, CANCELLED);
+}
+
+/** The ask timed out: the answers given so far stand, and the model decides the rest. */
+export function timedOutResult(questions: readonly AskQuestion[], answers: readonly Answer[]): AgentToolResult<AskToolDetails> {
+	return batchResult(questions, answers, TIMED_OUT);
 }
 
 /** The whole ask was cancelled: no question carries an answer. */
