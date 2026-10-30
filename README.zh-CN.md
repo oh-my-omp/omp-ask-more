@@ -29,7 +29,7 @@ omp plugin install https://github.com/oh-my-omp/omp-ask-more
 tern plugin install github.com/oh-my-omp/omp-ask-more/tern
 ```
 
-开发时用 `tern plugin link /path/to/omp-ask-more/tern`。它让 ask 面板用上 omp 其他 overlay 的无衬线字体，并在 Console 聊天风格下留出问题前 `?` 标记所在的左侧空白。不装它面板照常可用，简报以终端字体显示（见 [Tern](#表面)）。
+开发时用 `tern plugin link /path/to/omp-ask-more/tern`。两者都会让 Tern 重新加载插件，无需重启。它让 ask 面板用上 omp 其他 overlay 的无衬线字体，并在 Console 聊天风格下留出问题前 `?` 标记所在的左侧空白。不装它面板照常可用，简报以终端字体显示（见 [Tern](#表面)）。
 
 ## 参数
 
@@ -255,6 +255,6 @@ test/              校验、原生投影、演示加载、半块画面，以及�
 | Tern CJK 汇总 *18.14.0* | 同上，三道中文题，其一标签 15 个字，Other 以中文作答；每种聊天风格下 1280 与 640 px 窗格 | 各风格、各宽度下汇总行都是“标签 答案”且不重叠；先试过的原生 `kv`（`omp.ask.answers`）在 Reader 1280 px 下把长标签画到了答案上 |
 | Tern 按钮动作 *18.14.0* | 同上，带 `PI_TUI_TSP_RECORD` 记录；点击选项演示的 `Pause` 与 `Next` | Tern 发出 `demo:0:option:0:toggle`（按钮变成 `Play`）与 `answer:0:0`（`✓ Storage`，打开 Format） |
 | Tern 端到端 *18.14.0* | Console 风格的无头 Tern 中运行 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，提示词要求一次问两个独立问题；只用键盘 | 模型的 ask 以 `2 decisions` 面板打开，标记为 `( )`，光标 `›` 在其推荐行；`enter`、`↓`、`enter` 到达汇总（`✓ 重试上限`、`✓ 日志级别`、`All answered · Submit sends them`）；`enter` 返回 `retry: 固定 3 次`、`log_level: info`，模型据此复述 |
-| Tern 插件 *18.14.0* | `tern plugin link …/tern` 后 `tern plugin list --json`，两者都以临时目录作 `TERN_CONFIG_DIR` | `omp-ask-more` 0.1.0，`window: true`，状态 `ready`，无问题 |
+| Tern 插件 *18.14.0* | `tern plugin link …/tern` 后 `tern plugin list --json`，先以临时目录作 `TERN_CONFIG_DIR`，再在运行中的 Tern 里；在该 Tern 窗口执行 `tern ctl css` | `omp-ask-more` 0.1.0，`window: true`，状态 `ready`，无问题，原有插件不受影响；未重启，窗口的样式表中即出现 `plugin:local:omp-ask-more:styles`，3 条规则 |
 
-尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、带扩展参数的 `/tree` 重答、ANSI 页面打开时调整终端大小（每行按当前宽度截断，画面不会重画）、已安装的插件在 Tern 窗口中加载样式表（无头 Tern 只以 fixture 方式加载插件，所以上面的截图用 `ctl css` 加载 `tern/ask-more.css`），以及从 GitHub `tern plugin install`。
+尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、带扩展参数的 `/tree` 重答、ANSI 页面打开时调整终端大小（每行按当前宽度截断，画面不会重画）、由已安装插件提供样式的 Tern 窗口中一次 ask 的截图（上面的截图用 `ctl css` 加载同一份 `tern/ask-more.css`，因为无头 Tern 只以 fixture 方式加载插件），以及从 GitHub `tern plugin install`。
