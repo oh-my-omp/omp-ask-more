@@ -1,0 +1,1 @@
+-- Ask More is styles only: the manifest needs one entry, and Tern installs `styles` before it runs.

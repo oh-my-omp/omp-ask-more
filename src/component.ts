@@ -29,16 +29,14 @@ import { frameCount, frameInterval, halfBlockRows, type LoadedDemo, type Questio
 import { tr } from "./i18n.ts";
 import {
 	answerLabel,
-	CANCEL_ACT,
+	type DemoMove,
 	describeSheet,
-	ENTER_ACT,
 	OTHER_ITEM,
 	optionIndex,
-	type DemoMove,
-	parseDemoAct,
+	parseAct,
 	questionListKey,
 	REVIEW_TAB,
-	SUBMIT_ACT,
+	type SheetAct,
 	sheetTitle,
 	TABS_KEY,
 	tabLabel,
@@ -108,7 +106,9 @@ export class AskMoreComponent implements Component {
 		this.#tui = options.tui;
 		this.#finish = options.finish;
 		this.#title = sheetTitle(options.questions);
-		this.nativeOverlay = { role: "omp.overlay.askMore", size: "full", anchor: "center", head: this.#title };
+		// Outside `omp.overlay.*`: Tern's overlay list rule there outranks the ask list styling the
+		// options use (`omp.ask.options`), and draws each option's mark over its label.
+		this.nativeOverlay = { role: "omp.askMore", size: "full", anchor: "center", head: this.#title };
 		this.#states = options.questions.map((question, index) => {
 			const input = new Input();
 			input.placeholder = tr("Type your own answer", "自己写一个答案");
@@ -439,15 +439,11 @@ export class AskMoreComponent implements Component {
 				if (event.type === "activate") this.#answerOption(active.index, index);
 				return;
 			}
-			case "action":
-				if (event.act === CANCEL_ACT) this.#submit({ kind: "cancel" });
-				else if (event.act === ENTER_ACT) this.#pressEnter();
-				else if (event.act === SUBMIT_ACT) this.#submitAll();
-				else {
-					const control = parseDemoAct(event.act);
-					if (control !== undefined) this.#moveDemos(control.move, control.slot);
-				}
+			case "action": {
+				const act = parseAct(event.act);
+				if (act !== undefined) this.#act(act);
 				return;
+			}
 			case "toggle":
 			case "change":
 			case "edit":
@@ -578,6 +574,48 @@ export class AskMoreComponent implements Component {
 			return;
 		}
 		this.#answerOption(active.index, state.cursor);
+	}
+
+	/** The state of question `page` while it is the open page; undefined once the sheet left it. */
+	#openQuestion(page: number): QuestionState | undefined {
+		return this.#active.kind === "question" && this.#active.index === page ? this.#states[page] : undefined;
+	}
+
+	/** A sheet button: done only while the page and state it was drawn for are still the open ones. */
+	#act(act: SheetAct): void {
+		switch (act.kind) {
+			case "cancel":
+				this.#submit({ kind: "cancel" });
+				return;
+			case "submit":
+				if (this.#active.kind === "review") this.#submitAll();
+				return;
+			case "answer": {
+				const state = this.#openQuestion(act.page);
+				if (state !== undefined && !state.editing && state.cursor === act.option) this.#answerOption(act.page, act.option);
+				return;
+			}
+			case "openOther": {
+				const state = this.#openQuestion(act.page);
+				if (state === undefined || state.editing || !onOther(state)) return;
+				this.#change(() => {
+					state.editing = true;
+				});
+				return;
+			}
+			case "saveOther": {
+				const state = this.#openQuestion(act.page);
+				if (state?.editing) this.#saveOther(act.page, state.input.getValue());
+				return;
+			}
+			case "demo": {
+				const state = this.#openQuestion(act.page);
+				if (state === undefined) return;
+				if (act.target.slot === "option" && (state.editing || state.cursor !== act.target.option)) return;
+				this.#moveDemos(act.move, act.target.slot);
+				return;
+			}
+		}
 	}
 
 	#answerOption(index: number, option: number): void {

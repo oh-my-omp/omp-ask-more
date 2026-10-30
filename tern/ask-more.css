@@ -1,0 +1,16 @@
+/* The ask-more sheet's role (`omp.askMore`) sits outside `omp.overlay.*`: Tern's overlay list rule
+ * there outranks the native ask list styling its options use, and draws each option's mark over
+ * its label. Outside that namespace the sheet keeps Tern's base overlay face, so restore the two
+ * things the omp overlays have: the sans text face, and in Console the gutter the question's `?`
+ * marker hangs in. Console keeps its terminal face. */
+.sf-overlay[data-role='omp.askMore'] .sf-ov-card {
+	font: 13px/1.4 var(--sans);
+	letter-spacing: -0.003em;
+}
+.sf-chat-console .sf-overlay[data-role='omp.askMore'] .sf-ov-card {
+	font: inherit;
+	letter-spacing: normal;
+}
+.sf-chat-console .sf-overlay[data-role='omp.askMore'] .sf-ov-body {
+	padding-left: calc(3 * var(--sf-cw));
+}

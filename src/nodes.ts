@@ -15,49 +15,119 @@ import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type 
 export const TABS_KEY = "tabs";
 export const REVIEW_TAB = "review";
 export const OTHER_ITEM = "other";
-/** Enter on the page: answer the row under the cursor, save the Other text, or submit the review. */
-export const ENTER_ACT = "enter";
-export const SUBMIT_ACT = "submit";
-export const CANCEL_ACT = "cancel";
 
 const OPTION_PREFIX = "option:";
-const DEMO_PREFIX = "demo:";
 
 /** A demo control: step back, pause or play, step forward. */
 export type DemoMove = "prev" | "toggle" | "next";
 
-function demoAct(slot: DemoSlot, move: DemoMove): string {
-	return `${DEMO_PREFIX}${slot}:${move}`;
+/** The demo a control was drawn for: the question's, or the one of the option it was focused on. */
+export type DemoTarget = { readonly slot: "question" } | { readonly slot: "option"; readonly option: number };
+
+/**
+ * What a sheet button does, and for which state it was drawn. Tern keeps routing a click on a node
+ * the sheet has since redrawn, so every act that depends on the page carries that page and the
+ * state it meant; the component drops the act when the state has moved on.
+ */
+export type SheetAct =
+	| { readonly kind: "cancel" }
+	| { readonly kind: "submit" }
+	| { readonly kind: "answer"; readonly page: number; readonly option: number }
+	| { readonly kind: "openOther"; readonly page: number }
+	| { readonly kind: "saveOther"; readonly page: number }
+	| { readonly kind: "demo"; readonly page: number; readonly target: DemoTarget; readonly move: DemoMove };
+
+/** The action id a button sends for `act`. */
+export function encodeAct(act: SheetAct): string {
+	switch (act.kind) {
+		case "cancel":
+			return "cancel";
+		case "submit":
+			return "submit";
+		case "answer":
+			return `answer:${act.page}:${act.option}`;
+		case "openOther":
+			return `other:${act.page}`;
+		case "saveOther":
+			return `save:${act.page}`;
+		case "demo":
+			return act.target.slot === "question" ? `demo:${act.page}:question:${act.move}` : `demo:${act.page}:option:${act.target.option}:${act.move}`;
+	}
 }
 
-/** The demo and control an action id names, or undefined when it is not a demo control. */
-export function parseDemoAct(act: string): { readonly slot: DemoSlot; readonly move: DemoMove } | undefined {
-	if (!act.startsWith(DEMO_PREFIX)) return undefined;
-	const [slot, move] = act.slice(DEMO_PREFIX.length).split(":");
-	if (slot !== "question" && slot !== "option") return undefined;
-	if (move !== "prev" && move !== "toggle" && move !== "next") return undefined;
-	return { slot, move };
+/** A non-negative integer written in decimal digits only. */
+function parseIndex(text: string | undefined): number | undefined {
+	return text !== undefined && /^\d+$/.test(text) ? Number(text) : undefined;
+}
+
+function parseMove(text: string | undefined): DemoMove | undefined {
+	return text === "prev" || text === "toggle" || text === "next" ? text : undefined;
+}
+
+/** The act an action id names, or undefined when it names none. */
+export function parseAct(id: string): SheetAct | undefined {
+	const [kind, ...rest] = id.split(":");
+	switch (kind) {
+		case "cancel":
+			return rest.length === 0 ? { kind: "cancel" } : undefined;
+		case "submit":
+			return rest.length === 0 ? { kind: "submit" } : undefined;
+		case "answer": {
+			const page = parseIndex(rest[0]);
+			const option = parseIndex(rest[1]);
+			return rest.length === 2 && page !== undefined && option !== undefined ? { kind: "answer", page, option } : undefined;
+		}
+		case "other":
+		case "save": {
+			const page = parseIndex(rest[0]);
+			if (rest.length !== 1 || page === undefined) return undefined;
+			return kind === "other" ? { kind: "openOther", page } : { kind: "saveOther", page };
+		}
+		case "demo": {
+			const page = parseIndex(rest[0]);
+			if (page === undefined) return undefined;
+			if (rest[1] === "question" && rest.length === 3) {
+				const move = parseMove(rest[2]);
+				return move === undefined ? undefined : { kind: "demo", page, target: { slot: "question" }, move };
+			}
+			if (rest[1] === "option" && rest.length === 4) {
+				const option = parseIndex(rest[2]);
+				const move = parseMove(rest[3]);
+				return option === undefined || move === undefined ? undefined : { kind: "demo", page, target: { slot: "option", option }, move };
+			}
+			return undefined;
+		}
+		default:
+			return undefined;
+	}
+}
+
+/** The demo a control drives: the question's, or the focused option's, which owns its playback. */
+function demoTarget(demo: PageDemo): DemoTarget {
+	return demo.slot === "question" ? { slot: "question" } : { slot: "option", option: demo.play.owner };
 }
 
 /** Image height cap in the sheet. */
 const DEMO_IMAGE_LINES = "18lines";
 
-/** A demo as it plays in the sheet: frames the component steps, or an image Tern animates. */
-function demoNode(page: PageDemo): NativeNode {
-	const { demo, play, slot } = page;
+/** A demo as it plays in the sheet on question `page`: frames the component steps, or an image Tern animates. */
+function demoNode(demoPage: PageDemo, page: number): NativeNode {
+	const { demo, play, slot } = demoPage;
 	const caption = demo.caption ? [text([span(demo.caption, "muted")], { wrap: "word" })] : [];
 	switch (demo.kind) {
 		case "frames": {
 			const frame = demo.frames[play.frame] ?? demo.frames[0];
 			const count = frameCount(demo);
+			const target = demoTarget(demoPage);
+			const control = (move: DemoMove) => encodeAct({ kind: "demo", page, target, move });
 			const controls = node(
 				"row",
 				{ gap: "sm", align: "center" },
 				[
 					text([span(`${play.frame + 1}/${count}`, "muted")]),
-					actionButton(tr("Previous", "上一帧"), demoAct(slot, "prev"), { keys: "[" }),
-					actionButton(play.playing ? tr("Pause", "暂停") : tr("Play", "播放"), demoAct(slot, "toggle"), { keys: "p" }),
-					actionButton(tr("Next", "下一帧"), demoAct(slot, "next"), { keys: "]" }),
+					actionButton(tr("Previous", "上一帧"), control("prev"), { keys: "[" }),
+					actionButton(play.playing ? tr("Pause", "暂停") : tr("Play", "播放"), control("toggle"), { keys: "p" }),
+					actionButton(tr("Next", "下一帧"), control("next"), { keys: "]" }),
 				],
 				"controls",
 			);
@@ -167,31 +237,33 @@ function appendix(state: QuestionState): NativeNode[] {
 	return children;
 }
 
-/** The options as a sheet list; the chosen one carries the accent tone. */
+/** The options as the native ask's list (`omp.ask.options`), so Tern's ask styling marks the chosen one. */
 function options(state: QuestionState, index: number): NativeNode {
 	const { question, answer } = state;
 	const rows = question.options.map((option, optionIndexValue) =>
 		item(optionItem(optionIndexValue), {
+			role: "omp.ask.option",
 			label: option.label,
 			...(option.description?.trim() ? { detail: option.description.trim() } : {}),
-			...(optionIndexValue === question.recommended ? { value: [span(tr("Recommended", "推荐"), "accent")] } : {}),
+			...(optionIndexValue === question.recommended ? { value: [span(tr("Recommended", "推荐"))] } : {}),
 			...(answer.kind === "option" && answer.index === optionIndexValue ? { tone: "accent" as const } : {}),
 		}),
 	);
 	rows.push(
 		item(OTHER_ITEM, {
+			role: "omp.ask.other",
 			label: answer.kind === "custom" ? `${tr("Other", "其他")}: “${answer.text}”` : tr("Other…", "其他…"),
 			...(answer.kind === "custom" ? { tone: "accent" as const } : {}),
 		}),
 	);
-	return selectList(questionListKey(index), rows, { selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor) });
+	return selectList(questionListKey(index), rows, { role: "omp.ask.options", selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor) });
 }
 
-/** The focused option's tradeoff rows, under the options, and the demo of picking it. */
-function tradeoff(state: QuestionState, demo: PageDemo | undefined): NativeNode | undefined {
+/** The focused option's tradeoff rows, under the options, and the demo of picking it, on question `page`. */
+function tradeoff(state: QuestionState, demo: PageDemo | undefined, page: number): NativeNode | undefined {
 	const option = state.question.options[state.cursor];
 	if (option === undefined || state.editing) return undefined;
-	// Label then value per row: a `kv` grid sizes its label column too narrow for CJK labels.
+	// Label then value per row, the value wrapping under its own label.
 	const rows: NativeNode[] = (
 		[
 			[tr("Tradeoff", "取舍"), option.tradeoff],
@@ -201,10 +273,11 @@ function tradeoff(state: QuestionState, demo: PageDemo | undefined): NativeNode 
 	)
 		.filter((pair): pair is readonly [string, string] => pair[1] !== undefined && pair[1].trim().length > 0)
 		.map(([label, value], index) => node("text", { spans: [span(label, "muted"), span("  "), span(value.trim())], wrap: "word" }, undefined, `t${index}`));
-	if (demo !== undefined) rows.push(demoNode(demo));
+	if (demo !== undefined) rows.push(demoNode(demo, page));
 	return { ...card({ role: "omp.ask.tradeoff", tone: "accent", head: [span(option.label)] }, rows), key: "tradeoff" };
 }
 
+/** The question tabs in the native ask's head row (`omp.ask.head` > `omp.ask.questions`). */
 function tabs(states: readonly QuestionState[], active: ActiveTab): NativeNode | undefined {
 	if (states.length < 2) return undefined;
 	const items = states.map((state, index) => {
@@ -212,9 +285,10 @@ function tabs(states: readonly QuestionState[], active: ActiveTab): NativeNode |
 		return { id: String(index), label };
 	});
 	items.push({ id: REVIEW_TAB, label: [span(tr("Review", "汇总"))] });
-	return node(
+	const strip = node(
 		"tabs",
 		{
+			role: "omp.ask.questions",
 			items,
 			active: active.kind === "review" ? REVIEW_TAB : String(active.index),
 			title: tr("Next question  tab · Previous  shift+tab", "下一题 tab · 上一题 shift+tab"),
@@ -223,15 +297,23 @@ function tabs(states: readonly QuestionState[], active: ActiveTab): NativeNode |
 		undefined,
 		TABS_KEY,
 	);
+	return node("row", { role: "omp.ask.head", align: "center" }, [strip], "head");
 }
 
-/** Cancel and the page's Enter: Submit for one question, Next in a batch, Submit on the review. */
-function actions(primary: { readonly label: string; readonly act: string }): NativeNode {
+/** Cancel and the page's primary act: Submit for one question, Next in a batch, Submit on the review. */
+function actions(primary: { readonly label: string; readonly act: SheetAct }): NativeNode {
 	return actionBar([
 		null,
-		actionButton(tr("Cancel all", "全部取消"), CANCEL_ACT, { keys: "escape" }),
-		actionButton(primary.label, primary.act, { keys: "enter", tone: "accent" }),
+		actionButton(tr("Cancel all", "全部取消"), encodeAct({ kind: "cancel" }), { keys: "escape" }),
+		actionButton(primary.label, encodeAct(primary.act), { keys: "enter", tone: "accent" }),
 	]);
+}
+
+/** The page's primary act, as Enter would do it now: save the Other text, open the field, or answer the row. */
+function primaryAct(states: readonly QuestionState[], state: QuestionState, page: number): { readonly label: string; readonly act: SheetAct } {
+	if (state.editing) return { label: tr("Save answer", "保存答案"), act: { kind: "saveOther", page } };
+	const label = states.length === 1 ? tr("Submit", "提交") : tr("Next", "下一题");
+	return { label, act: onOther(state) ? { kind: "openOther", page } : { kind: "answer", page, option: state.cursor } };
 }
 
 function questionPage(states: readonly QuestionState[], index: number): NativeChild[] {
@@ -239,25 +321,24 @@ function questionPage(states: readonly QuestionState[], index: number): NativeCh
 	if (state === undefined) return [];
 	const demos = pageDemos(state);
 	const decision: NativeChild[] = [options(state, index)];
-	const focused = tradeoff(state, demos.find(demo => demo.slot === "option"));
+	const focused = tradeoff(state, demos.find(demo => demo.slot === "option"), index);
 	if (focused !== undefined) decision.push(focused);
 	// The field is its own component, so the terminal's edits and undo reach it directly.
 	if (state.editing) decision.push(node("row", { role: "omp.ask.otherField" }, [state.input], "otherField"));
-	const primary = state.editing
-		? { label: tr("Save answer", "保存答案"), act: ENTER_ACT }
-		: { label: states.length === 1 ? tr("Submit", "提交") : tr("Next", "下一题"), act: ENTER_ACT };
 	// Tern scrolls a list's selection into view against the body's bottom edge, where a sticky last
 	// `omp.actions` row would cover it; so the bar sits in the decision column (not last) and reveals
 	// itself when a page opens, which pulls the whole decision into view after a long brief.
-	decision.push({ ...actions(primary), reveal: "nearest" });
+	decision.push({ ...actions(primaryAct(states, state, index)), reveal: "nearest" });
 	const questionDemo = demos.find(demo => demo.slot === "question");
-	const demo = questionDemo === undefined ? [] : [block("demo", tr("Demo", "演示"), [demoNode(questionDemo)])];
+	const demo = questionDemo === undefined ? [] : [block("demo", tr("Demo", "演示"), [demoNode(questionDemo, index)])];
 	return [...lead(state.question), node("col", { gap: "md" }, decision, `decision${index}`), ...demo, ...appendix(state)];
 }
 
+/** The review: the native ask's notice of unanswered questions, then each question's answer. */
 function reviewPage(states: readonly QuestionState[]): NativeChild[] {
 	const unanswered = states.filter(state => state.answer.kind === "unanswered").length;
-	// One row per question, label then answer: a `kv` grid sizes its label column too narrow for CJK labels.
+	// Label then answer per row, not the native `kv` (`omp.ask.answers`): Reader gives that grid a
+	// fixed key column, and a long CJK chip runs into its answer.
 	const rows = states.map((state, index) => {
 		const answer = answerLabel(state.question, state.answer);
 		return node(
@@ -267,20 +348,14 @@ function reviewPage(states: readonly QuestionState[]): NativeChild[] {
 			`answer${index}`,
 		);
 	});
+	const notice =
+		unanswered > 0
+			? [span(tr(`${unanswered} unanswered`, `${unanswered} 题未回答`), "warning"), span(tr(" · Submit still sends the rest", " · 提交仍会发送其余答案"))]
+			: [span(tr("All answered · Submit sends them", "全部已答 · 提交即发送"))];
 	return [
-		node("md", { text: tr("Review your answers", "核对你的答案"), role: "omp.ask.question" }, undefined, "reviewHead"),
-		...(unanswered > 0
-			? [
-					node(
-						"text",
-						{ spans: [span(tr(`${unanswered} unanswered · Submit still sends the rest`, `${unanswered} 题未回答 · 提交仍会发送其余答案`), "warning")] },
-						undefined,
-						"notice",
-					),
-				]
-			: []),
+		node("text", { role: "omp.ask.notice", spans: notice, wrap: "word" }, undefined, "notice"),
 		node("col", { gap: "sm" }, rows, "answers"),
-		{ ...actions({ label: tr("Submit", "提交"), act: SUBMIT_ACT }), reveal: "nearest" },
+		{ ...actions({ label: tr("Submit", "提交"), act: { kind: "submit" } }), reveal: "nearest" },
 	];
 }
 

@@ -1,0 +1,7 @@
+schema = 1
+id = "omp-ask-more"
+name = "Ask More"
+version = "0.1.0"
+description = "Text face and Console gutter for the ask-more decision sheet."
+window = "window.luau"
+styles = ["ask-more.css"]
