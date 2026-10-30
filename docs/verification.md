@@ -31,7 +31,7 @@ Not yet exercised at runtime: the native-delegation path itself (needs an enviro
 
 ## A skill that asks in chat
 
-Does a model follow a skill that prescribes its questions as chat text, or this plugin's description? Four descriptions were tested in turn: the first, whose only rule for skills was one sentence ("When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask"); the second, rewritten after those runs around the skill's template (`variants/description-rewrite.diff`); the third, which replaced the second with a short general one (commit `e73cd59`); and the current one, which adds to the third what the models' reasoning showed it lacked. Run on 2026-10-30 with omp 18.14.0 in a PTY (the classic renderer's alternate-screen page), with `opencode-go/deepseek-v4.1-flash` and `opencode-go/kimi-k2.7-code`. Everything below is in [`skill-priority/`](skill-priority/).
+Does a model follow a skill that prescribes its questions as chat text, or this plugin's description? Four descriptions were tested in turn: the first, whose only rule for skills was one sentence ("When a skill, workflow or other instruction tells you to ask the user, confirm with them, or let them pick, do it with ask"); the second, rewritten after those runs around the skill's template (`variants/description-rewrite.diff`); the third, which replaced the second with a short general one (commit `e73cd59`); and the current one, which adds to the third what the models' reasoning showed it lacked. Run on 2026-10-30 with omp 18.14.0 in a PTY (the classic renderer's alternate-screen page), with `opencode-go/deepseek-v4.1-flash` and `opencode-go/kimi-k2.7-code`, and for the current description also with `openai-codex/gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra`. Everything below is in [`skill-priority/`](skill-priority/).
 
 - **Fixture** (`fixture/`): a `PLAN.md` for rate-limiting an orders API with seven open decisions, three source files, and `grilling-SKILL.md`, the `grilling` skill copied from mattpocock/skills `main`. It says "Format a round like so: ❓ **Q1** … ➡️ <your recommended answer>" and "wait for the user's answers before the next round".
 - **Launch** (`run.sh`): `--no-extensions --skills=grilling --no-rules --no-context-files`, omp's own 18.14.0 system template and an empty append prompt, so no installed plugin, rule, `SYSTEM_TEMPLATE.md` or `APPEND_SYSTEM.md` takes part. Arms A, R, S and T load this plugin with `-e index.ts --tools=ask,read` (A with the first description, R with the second, S with the third, T with the current one), as do the negative arms N, RN, SN and TN; B has no ask tool (`--tools=read`); C has omp's native ask.
@@ -58,6 +58,12 @@ Does a model follow a skill that prescribes its questions as chat text, or this 
 | km-S1 | kimi | S third description | `chat(5)` |
 | ds-T1 | deepseek | T current description | `ask(7)` |
 | km-T1 | kimi | T current description | `chat(5)` |
+| l56-T1 | gpt-5.6-luna | T current, before `strict: false` | `ask(7)` rejected ×3, stopped |
+| l6-T1 | gpt-6-luna | T current, before `strict: false` | `ask(3)` rejected ×4 → `ask(1)` rejected ×5, stopped |
+| t61-T1 | gpt-6.1-terra | T current, before `strict: false` | `ask(7)` rejected ×2 → `ask(1)` rejected ×7, stopped |
+| l56-T2 | gpt-5.6-luna | T current | `ask(4)` |
+| l6-T2 | gpt-6-luna | T current | `ask(5)` rejected → `ask(6)` rejected ×2 → `ask(5)` |
+| t61-T2 | gpt-6.1-terra | T current | `ask(6)` |
 | ds-B1 | deepseek | B no ask | `chat(7)` |
 | km-B1 | kimi | B no ask | `chat(6)` |
 | ds-C1 | deepseek | C native ask | `chat(6)` |
@@ -68,6 +74,7 @@ Does a model follow a skill that prescribes its questions as chat text, or this 
 | km-RN1 | kimi | RN negative, second | three bullets, no ask |
 | ds-SN1 | deepseek | SN negative, third | three bullets, no ask |
 | ds-TN1 | deepseek | TN negative, current | three bullets, no ask |
+| l6-TN1 | gpt-6-luna | TN negative, current | three bullets, no ask |
 | km-V1a | kimi | V1 wording | `chat(7)` |
 | km-V1b | kimi | V1 wording | `chat(4)` |
 | km-V2a | kimi | V2 system line | `chat(3)` |
@@ -76,9 +83,9 @@ Does a model follow a skill that prescribes its questions as chat text, or this 
 | km-V3b | kimi | V3 stop guard | `chat(7)` → guard → `ask(7)` → `ask(8)` |
 | ds-V3a | deepseek | V3 stop guard | `ask(6)` → `ask(7)` |
 
-`ask(N)` is an ask call with N questions that opened (and, in A and R runs, was answered). `rejected` is a call the plugin refused before anything opened (a missing `question`, evidence without `path`, `lines: "3,10,19-20"` or `"8,17"`), which the model resent through ask; the person never saw it. `chat(N)` is a reply that ended the turn on N `❓` questions.
+`ask(N)` is an ask call with N questions that opened (and, in A and R runs, was answered); in a row ending "stopped", none opened. `rejected` is a call refused before anything opened, by the plugin (a missing `question`, evidence without `path`, `lines: "3,10,19-20"` or `"8,17"`, an empty `demo`) or by omp's parameter check (a malformed argument); the model resent it through ask, and the person never saw it. `chat(N)` is a reply that ended the turn on N `❓` questions.
 
-Without this plugin both models asked in chat, native ask included. With the first description, deepseek asked through ask in 3/3 runs and kimi in chat in 3/3. With the second, deepseek asked through ask in 3/3 and kimi in 2/3; km-R2 asked both rounds in chat. With the third and with the current one, in one run each, deepseek asked through ask and kimi in chat. No model called ask for the summary under any description.
+Without this plugin both models asked in chat, native ask included. With the first description, deepseek asked through ask in 3/3 runs and kimi in chat in 3/3. With the second, deepseek asked through ask in 3/3 and kimi in 2/3; km-R2 asked both rounds in chat. With the third and with the current one, in one run each, deepseek asked through ask and kimi in chat. With the current one, the three `openai-codex` models also asked through ask, one run each, once the tool declared `strict: false` (below). No model called ask for the summary under any description.
 
 ### Why the first description lost, and what the later ones changed
 
@@ -103,6 +110,13 @@ The current description keeps the third's scope and adds three things the kimi r
 
 - **deepseek**: ds-T1 put a seven-question first round into ask, its first call opening with no rejection. Its reasoning quotes the new text: "the recommended option is cursor position, so it's equivalent".
 - **kimi**: km-T1 asked a five-question round in chat. Its reasoning restates the description's answer model in the skill's terms ("The user can say "yes" to accept, or pick another, or write their own") but never mentions the tool; every "ask" in it is the verb. The description now carries everything kimi's reasoning in earlier runs said was missing, and kimi still does not reach for the tool.
+
+### OpenAI models on the `openai-codex` channel
+
+`openai-codex/gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` (the channel has no `gpt-6-terra`), one grilling run each with the current description, the same fixture and flags.
+
+- **Before `strict: false`** (the T1 runs, commit `96b4cd5`): all three put the first round into ask, and every call was rejected before it opened. Each filled the optional `demo` with empty values, `{frames: […], path: ""}` or `{frames: [], path: ""}`, which fails "give exactly one of frames or path". Their reasoning then said "Removing all demos" or "Omitting full demo", and the next call carried the same empty `demo`: the models could not leave the field out. The tool sent no `strict` flag, and OpenAI-family backends treat that as strict mode, where every property has to be produced; omp's own provider notes the same (`openai-responses.ts:1907-1918`, #4336). The runs were stopped after 3, 9 and 9 rejections. The summary in l6-TN1 called no ask.
+- **After `strict: false`** (the T2 runs): gpt-5.6-luna and gpt-6.1-terra opened a round of 4 and 6 questions on their first call. gpt-6-luna opened a round of 5 on its fourth: first `lines: "7-8,16-17"`, the multi-range form deepseek also tried, then twice a sixth array entry that was reasoning text instead of a question (`"recommended:0}]}]} c? Syntax perhaps JSON invalid? …"`), which omp's parameter check refused. Without strict mode the arguments are no longer grammar-constrained, so a malformed call is possible; each was refused with its reason and resent.
 
 ### Changes tried on the first description
 

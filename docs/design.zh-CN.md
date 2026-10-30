@@ -28,7 +28,7 @@ flowchart LR
   n --> a
 ```
 
-插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。
+插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。它还设了 `strict: false`。扩展字段全是可选的，而 OpenAI 系的后端收不到 `strict` 时按严格模式处理，让模型把每个可选字段都填上：空的 `demo.path`、0 帧的 `demo`。校验会拒绝这些；在 `openai-codex` 的运行里，模型无法省掉该字段，反复重发同一个调用，直到被停下。omp 会把显式的 `false` 原样发出（`ToolDefinition.strict`，`packages/ai/src/providers/openai-responses.ts:1907-1918`）。
 
 一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
 

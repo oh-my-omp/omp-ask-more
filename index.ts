@@ -120,6 +120,10 @@ export default function askMore(pi: ExtensionAPI): void {
 		description: DESCRIPTION,
 		parameters: parametersSchema,
 		approval: "read",
+		// Every extension field is optional. OpenAI-family backends treat an absent `strict` as strict
+		// and make the model fill each optional field (an empty `demo.path`, zero `frames`), which
+		// validation then rejects; an explicit `false` reaches the wire and lets the model omit them.
+		strict: false,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
 	});
