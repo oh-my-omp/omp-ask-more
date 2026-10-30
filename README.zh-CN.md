@@ -4,7 +4,7 @@
 
 一个影子替换原生 `ask` 的 OMP 插件，让 `ask` 成为代理把决定交给用户的唯一入口。参数是原生参数**加上扩展字段**：原生组件渲染原生部分、忽略其余；ask-more 组件两者都渲染。答案形状、结果渲染器与持久化调用的契约保持原生。
 
-状态：**已实现，v0.1.0**。在 omp 18.13.3 + Tern 0.9.6 上验证：单测、ANSI 页面与 Tern 面板端到端（单题、三题一批，以及分步画面、GIF 和 mp4 三种演示）、无 UI 路径。见[验证](#验证)。
+状态：**已实现，v0.1.0**。均在 Tern 0.9.6 上验证。omp 18.14.0：单测、Tern 内置全部 102 个配色主题在 Reader、Spine、Console 三种聊天风格下的 Tern 面板、面板按钮动作，以及一次真实 ask 的端到端。omp 18.13.3：ANSI 页面，Tern 面板的多题、长简报与演示流程（分步画面、GIF 和 mp4），以及无 UI 路径。见[验证](#验证)。
 
 ## 为什么
 
@@ -22,6 +22,14 @@ omp plugin install https://github.com/oh-my-omp/omp-ask-more
 ```
 
 本地开发用 `omp plugin link /path/to/omp-ask-more`。插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明；不需要任何配置节，并必须保留原生 `ask` 开启，供无 UI 路径委托。
+
+在 Tern 中还要安装 `tern/` 里的纯样式 Tern 插件：
+
+```sh
+tern plugin install github.com/oh-my-omp/omp-ask-more/tern
+```
+
+开发时用 `tern plugin link /path/to/omp-ask-more/tern`。它让 ask 面板用上 omp 其他 overlay 的无衬线字体，并在 Console 聊天风格下留出问题前 `?` 标记所在的左侧空白。不装它面板照常可用，简报以终端字体显示（见 [Tern](#表面)）。
 
 ## 参数
 
@@ -141,7 +149,11 @@ flowchart LR
 
 **ANSI。** `fullscreen` 把页面放到 alternate screen。标题和（多题时的）标签行（已答题带 `✓`，最后是 `汇总`）固定在顶部，键位提示固定在底部；中间的正文是按实时终端高度调整的 pi-tui `ScrollView`，带滚动条，可用 `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` 和鼠标滚轮滚动，`↑↓` 移动选项时自动滚到聚焦选项。
 
-**Tern。** 组件声明 `nativeOverlay`（`role: "omp.overlay.askMore"`、`size: "full"`，`head` 为该题的 `header`，多题时为“N 个决定”），后端把它包进一张铺满窗格的不透明面板（`packages/tui/src/native/backend.ts:873-900`），`describe()` 只返回内容：多题时一个 `tabs` 节点（按位置编号，已答题带 `✓`，最后是 `汇总`，点击切换）；问题与 Where/What/How；然后是决定区——每题一个以 `qN` 为 key 的选项列表（单击选中、双击作答、最后一行是 `其他…`）、聚焦选项的取舍卡、Other 输入框和动作条（`全部取消`，以及 `下一题` / `提交` / `保存答案`）；最后是证据 `code` 节点（折叠到 12 行，由 Tern 自带的 "more lines" 展开）、Mermaid 的 `md` 和风险。Tern 把面板正文当作一列整体滚动，并按正文底边把列表选中项滚进视野，因此动作条紧跟决定区，并在每页打开时把自己滚进视野：简报再长，打开时整个决定区也在视野内。键盘滚动以正文上的 `scroll` 请求交给 Tern。
+**Tern。** 组件声明 `nativeOverlay`（`role: "omp.askMore"`、`size: "full"`，`head` 为该题的 `header`，多题时为“N 个决定”），后端把它包进一张铺满窗格的不透明面板（`packages/tui/src/native/backend.ts:873-900`），`describe()` 只返回内容，并使用原生 ask 的 role，Tern 的配色主题与 Reader、Spine、Console 三种聊天风格本就为这些 role 写了样式：多题时一个 `omp.ask.head` 行，内含 `omp.ask.questions` 标签（按位置编号，已答题带 `✓`，最后是 `汇总`，点击切换）；问题（`omp.ask.question`）与 Where/What/How；然后是决定区——每题一个以 `qN` 为 key 的 `omp.ask.options` 选项列表，各行为 `omp.ask.option`、最后一行为 `omp.ask.other`（单击选中、双击作答；已作答的行带强调色，Tern 把它画成实心单选标记，Console 下为 `(•)`，光标则是列表的高亮行）、聚焦选项的取舍卡、Other 输入框和动作条（`全部取消`，以及 `下一题` / `提交` / `保存答案`）；最后是证据 `code` 节点（折叠到 12 行，由 Tern 自带的 "more lines" 展开）、Mermaid 的 `md` 和风险。汇总页是一行 `omp.ask.notice`，加上每题一行“标签 答案”：Reader 给原生答案网格（`omp.ask.answers`）设了固定宽度的键列，较长的 CJK 标签会压到答案上。面板 role 有意不放在 `omp.overlay.*` 下：Tern 给这类 overlay 写的列表规则（`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`）优先级高于 ask 列表样式，会把每个选项的标记画在文字上。Tern 把面板正文当作一列整体滚动，并按正文底边把列表选中项滚进视野，因此动作条紧跟决定区，并在每页打开时把自己滚进视野：简报再长，打开时整个决定区也在视野内。键盘滚动以正文上的 `scroll` 请求交给 Tern。
+
+每个按钮的动作 id 都写明它绘制时所属的页面与状态（`answer:<page>:<option>`、`other:<page>`、`save:<page>`、`demo:<page>:question:<move>`、`demo:<page>:option:<option>:<move>`、`submit`、`cancel`；见 `src/nodes.ts#SheetAct`）。面板重画后，Tern 仍会把点击路由到已被替换的节点，因此在页面、光标所在行或 Other 输入框变化之后才到达的点击——再点一次 `下一题`、光标已离开的选项的演示控件、离开汇总后的 `提交`——会被丢弃，而不是作用在新状态上。选项列表按题目编 key 也是出于同一原因。
+
+**Tern 样式表。** 不在 `omp.overlay.*` 下时，面板沿用 Tern 基础 overlay 的外观。`tern/` 是一个纯样式的 Tern 插件（`plugin.toml`、`ask-more.css`，以及因清单至少需要一个入口而放的只含一行注释的 `window.luau`），三条规则只匹配 `omp.askMore`：omp overlay 的无衬线字体；Console 下保留终端字体，并留出问题前 `?` 标记所在的三格左侧空白。
 
 **演示。** 文件和证据一起、在界面打开前按当前界面加载（`src/demo.ts`）：
 
@@ -202,6 +214,7 @@ Other 输入框是 pi-tui `Input`，每题一个：它的值是文本的唯一�
 - **ANSI 下的演示很粗。** 文件按 64 × 20 格播放、每格两个像素：动作看得出，录屏里的小字看不清，所以要在 caption 写清看什么。每帧最多重写 20 行 24 位色（画面复杂时每帧约 16–17 KB），慢速 SSH 下会有感觉。画面宽度在 ask 打开时就定了，改变终端大小不会重画。
 - **ANSI 页面和视频需要 ffmpeg。** `PATH` 里没有 `ffmpeg`/`ffprobe` 时，这类演示显示为错误行；Tern 里的 GIF、APNG、WebP 两者都不需要。
 - 工具以原生名注册：模型读到的是本插件的描述，而不是 `prompts/tools/ask.md`。改写 ask prompt 的扩展必须针对最终描述。
+- **不装 Tern 样式插件时**，Reader 与 Spine 下简报以终端字体显示，Console 下问题前的 `?` 标记贴在面板左边缘。
 
 ## 文件
 
@@ -212,21 +225,23 @@ src/brief.ts       按工作目录解析 path:lines，限界读取
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
 src/state.ts       每题状态（光标、答案、Other 输入框、折叠、滚动、演示播放）与当前标签
 src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（describe）、按键与事件
-src/nodes.ts       Tern 内容：标签、简报各段、选项列表、取舍卡、动作条、汇总页
+src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动作（SheetAct）
 src/result.ts      Answer 变体、AskToolDetails 构造、取消与拒绝结果
 src/i18n.ts        界面标签取自 OMOMP_LANG / LC_*；协议字段保持英文
 src/description.ts 面向模型的工具描述
-test/              校验、原生投影、演示加载与半块画面测试（bun test）
+tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
+test/              校验、原生投影、演示加载、半块画面，以及经 pi-tui reconciler 与参考 TSP
+                   applier 驱动的 Tern 面板（bun test）
 ```
 
 ## 验证
 
-2026-10-29 执行，omp 18.13.3、Tern 0.9.6、`opencode-go/deepseek-v4.1-flash`。
+均使用 Tern 0.9.6 与 `opencode-go/deepseek-v4.1-flash`。标 *18.14.0* 的行于 2026-10-30 在 Tern 样式改动之后用 omp 18.14.0 执行；其余行于 2026-10-29 用 omp 18.13.3 执行。
 
 | 检查 | 命令 | 观察结果 |
 |---|---|---|
-| 类型 | `bun run check` | `tsc --noEmit` 无错误 |
-| 单测 | `bun test` | 24 通过 0 失败：每条拒绝信息、逐题下标与重复 id、证据上下界、演示来源与上下界规则、`nativeQuestion` 投影、半块颜色、画面尺寸，以及演示加载缺失文件、伪图片、真实 GIF 和默认帧间隔 |
+| 类型 *18.14.0* | `bun run check` | `tsc --noEmit` 无错误 |
+| 单测 *18.14.0* | `bun test` | 38 通过 0 失败：每条拒绝信息、逐题下标与重复 id、证据上下界、演示来源与上下界规则、`nativeQuestion` 投影、半块颜色、画面尺寸、演示加载，以及 Tern 面板：每一帧都被 pi-tui 的参考 applier 接受；原生 ask role，光标停在别处时已选行仍有标记；单击与双击；过期点击（再点一次 `下一题`、光标移动或 Other 打开之前画出的 `下一题`、光标已离开的选项的演示控件、离开汇总后的 `提交`、重复 `全部取消`）被丢弃。去掉选项列表的 role、把面板 role 改回 `omp.overlay.*`、或去掉作答动作对页面与光标的核对，分别有 5、1、3 个测试失败 |
 | ANSI 多题 | 130×40 PTY 里 `omp --no-extensions -e …/index.ts`，提示词要求一次问三个独立问题 | alternate screen 页面画出标题、标签行 `重试上限 日志级别 缓存 汇总`、滚动条与键位提示；`enter` 回答第 1 题（`✓ 重试上限`）并打开第 2 题；`o`、`warn`、`enter` 作答；第 3 题 `PgDn` 滚动；`tab` 打开汇总，列出两题答案与 `1 题未回答`；`enter` 返回 `retry-limit: 固定 3 次，指数退避`、`log-level: "warn"`、`cache: (cancelled)` |
 | ANSI 单题 | 同一会话 | 无标签行；`↓`、`enter` 直接提交：`cap: 3 次` |
 | Tern 多题 | 无头 `tern serve --control …`，在其窗格里带 `PI_TUI_TSP_RECORD` 运行 omp；`ctl shot`、`tree`、`click`、`dblclick`、`key`、`type` | 一张 `sf-overlay sz-full at-center modal` 面板，标题 `3 decisions`，带 `tabs` 行；单击一行发出 `select … q0/option:2` 并切换取舍卡；`Next` 作答并打开下一题；点击标签回到第 2 题，原答案保留；`Other…` 打开获得焦点的 `sf-input`，键入的文字进入其中，`Save answer` 作答并前进；`tab` 打开汇总；`enter` 返回 `retry-limit: 10 次(长退避)`、`log-level: "warn and above"`、`cache: 定时过期(TTL 固定)`，面板离开 `layer`。`OMOMP_LANG=zh` 下汇总行与取舍行为“标签 值”且不重叠，`esc` 返回三题均为 `(cancelled)` |
@@ -234,7 +249,12 @@ test/              校验、原生投影、演示加载与半块画面测试（b
 | 无 UI 路径 | `omp -p … "调用一次 ask 工具，一次问两个问题…"` | 载荷通过校验后得到 `ask rejected: … no native ask is available to delegate to here` |
 | 演示加载 | 脚本对 3 秒 GIF 和 4 秒 mp4（ffmpeg `testsrc2` 生成）按两种界面调用 `loadDemo`，再跑错误路径 | Tern：GIF 原样 246280 字节；mp4 在 672 ms 内转成 2621279 字节的 GIF。ANSI：64 × 18 格，分别 30 帧和 40 帧，每帧 100 ms。文件不存在、文本冒充 `.gif`、解码中途中止、`PATH` 里没有 ffmpeg，分别得到错误行（`文件不存在`、`不是 GIF、PNG 或 WebP 图片`、`已中止`、`播放这个文件需要 PATH 里有 ffmpeg`）；同样的 `PATH` 下 Tern 的 GIF 仍能加载 |
 | ANSI 演示 | 120×45 PTY，工作目录里放着这两个文件；先让模型问一题、两个选项各带 GIF 和 mp4 演示，再问一题、带 1500 ms 的三帧演示 | GIF 画在聚焦选项的取舍下方，是 18 行 `38;2;…;48;2;…m▀` 半块，带说明和 `24/30 ▶`；`p` 后显示 `⏸`，`]` 把 `17/30` 推到 `18/30`，之后 3 秒输出不再增长；`↓` 到视频选项后画出它 40 帧的画面并从第 1 帧开始；分步演示显示 `加载中 50%` · `第二步` · `2/3`，随后 `完成 ✓` · `3/3`；暂停在 `1/3` 时 `[` 回绕到 `3/3`；`esc` 返回 `render: (cancelled)`，`enter` 返回 `progress: 显示` |
-| Tern 演示 | 同上的无头 Tern，一题带三帧的问题演示和 GIF / mp4 选项演示 | GIF 在取舍卡里播放（时间码 `00:00:00.000`、第 0 帧，一秒后 `00:00:01.000`、第 10 帧；两次截取的 PSNR 14.2 dB）；记录的 TSP 帧流每 1500 ms 一次更新，只含变化的文字、说明和计数，期间面板一直停在滚到底的位置；`Pause` 发出 `demo:question:toggle`，按钮变成 `Play`，之后 22 秒没有帧更新；`Next` 只发一帧（`2/3`）；单击视频行后图片 blob 换成转出的 GIF，它也在播放（相隔一秒 PSNR 17.1 dB）；`enter` 返回 `render: 视频`，关闭后再无演示更新 |
+| Tern 演示 | 同上的无头 Tern，一题带三帧的问题演示和 GIF / mp4 选项演示 | GIF 在取舍卡里播放（时间码 `00:00:00.000`、第 0 帧，一秒后 `00:00:01.000`、第 10 帧；两次截取的 PSNR 14.2 dB）；记录的 TSP 帧流每 1500 ms 一次更新，只含变化的文字、说明和计数，期间面板一直停在滚到底的位置；`Pause` 使按钮变成 `Play`，之后 22 秒没有帧更新；`Next` 只发一帧（`2/3`）；单击视频行后图片 blob 换成转出的 GIF，它也在播放（相隔一秒 PSNR 17.1 dB）；`enter` 返回 `render: 视频`，关闭后再无演示更新 |
 | APNG 与动态 WebP | 用 ffmpeg 生成 3 秒 APNG，用 `gif2webp` 由那个 GIF 生成 WebP：两种界面各调一次 `loadDemo`，再在无头 Tern 里问一题、两个选项各带其一 | ANSI：两者都解成 64 × 18 格、30 帧，30 帧互不相同。Tern：APNG 以 `image/png`（211294 字节）、WebP 以 `image/webp`（105182 字节）发送；两者都在取舍卡里播放，相隔一秒截取的 PSNR 分别为 14.05 dB 和 13.71 dB |
+| Tern 配色主题与聊天风格 *18.14.0* | 无头 `tern serve`；在其窗格里用脚本经真实 `ProcessTerminal` 挂载面板（两题，Postgres 已作答，光标回到带分步演示的 SQLite）；`ctl css` 加载 `tern/ask-more.css`；对 Tern 0.9.6 内置的 102 个主题逐个执行 `plugins run chat:reader\|spine\|console` 与 `theme dark "<name>"`；脚本检查每张截图的 layout JSON 与像素 | 改动前，102 张 Reader 截图中选项文字距行左边缘都只有 10 px，已选标记不可见（Postgres 与 Files 标记区的像素差为 0.3–1.2，和两个未选行之间一样）。改动后 306 张截图全部：文字距行左边缘 40 / 34 / 54 px（Reader / Spine / Console）；已选与未选标记差 25–51 / 6–20 / 1.4–5.6，两个未选行之间 ≤ 1.8 / 0 / 0（Console 的 `(•)` 与 `( )` 只差一个圆点）；WCAG 对比度最低为选项文字 4.84、说明 4.51、简报 5.50 |
+| Tern CJK 汇总 *18.14.0* | 同上，三道中文题，其一标签 15 个字，Other 以中文作答；每种聊天风格下 1280 与 640 px 窗格 | 各风格、各宽度下汇总行都是“标签 答案”且不重叠；先试过的原生 `kv`（`omp.ask.answers`）在 Reader 1280 px 下把长标签画到了答案上 |
+| Tern 按钮动作 *18.14.0* | 同上，带 `PI_TUI_TSP_RECORD` 记录；点击选项演示的 `Pause` 与 `Next` | Tern 发出 `demo:0:option:0:toggle`（按钮变成 `Play`）与 `answer:0:0`（`✓ Storage`，打开 Format） |
+| Tern 端到端 *18.14.0* | Console 风格的无头 Tern 中运行 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，提示词要求一次问两个独立问题；只用键盘 | 模型的 ask 以 `2 decisions` 面板打开，标记为 `( )`，光标 `›` 在其推荐行；`enter`、`↓`、`enter` 到达汇总（`✓ 重试上限`、`✓ 日志级别`、`All answered · Submit sends them`）；`enter` 返回 `retry: 固定 3 次`、`log_level: info`，模型据此复述 |
+| Tern 插件 *18.14.0* | `tern plugin link …/tern` 后 `tern plugin list --json`，两者都以临时目录作 `TERN_CONFIG_DIR` | `omp-ask-more` 0.1.0，`window: true`，状态 `ready`，无问题 |
 
-尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、带扩展参数的 `/tree` 重答，以及 ANSI 页面打开时调整终端大小（每行按当前宽度截断，画面不会重画）。
+尚未在 runtime 验证：委托原生这条路本身（需要一个 `ctx.invokeTool` 存在而 `ui.custom` 不存在的环境）、协作 guest、带扩展参数的 `/tree` 重答、ANSI 页面打开时调整终端大小（每行按当前宽度截断，画面不会重画）、已安装的插件在 Tern 窗口中加载样式表（无头 Tern 只以 fixture 方式加载插件，所以上面的截图用 `ctl css` 加载 `tern/ask-more.css`），以及从 GitHub `tern plugin install`。
