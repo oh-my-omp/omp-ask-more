@@ -13,7 +13,6 @@ import {
 	routeSgrMouseInput,
 	ScrollView,
 	type RenderTimer,
-	type TUI,
 	getMarkdownTheme,
 	matchesKey,
 	theme,
@@ -47,8 +46,15 @@ import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type 
 
 export type Submission = { readonly kind: "submit"; readonly answers: readonly Answer[] } | { readonly kind: "cancel" };
 
+/** What the component needs from the TUI: its render clock and the terminal height. */
+export interface SheetHost {
+	scheduleAfter(delayMs: number, callback: () => void): RenderTimer;
+	requestComponentRender(component: Component): void;
+	readonly terminal: { readonly rows: number };
+}
+
 export interface AskMoreOptions {
-	readonly tui: TUI;
+	readonly tui: SheetHost;
 	readonly questions: readonly AskQuestion[];
 	/** Resolved evidence, one list per question. */
 	readonly evidence: readonly (readonly ResolvedEvidence[])[];
@@ -75,7 +81,7 @@ function newView(): ScrollView {
 export class AskMoreComponent implements Component {
 	debugKind = "AskMore";
 	readonly nativeOverlay: NonNullable<Component["nativeOverlay"]>;
-	readonly #tui: TUI;
+	readonly #tui: SheetHost;
 	readonly #finish: (submission: Submission) => void;
 	readonly #states: readonly QuestionState[];
 	readonly #review: ReviewState = { view: newView(), nativeScroll: undefined };
