@@ -795,6 +795,8 @@ export class AskMoreComponent implements Component {
 				this.#change(() => {
 					this.#countdown = { kind: "notified", at, due, timer };
 				});
+				// A timer, not input, changed the sheet: nothing else asks the TUI to draw it again.
+				this.#tui.requestComponentRender(this);
 				this.#notify(due);
 				return;
 			}

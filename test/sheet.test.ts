@@ -34,7 +34,12 @@ class Clock implements SheetHost {
 		};
 	}
 
-	requestComponentRender(): void {}
+	/** Draws the TUI was asked for: a change a timer makes reaches the screen only through one. */
+	renders = 0;
+
+	requestComponentRender(): void {
+		this.renders++;
+	}
 
 	advance(ms: number): void {
 		const until = this.#now + ms;
@@ -392,8 +397,10 @@ describe("countdown", () => {
 		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: due => dues.push(due) });
 		const idle = sheet.countdown();
 		expect(idle).toBeDefined();
+		const rendersBefore = clock.renders;
 		clock.advance(30 * MIN);
 		expect(dues).toHaveLength(1);
+		expect(clock.renders).toBeGreaterThan(rendersBefore);
 		expect(Math.abs((dues[0]?.getTime() ?? 0) - Date.now() - 20 * MIN)).toBeLessThan(5000);
 		expect(sheet.countdown()).not.toBe(idle);
 		expect(sheet.submissions).toEqual([]);
