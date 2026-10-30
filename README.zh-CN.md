@@ -145,11 +145,13 @@ stateDiagram-v2
 
 ## 模型发出什么、收到什么
 
-参数是原生参数加上扩展字段：
+参数是原生参数（不含 `multi`）加上扩展字段：
 
 | 沿用原生 `ask` | 新增 |
 |---|---|
-| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`multi?`、`recommended?` | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
+| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?` | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
+
+工具按严格工具调用注册，provider 会把模型的参数限定在 schema 之内。参数形状也是按此设计的：演示是两种之一，`{kind: "frames", frames, interval_ms?}` 或 `{kind: "file", path}`；证据用数字 `start`、`end` 指明行号，而不是文本。严格模式下，模型把没用到的可选字段都填成 `null`，omp 在检查调用之前把它们去掉。
 
 工具说明讲的是 `ask` 做什么、什么时候用：
 
@@ -176,11 +178,12 @@ ask({
       what: "选择失败后的重试策略，决定是否引入幂等键。",
       how: "选 A 要加迁移；选 B 只改 retry() 内部，不动调用方。",
       evidence: [
-        { path: "src/retry.ts", lines: "41-58", note: "现有重试只有 1 次" },
-        { path: "src/order/paid.ts", lines: "88-96" }
+        { path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
+        { path: "src/order/paid.ts", start: 88, end: 96 }
       ],
       diagram: "flowchart LR\n  client --> retry --> write",
       demo: {
+        kind: "frames",
         frames: [
           { body: "`write #1` → 429", caption: "第一次写入被限流" },
           { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
@@ -195,7 +198,7 @@ ask({
         tradeoff: "重试安全，代价是迁移",
         holds_when: "下游能给出稳定请求键",
         cost: "1 张表、2 个字段，可回滚",
-        demo: { path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
+        demo: { kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
       { label: "固定 3 次重试", description: "改动最小",
         tradeoff: "不动 schema，但重复写会继续发生",
         cost: "只改 retry() 内部" }
@@ -210,7 +213,7 @@ ask({
 })
 ```
 
-限制：每题 2–5 个选项，每题最多 6 条证据引用，每条引用最多 80 行，不支持 `multi`。演示：2–12 帧，每帧 300–5000 毫秒（默认 1200）；文件最大 16 MB，只播前 15 秒。违反规则的调用在任何界面打开之前就被拒绝，一次列出全部问题，由模型改好再调用。
+限制：每题 2–5 个选项；每题最多 6 条证据引用，每条是一段最多 80 行的连续行（只给 `start` 就是一行，两个都不给就显示文件前 40 行，不相邻的几段各写一条引用）；不支持 `multi`。演示：2–12 帧，每帧 300–5000 毫秒（默认 1200）；文件最大 16 MB，只播前 15 秒。违反规则的调用在任何界面打开之前就被拒绝，一次列出全部问题，由模型改好再调用。
 
 结果是原生形状：`User answers:` 加每题一行，按提问顺序：
 

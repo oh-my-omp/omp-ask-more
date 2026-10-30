@@ -15,7 +15,7 @@ function questionResult(question: AskQuestion, answer: Answer): QuestionResult {
 		id: question.id,
 		question: question.question,
 		options: question.options.map(option => option.label),
-		multi: question.multi ?? false,
+		multi: false,
 	};
 	switch (answer.kind) {
 		case "unanswered":

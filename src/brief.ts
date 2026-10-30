@@ -1,5 +1,6 @@
-// Evidence: the model cites `path:lines`; the tool reads the file, so the panel shows real lines
-// instead of model-typed code. A reference that cannot be read is reported, never fatal.
+// Evidence: the model cites a file and an optional line window; the tool reads the file, so the
+// panel shows real lines instead of model-typed code. A reference that cannot be read is reported,
+// never fatal.
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { tr } from "./i18n.ts";
@@ -22,15 +23,15 @@ export type ResolvedEvidence =
 	  }
 	| { readonly ok: false; readonly path: string; readonly note?: string; readonly error: string };
 
-function parseWindow(spec: string | undefined, total: number): { start: number; end: number } | null {
-	if (spec === undefined || spec.trim() === "") return { start: 1, end: Math.min(total, HEAD_LINES) };
-	const match = /^(\d+)(?:-(\d+))?$/.exec(spec.trim());
-	if (!match) return null;
-	const first = Number(match[1]);
-	const last = match[2] === undefined ? first : Number(match[2]);
-	const start = Math.max(1, Math.min(first, last));
-	const end = Math.min(total, Math.max(first, last), start + MAX_EVIDENCE_LINES - 1);
-	return end < start ? null : { start, end };
+/**
+ * The window a reference names: its first lines without `start`, one line with `start` alone,
+ * `start`-`end` inclusive otherwise. A window past the end of the file is cut to it; one that
+ * starts past it is null.
+ */
+function evidenceWindow(ref: EvidenceRef, total: number): { start: number; end: number } | null {
+	if (ref.start === undefined) return { start: 1, end: Math.min(total, HEAD_LINES) };
+	const end = Math.min(total, ref.end ?? ref.start, ref.start + MAX_EVIDENCE_LINES - 1);
+	return end < ref.start ? null : { start: ref.start, end };
 }
 
 async function readRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence> {
@@ -46,7 +47,7 @@ async function readRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence>
 		}
 		const text = await readFile(absolute, "utf8");
 		const all = text.split("\n");
-		const window = parseWindow(ref.lines, all.length);
+		const window = evidenceWindow(ref, all.length);
 		if (window === null) {
 			return { ok: false, path: ref.path, ...(note ? { note } : {}), error: tr("line window is outside the file", "行段超出文件范围") };
 		}

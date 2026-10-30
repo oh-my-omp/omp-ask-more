@@ -145,11 +145,13 @@ stateDiagram-v2
 
 ## What the model sends and gets
 
-The parameters are the native ones plus extension fields:
+The parameters are the native ones, without `multi`, plus extension fields:
 
 | Kept from the native `ask` | Added |
 |---|---|
-| tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `multi?`, `recommended?` | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
+| tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
+
+The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The shapes are written for it: a demo is one of two kinds, `{kind: "frames", frames, interval_ms?}` or `{kind: "file", path}`, and an evidence entry names its lines as numbers, `start` and `end`, never as text. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
 
 The tool description says what `ask` does and when to use it:
 
@@ -176,11 +178,12 @@ ask({
       what: "选择失败后的重试策略，决定是否引入幂等键。",
       how: "选 A 要加迁移；选 B 只改 retry() 内部，不动调用方。",
       evidence: [
-        { path: "src/retry.ts", lines: "41-58", note: "现有重试只有 1 次" },
-        { path: "src/order/paid.ts", lines: "88-96" }
+        { path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
+        { path: "src/order/paid.ts", start: 88, end: 96 }
       ],
       diagram: "flowchart LR\n  client --> retry --> write",
       demo: {
+        kind: "frames",
         frames: [
           { body: "`write #1` → 429", caption: "第一次写入被限流" },
           { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
@@ -195,7 +198,7 @@ ask({
         tradeoff: "重试安全，代价是迁移",
         holds_when: "下游能给出稳定请求键",
         cost: "1 张表、2 个字段，可回滚",
-        demo: { path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
+        demo: { kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
       { label: "固定 3 次重试", description: "改动最小",
         tradeoff: "不动 schema，但重复写会继续发生",
         cost: "只改 retry() 内部" }
@@ -210,7 +213,7 @@ ask({
 })
 ```
 
-Limits: 2–5 options per question, at most 6 evidence references per question, at most 80 lines per reference, no `multi`. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
+Limits: 2–5 options per question; at most 6 evidence references per question, each one window of at most 80 lines (`start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate references); no `multi`. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
 
 The result is the native one: `User answers:` and one line per question, in the order asked:
 

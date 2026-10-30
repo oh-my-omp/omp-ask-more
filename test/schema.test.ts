@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { demoSchema, nativeQuestion, parametersSchema, validate, type AskParams } from "../src/schema.ts";
 
 function payload(overrides: (params: AskParams) => void = () => {}): AskParams {
@@ -67,14 +68,6 @@ describe("validate", () => {
 		if (!checked.ok) expect(checked.problems.join("\n")).toContain("added by the UI");
 	});
 
-	it("rejects a multi-select question", () => {
-		const params = payload();
-		params.questions[0]!.multi = true;
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("multi");
-	});
-
 	it("rejects a recommended index outside the options", () => {
 		const params = payload();
 		params.questions[0]!.recommended = 9;
@@ -85,63 +78,74 @@ describe("validate", () => {
 
 	it("rejects more evidence references than the surface can show", () => {
 		const params = payload();
-		params.questions[0]!.brief.evidence = Array.from({ length: 7 }, (_, index) => ({ path: `src/f${index}.ts`, lines: undefined, note: undefined }));
+		params.questions[0]!.brief.evidence = Array.from({ length: 7 }, (_, index) => ({ path: `src/f${index}.ts`, start: undefined, end: undefined, note: undefined }));
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) expect(checked.problems.join("\n")).toContain("at most 6");
 	});
 
-	it("rejects an evidence window wider than the surface draws", () => {
+	it("accepts an evidence window of 80 lines and rejects one of 81", () => {
 		const params = payload();
-		params.questions[0]!.brief.evidence = [{ path: "src/retry.ts", lines: "41-300", note: undefined }];
+		params.questions[0]!.brief.evidence = [
+			{ path: "src/retry.ts", start: 1, end: 80, note: undefined },
+			{ path: "src/retry.ts", start: 1, end: 81, note: undefined },
+		];
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("spans 260 lines");
+		if (!checked.ok) expect(checked.problems).toEqual(["questions[0].brief.evidence[1]: lines 1-81 span 81 lines; narrow it to 80 or fewer."]);
 	});
 
-	it("rejects an evidence line window that is not N or N-M", () => {
+	it("rejects an evidence end without a start, or before it", () => {
 		const params = payload();
-		params.questions[0]!.brief.evidence = [{ path: "src/retry.ts", lines: "41..58", note: undefined }];
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("is not \"N\" or \"N-M\"");
-	});
-
-	it("accepts a question demo of frames and an option demo of a file", () => {
-		const params = payload();
-		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "a" }, { body: "b" }], interval_ms: 800 });
-		params.questions[0]!.options[0]!.demo = demoSchema.parse({ path: "docs/retry.gif", caption: "两次失败后退避" });
-		expect(validate(params).ok).toBe(true);
-	});
-
-	it("rejects a demo with both frames and a path, or with neither", () => {
-		const params = payload();
-		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "a" }, { body: "b" }], path: "a.gif" });
-		params.questions[0]!.options[1]!.demo = demoSchema.parse({ caption: "nothing to play" });
+		params.questions[0]!.brief.evidence = [
+			{ path: "src/retry.ts", start: undefined, end: 58, note: undefined },
+			{ path: "src/retry.ts", start: 58, end: 41, note: undefined },
+		];
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) {
 			expect(checked.problems).toEqual([
-				"questions[0].options[1].demo: give exactly one of frames (an animation you write) or path (an animation or video file)",
-				"questions[0].brief.demo: give exactly one of frames (an animation you write) or path (an animation or video file)",
+				"questions[0].brief.evidence[0].end: 58 without start; give start too, or leave both out for the file's first lines",
+				"questions[0].brief.evidence[1].end: 41 is before start 58",
 			]);
 		}
 	});
 
+	it("accepts a question demo of frames and an option demo of a file", () => {
+		const params = payload();
+		params.questions[0]!.brief.demo = demoSchema.parse({ kind: "frames", frames: [{ body: "a" }, { body: "b" }], interval_ms: 800 });
+		params.questions[0]!.options[0]!.demo = demoSchema.parse({ kind: "file", path: "docs/retry.gif", caption: "两次失败后退避" });
+		expect(validate(params).ok).toBe(true);
+	});
+
+	it("does not parse a demo without its kind, or one carrying the other kind's source", () => {
+		expect(demoSchema.safeParse({ frames: [{ body: "a" }, { body: "b" }] }).success).toBe(false);
+		expect(demoSchema.safeParse({ kind: "file", frames: [{ body: "a" }, { body: "b" }] }).success).toBe(false);
+		expect(demoSchema.safeParse({ kind: "frames", path: "a.gif" }).success).toBe(false);
+	});
+
 	it("rejects a frame count, an interval or a file type the sheet cannot play", () => {
 		const params = payload();
-		params.questions[0]!.brief.demo = demoSchema.parse({ frames: [{ body: "only one" }], interval_ms: 100 });
-		params.questions[0]!.options[0]!.demo = demoSchema.parse({ path: "notes/plan.pdf" });
-		params.questions[0]!.options[1]!.demo = demoSchema.parse({ path: "clip.mp4", interval_ms: 1000 });
+		params.questions[0]!.brief.demo = demoSchema.parse({ kind: "frames", frames: [{ body: "only one" }], interval_ms: 100 });
+		params.questions[0]!.options[0]!.demo = demoSchema.parse({ kind: "file", path: "notes/plan.pdf" });
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) {
-			const problems = checked.problems.join("\n");
-			expect(problems).toContain("questions[0].brief.demo.frames: 1 frames; a demo plays 2 to 12");
-			expect(problems).toContain("questions[0].brief.demo.interval_ms: 100 is not a whole number of ms from 300 to 5000");
-			expect(problems).toContain('questions[0].options[0].demo.path: "notes/plan.pdf" is not one of');
-			expect(problems).toContain("questions[0].options[1].demo.interval_ms: only frames take an interval");
+			expect(checked.problems).toEqual([
+				'questions[0].options[0].demo.path: "notes/plan.pdf" is not one of .gif, .png, .apng, .webp, .mp4, .mov, .webm, .mkv, .m4v',
+				"questions[0].brief.demo.frames: 1 frames; a demo plays 2 to 12",
+				"questions[0].brief.demo.interval_ms: 100 is not from 300 to 5000 ms",
+			]);
 		}
+	});
+});
+
+describe("strict tool calling", () => {
+	it("keeps the parameters representable in strict mode", () => {
+		// A shape omp cannot express in strict mode silently falls back to non-strict, and the
+		// provider then makes the model fill every optional field (the openai-codex failure).
+		const wire = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<typeof toolWireSchema>[0]);
+		expect(tryEnforceStrictSchema(wire as Record<string, unknown>).strict).toBe(true);
 	});
 });
 

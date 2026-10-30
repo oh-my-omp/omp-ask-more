@@ -64,18 +64,20 @@ function trimmed(value: string | undefined): string | undefined {
 	return text ? text : undefined;
 }
 
-/** The spec of a validated demo (`validate` has checked that exactly one source is given). */
+/** The spec of a validated demo. */
 export function demoSpec(demo: DemoParams): DemoSpec {
 	const caption = trimmed(demo.caption);
-	if (demo.frames !== undefined) {
-		return {
-			kind: "frames",
-			frames: demo.frames.map(frame => ({ body: frame.body, ...(trimmed(frame.caption) ? { caption: trimmed(frame.caption) } : {}) })),
-			intervalMs: demo.interval_ms ?? DEFAULT_FRAME_MS,
-			...(caption ? { caption } : {}),
-		};
+	switch (demo.kind) {
+		case "frames":
+			return {
+				kind: "frames",
+				frames: demo.frames.map(frame => ({ body: frame.body, ...(trimmed(frame.caption) ? { caption: trimmed(frame.caption) } : {}) })),
+				intervalMs: demo.interval_ms ?? DEFAULT_FRAME_MS,
+				...(caption ? { caption } : {}),
+			};
+		case "file":
+			return { kind: "file", path: demo.path.trim(), ...(caption ? { caption } : {}) };
 	}
-	return { kind: "file", path: (demo.path ?? "").trim(), ...(caption ? { caption } : {}) };
 }
 
 class DemoError extends Error {}

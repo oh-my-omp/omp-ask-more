@@ -28,7 +28,7 @@ flowchart LR
   n --> a
 ```
 
-The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. It registers the tool under the native name `ask` (`approval: "read"`, matching `packages/coding-agent/src/tools/ask.ts:544-551`), so the model reads this plugin's description (`src/description.ts`) instead of `prompts/tools/ask.md`, and the result renderer stays the native `askToolRenderer`, since renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`). It also sets `strict: false`. Every extension field is optional, and an OpenAI-family backend that receives no `strict` flag treats the tool as strict, which makes the model fill each optional field: an empty `demo.path`, a `demo` with zero frames. Validation rejects those, and in the `openai-codex` runs the models could not leave the field out and resent the same call until stopped. omp keeps an explicit `false` on the wire (`ToolDefinition.strict`, `packages/ai/src/providers/openai-responses.ts:1907-1918`).
+The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. It registers the tool under the native name `ask` (`approval: "read"`, matching `packages/coding-agent/src/tools/ask.ts:544-551`), so the model reads this plugin's description (`src/description.ts`) instead of `prompts/tools/ask.md`, and the result renderer stays the native `askToolRenderer`, since renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`). It sets `strict: true`: the provider holds the arguments to the schema's grammar, and omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `enforceStrictSchema`; `packages/ai/src/utils/validation.ts`, `normalizeOptionalNullsForSchema`). OpenAI-family backends apply strict mode even when the flag is absent, so the schema is written for it either way (see Schema).
 
 One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`extension-ui-controller.ts:1283-1369`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself. One ask is in flight at a time: a second call is rejected instead of opening a second sheet and orphaning the first one's promise.
 
@@ -38,17 +38,19 @@ The schema is the native one extended the way `omp-todo-more` extends `todo`:
 
 | Kept | Added |
 |---|---|
-| Tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `multi?`, `recommended?` (`packages/coding-agent/src/tools/ask.ts:52-88`) | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
+| Tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` (`packages/coding-agent/src/tools/ask.ts:52-88`); not `multi`, since every question takes one answer | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
 
 `arktype` keeps undeclared keys, so a persisted extended call still passes `recoverAskQuestions` (`ask.ts:94-109`) and `/tree` re-answer reopens it; the native dialog there renders the native fields only.
+
+The shapes are chosen for strict mode, where the model has to produce every field. A choice between two shapes is a union tagged by `kind`, so the model builds one branch and never fills the other; two optional fields with an "exactly one" rule made strict models send `{frames: […], path: ""}`. Every optional string rejects `""`, so an empty placeholder is dropped before validation the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
 How the fields are drawn:
 
 - `brief.where/what/how` are drawn above the options and never collapsed.
-- `evidence[].path` with optional `lines` is resolved against the session's working directory and read when the ask opens, so the page shows the real lines (in Tern a `code` node with `path` and `start`, `packages/wire/src/tsp.ts:222-236`) instead of model-typed code. An unreadable reference is drawn in an error tone with the reason and never blocks the ask.
+- `evidence[].path` with optional `start` and `end` is resolved against the session's working directory and read when the ask opens, so the page shows the real lines (in Tern a `code` node with `path` and `start`, `packages/wire/src/tsp.ts:222-236`) instead of model-typed code. Neither line shows the file's first 40 lines, `start` alone one line, both an inclusive window; a window past the end of the file is cut there, and one starting past it is an error. Lines that are not adjacent are separate references. An unreadable reference is drawn in an error tone with the reason and never blocks the ask.
 - `diagram` is Mermaid source: the `md` node draws it natively in Tern, and the TUI Markdown renderer draws it as ASCII (`packages/tui/src/theme/mermaid-cache.ts:66,100`).
 - `tradeoff` / `holds_when` / `cost` are one line each and are drawn under the focused option.
-- `demo` gives exactly one source. `frames[{body, caption?}]` with `interval_ms` are Markdown frames the sheet steps through in a loop (text, a ` ```mermaid ` diagram, a fenced text drawing), every frame padded to the tallest so nothing below moves. `path` names an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), resolved against the session's working directory like evidence. A question's demo sits under the decision; an option's demo sits in its tradeoff card and restarts whenever the cursor moves onto that option. `caption` says what to watch.
+- `demo` is one of two kinds. `{kind: "frames", frames[{body, caption?}], interval_ms?}` are Markdown frames the sheet steps through in a loop (text, a ` ```mermaid ` diagram, a fenced text drawing), every frame padded to the tallest so nothing below moves. `{kind: "file", path}` names an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), resolved against the session's working directory like evidence. A question's demo sits under the decision; an option's demo sits in its tradeoff card and restarts whenever the cursor moves onto that option. `caption` says what to watch.
 
 ## Validation
 
@@ -62,12 +64,10 @@ Validation runs at the tool boundary, before any UI opens, checks every question
 | every option has a non-empty `tradeoff` | `questions[i].options[j].tradeoff: empty` |
 | ≥ 2 options | a decision needs at least two options |
 | labels unique within a question and not reserved (`Other (type your own)`, `Chat about this`, `Next →`) | named per option |
-| `multi` unset | not supported; split it into separate questions |
 | `recommended` is an index into the options | names the bad value |
-| ≤ 6 evidence references; `lines` is `N` or `N-M` and spans ≤ 80 lines | names the reference and the span |
-| a demo gives exactly one of `frames` and `path` | `….demo: give exactly one of frames (an animation you write) or path (an animation or video file)` |
-| 2–12 frames, none blank; `interval_ms` a whole number from 300 to 5000, and only with `frames` | names the count, the frame or the interval |
-| `path` ends in `.gif`, `.png`, `.apng`, `.webp`, `.mp4`, `.mov`, `.webm`, `.mkv` or `.m4v` | names the path and the accepted extensions |
+| ≤ 6 evidence references; `end` only with `start`, not before it, and the window ≤ 80 lines | names the reference, the lines and the span |
+| 2–12 frames, none blank; `interval_ms` from 300 to 5000 | names the count, the frame or the interval |
+| a file demo's `path` ends in `.gif`, `.png`, `.apng`, `.webp`, `.mp4`, `.mov`, `.webm`, `.mkv` or `.m4v` | names the path and the accepted extensions |
 
 ## ANSI page
 
@@ -152,7 +152,7 @@ sequenceDiagram
 ```
 index.ts           plugin entry: registers ask, validates, mounts the fullscreen overlay, delegates
 src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question validation
-src/brief.ts       path:lines resolution against the working directory, bounded reads
+src/brief.ts       evidence windows (path, start, end) read against the working directory, bounded reads
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
 src/state.ts       per-question state (cursor, answer, Other field, folding, scroll, demo playback) and the active tab
 src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events, the countdown

@@ -1,6 +1,11 @@
-// The tool's parameters: every native `ask` field, plus the extension fields that carry the
-// decision. Native components render the native part and ignore the rest; this plugin's
-// component renders both. See README.md#the-contract.
+// The tool's parameters: the native `ask` fields this plugin supports, plus the extension fields
+// that carry the decision. Native components render the native part and ignore the rest; this
+// plugin's component renders both. See README.md#what-the-model-sends-and-gets.
+//
+// The shapes are written for strict tool calling (index.ts registers `strict: true`): omp makes
+// every optional field nullable and drops null placeholders before validation, so a choice
+// between shapes is a union tagged by `kind`, never two optional fields, and every optional
+// string rejects "" so an empty placeholder is dropped the same way.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
 /** Labels the UI adds itself; the native tool rejects them too (`tools/ask.ts:52-58`). */
@@ -22,49 +27,58 @@ export const DEMO_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v"] a
 
 export const evidenceSchema = z.object({
 	path: z.string().min(1).describe("file or directory path, relative to the working directory or absolute"),
-	lines: z.string().optional().describe('line window: "41" or "41-58"; omitted reads the head of the file'),
-	note: z.string().optional().describe("why this evidence matters"),
+	start: z.number().int().min(1).optional().describe("first line, 1-based; without it the file's first lines are shown"),
+	end: z.number().int().min(1).optional().describe("last line, inclusive; needs start, and omitted means start alone. For lines that are not adjacent, cite each window as its own entry"),
+	note: z.string().min(1).optional().describe("why this evidence matters"),
 });
 
 export const demoFrameSchema = z.object({
 	body: z.string().min(1).describe("Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
-	caption: z.string().optional().describe("one line under this frame"),
+	caption: z.string().min(1).optional().describe("one line under this frame"),
 });
 
-export const demoSchema = z.object({
-	frames: z.array(demoFrameSchema).optional().describe("frames played in a loop; give either frames or path"),
-	interval_ms: z.number().optional().describe("frames only: time per frame in ms"),
-	path: z.string().optional().describe("an animation or video file; relative to the working directory or absolute"),
-	caption: z.string().optional().describe("one line saying what to watch"),
+export const framesDemoSchema = z.object({
+	kind: z.literal("frames"),
+	frames: z.array(demoFrameSchema).describe("frames played in a loop"),
+	interval_ms: z.number().int().optional().describe("time per frame in ms"),
+	caption: z.string().min(1).optional().describe("one line saying what to watch"),
 });
+
+export const fileDemoSchema = z.object({
+	kind: z.literal("file"),
+	path: z.string().min(1).describe("an animation or video file; relative to the working directory or absolute"),
+	caption: z.string().min(1).optional().describe("one line saying what to watch"),
+});
+
+/** An animation the model writes, or a file it names. */
+export const demoSchema = z.union([framesDemoSchema, fileDemoSchema]);
 
 export const briefSchema = z.object({
 	where: z.string().min(1).describe("what exists now: paths, symbols, the observation that forces the decision"),
 	what: z.string().min(1).describe("the decision, and why code, docs and conventions cannot make it"),
 	how: z.string().min(1).describe("what happens after each answer, and which constraint decides it"),
 	evidence: z.array(evidenceSchema).optional(),
-	diagram: z.string().optional().describe("Mermaid source (a flowchart, sequence or state diagram)"),
+	diagram: z.string().min(1).optional().describe("Mermaid source (a flowchart, sequence or state diagram)"),
 	demo: demoSchema.optional().describe("an animation of how things behave now"),
-	risks: z.array(z.string()).optional(),
+	risks: z.array(z.string().min(1)).optional(),
 });
 
 export const optionSchema = z.object({
 	label: z.string().min(1),
-	description: z.string().optional().describe("one line that disambiguates the option; never the tradeoff"),
-	preview: z.string().optional().describe("extra Markdown the native surface can show"),
+	description: z.string().min(1).optional().describe("one line that disambiguates the option; never the tradeoff"),
+	preview: z.string().min(1).optional().describe("extra Markdown the native surface can show"),
 	tradeoff: z.string().min(1).describe("what the option buys and what it costs, in one line"),
-	holds_when: z.string().optional().describe("the condition under which this option is right"),
-	cost: z.string().optional().describe("what changes: files, migrations, time"),
+	holds_when: z.string().min(1).optional().describe("the condition under which this option is right"),
+	cost: z.string().min(1).optional().describe("what changes: files, migrations, time"),
 	demo: demoSchema.optional().describe("an animation of the result of picking this option"),
 });
 
 export const questionSchema = z.object({
 	id: z.string().min(1).describe("unique within the call; the answer is reported under it"),
 	question: z.string().min(1).describe("one or two sentences; the brief carries the context"),
-	header: z.string().optional().describe("short tab label"),
+	header: z.string().min(1).optional().describe("short tab label"),
 	options: z.array(optionSchema).min(2).max(5),
-	multi: z.boolean().optional().describe("not supported: one answer per question"),
-	recommended: z.number().optional().describe("0-based index of the option you would pick; the cursor starts there, so Enter accepts it"),
+	recommended: z.number().int().optional().describe("0-based index of the option you would pick; the cursor starts there, so Enter accepts it"),
 	brief: briefSchema,
 });
 
@@ -82,7 +96,8 @@ export type AskParams = z.infer<typeof parametersSchema>;
 /** Every question validated; or every reason the call cannot be asked. */
 export type Validated = { readonly ok: true; readonly questions: readonly AskQuestion[] } | { readonly ok: false; readonly problems: readonly string[] };
 
-const LINE_SPEC = /^\d+(?:-\d+)?$/;
+export type FramesDemo = z.infer<typeof framesDemoSchema>;
+export type FileDemo = z.infer<typeof fileDemoSchema>;
 
 /** Bounds the surface can show without folding away what the model cited. */
 export const MAX_EVIDENCE_REFS = 6;
@@ -109,7 +124,6 @@ export function validate(params: AskParams): Validated {
 function validateQuestion(question: AskQuestion, at: string): string[] {
 	const problems: string[] = [];
 	if (question.question.trim().length === 0) problems.push(`${at}.question: empty`);
-	if (question.multi === true) problems.push(`${at}.multi: not supported; each question takes one answer. Split it into separate questions.`);
 
 	for (const field of ["where", "what", "how"] as const) {
 		if (question.brief[field].trim().length === 0) problems.push(`${at}.brief.${field}: empty`);
@@ -138,16 +152,18 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 	evidence.forEach((ref, index) => {
 		const refAt = `${at}.brief.evidence[${index}]`;
 		if (ref.path.trim().length === 0) problems.push(`${refAt}.path: empty`);
-		if (ref.lines === undefined) return;
-		const spec = ref.lines.trim();
-		if (!LINE_SPEC.test(spec)) {
-			problems.push(`${refAt}.lines: "${ref.lines}" is not "N" or "N-M"`);
+		if (ref.end === undefined) return;
+		if (ref.start === undefined) {
+			problems.push(`${refAt}.end: ${ref.end} without start; give start too, or leave both out for the file's first lines`);
 			return;
 		}
-		const [first, last] = spec.split("-").map(Number);
-		const span = last === undefined ? 1 : Math.abs(last - (first ?? 0)) + 1;
+		if (ref.end < ref.start) {
+			problems.push(`${refAt}.end: ${ref.end} is before start ${ref.start}`);
+			return;
+		}
+		const span = ref.end - ref.start + 1;
 		if (span > MAX_EVIDENCE_LINES) {
-			problems.push(`${refAt}.lines: "${ref.lines}" spans ${span} lines; narrow it to ${MAX_EVIDENCE_LINES} or fewer.`);
+			problems.push(`${refAt}: lines ${ref.start}-${ref.end} span ${span} lines; narrow it to ${MAX_EVIDENCE_LINES} or fewer.`);
 		}
 	});
 
@@ -166,33 +182,35 @@ export function extensionOf(path: string): string {
 }
 
 function validateDemo(demo: DemoParams, at: string): string[] {
+	switch (demo.kind) {
+		case "frames":
+			return validateFrames(demo, at);
+		case "file":
+			return validateFile(demo, at);
+	}
+}
+
+function validateFrames(demo: FramesDemo, at: string): string[] {
 	const problems: string[] = [];
-	const { frames, path } = demo;
-	if ((frames === undefined) === (path === undefined)) {
-		problems.push(`${at}: give exactly one of frames (an animation you write) or path (an animation or video file)`);
+	if (demo.frames.length < MIN_DEMO_FRAMES || demo.frames.length > MAX_DEMO_FRAMES) {
+		problems.push(`${at}.frames: ${demo.frames.length} frames; a demo plays ${MIN_DEMO_FRAMES} to ${MAX_DEMO_FRAMES}`);
 	}
-	if (frames !== undefined) {
-		if (frames.length < MIN_DEMO_FRAMES || frames.length > MAX_DEMO_FRAMES) {
-			problems.push(`${at}.frames: ${frames.length} frames; a demo plays ${MIN_DEMO_FRAMES} to ${MAX_DEMO_FRAMES}`);
-		}
-		frames.forEach((frame, index) => {
-			if (frame.body.trim().length === 0) problems.push(`${at}.frames[${index}].body: empty`);
-		});
-	}
+	demo.frames.forEach((frame, index) => {
+		if (frame.body.trim().length === 0) problems.push(`${at}.frames[${index}].body: empty`);
+	});
 	const interval = demo.interval_ms;
-	if (interval !== undefined) {
-		if (frames === undefined) problems.push(`${at}.interval_ms: only frames take an interval; a file plays at its own speed`);
-		else if (!Number.isInteger(interval) || interval < MIN_FRAME_MS || interval > MAX_FRAME_MS) {
-			problems.push(`${at}.interval_ms: ${interval} is not a whole number of ms from ${MIN_FRAME_MS} to ${MAX_FRAME_MS}`);
-		}
-	}
-	if (path !== undefined) {
-		const extension = extensionOf(path.trim());
-		const known = [...DEMO_IMAGE_EXTENSIONS, ...DEMO_VIDEO_EXTENSIONS] as readonly string[];
-		if (path.trim().length === 0) problems.push(`${at}.path: empty`);
-		else if (!known.includes(extension)) problems.push(`${at}.path: "${path}" is not one of ${known.join(", ")}`);
+	if (interval !== undefined && (interval < MIN_FRAME_MS || interval > MAX_FRAME_MS)) {
+		problems.push(`${at}.interval_ms: ${interval} is not from ${MIN_FRAME_MS} to ${MAX_FRAME_MS} ms`);
 	}
 	return problems;
+}
+
+function validateFile(demo: FileDemo, at: string): string[] {
+	const path = demo.path.trim();
+	const known = [...DEMO_IMAGE_EXTENSIONS, ...DEMO_VIDEO_EXTENSIONS] as readonly string[];
+	if (path.length === 0) return [`${at}.path: empty`];
+	if (!known.includes(extensionOf(path))) return [`${at}.path: "${demo.path}" is not one of ${known.join(", ")}`];
+	return [];
 }
 
 /** The native shape of one question: extension fields dropped, `preview` kept when the model wrote one. */

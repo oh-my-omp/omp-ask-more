@@ -120,10 +120,11 @@ export default function askMore(pi: ExtensionAPI): void {
 		description: DESCRIPTION,
 		parameters: parametersSchema,
 		approval: "read",
-		// Every extension field is optional. OpenAI-family backends treat an absent `strict` as strict
-		// and make the model fill each optional field (an empty `demo.path`, zero `frames`), which
-		// validation then rejects; an explicit `false` reaches the wire and lets the model omit them.
-		strict: false,
+		// Strict tool calling: the provider constrains the arguments to the schema, and omp turns every
+		// optional field into a nullable one whose null it drops before validation. The parameter
+		// shapes are written for it (src/schema.ts); OpenAI-family backends apply strict mode anyway
+		// when the flag is absent.
+		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
 	});

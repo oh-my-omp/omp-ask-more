@@ -28,7 +28,7 @@ flowchart LR
   n --> a
 ```
 
-插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。它还设了 `strict: false`。扩展字段全是可选的，而 OpenAI 系的后端收不到 `strict` 时按严格模式处理，让模型把每个可选字段都填上：空的 `demo.path`、0 帧的 `demo`。校验会拒绝这些；在 `openai-codex` 的运行里，模型无法省掉该字段，反复重发同一个调用，直到被停下。omp 会把显式的 `false` 原样发出（`ToolDefinition.strict`，`packages/ai/src/providers/openai-responses.ts:1907-1918`）。
+插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。它设了 `strict: true`：provider 按 schema 的语法约束参数，omp 把每个可选字段改成可为 null，并在校验前去掉 null（`packages/ai/src/utils/schema/normalize.ts` 的 `enforceStrictSchema`；`packages/ai/src/utils/validation.ts` 的 `normalizeOptionalNullsForSchema`）。OpenAI 系后端在没有这个标志时也按严格模式处理，所以 schema 无论如何都按严格模式来写（见 Schema 一节）。
 
 一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
 
@@ -38,17 +38,19 @@ schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字�
 
 | 保持 | 新增 |
 |---|---|
-| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`multi?`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`） | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
+| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`）；不含 `multi`，每题只取一个答案 | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
 
 `arktype` 保留未声明键，因此持久化的扩展调用仍能通过 `recoverAskQuestions`（`ask.ts:94-109`），`/tree` 重答会重新打开它；那里原生对话框只渲染原生字段。
+
+参数形状按严格模式选定，严格模式下模型必须生成每个字段。两种形状二选一时，用以 `kind` 区分的联合，模型只构造其中一支，不会去填另一支；“两个可选字段、只能给一个”的写法曾让严格模式下的模型发出 `{frames: […], path: ""}`。每个可选字符串都拒绝 `""`，所以空占位值和 null 一样在校验前被去掉。行号是整数，而不是 `"41-58"` 这样的字符串。`tryEnforceStrictSchema` 必须让 schema 保持严格（`test/schema.test.ts`）；它表达不了的形状会悄悄退回非严格模式。
 
 各字段的画法：
 
 - `brief.where/what/how` 画在选项上方，不折叠。
-- `evidence[].path` 加可选 `lines` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path` 与 `start` 的 `code` 节点，`packages/wire/src/tsp.ts:222-236`），而不是模型敲进去的代码。读不到的引用用错误色画出原因，不阻塞这次 ask。
+- `evidence[].path` 加可选的 `start`、`end` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path` 与 `start` 的 `code` 节点，`packages/wire/src/tsp.ts:222-236`），而不是模型敲进去的代码。两个都不给显示文件前 40 行，只给 `start` 是一行，都给是一段闭区间；超出文件末尾的部分被截掉，起点就在文件之外则报错。不相邻的几段各写一条引用。读不到的引用用错误色画出原因，不阻塞这次 ask。
 - `diagram` 是 Mermaid 源码：Tern 由 `md` 节点原生绘制，TUI 由 Markdown 渲染器画成 ASCII（`packages/tui/src/theme/mermaid-cache.ts:66,100`）。
 - `tradeoff` / `holds_when` / `cost` 各一行，画在聚焦选项下方。
-- `demo` 只能给一种来源。`frames[{body, caption?}]` 加 `interval_ms` 是面板循环播放的 Markdown 帧（文字、` ```mermaid ` 图或代码块里的字符画），每帧补齐到最高一帧的高度，下面的内容不会跳动。`path` 指向动画（GIF、APNG、WebP）或视频（mp4、mov、webm、mkv、m4v），和证据一样按会话工作目录解析。问题的演示在决定区下方；选项的演示在它的取舍卡里，光标每次移到该选项都从头播放。`caption` 写看什么。
+- `demo` 是两种之一。`{kind: "frames", frames[{body, caption?}], interval_ms?}` 是面板循环播放的 Markdown 帧（文字、` ```mermaid ` 图或代码块里的字符画），每帧补齐到最高一帧的高度，下面的内容不会跳动。`{kind: "file", path}` 指向动画（GIF、APNG、WebP）或视频（mp4、mov、webm、mkv、m4v），和证据一样按会话工作目录解析。问题的演示在决定区下方；选项的演示在它的取舍卡里，光标每次移到该选项都从头播放。`caption` 写看什么。
 
 ## 校验
 
@@ -62,12 +64,10 @@ schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字�
 | 每个选项 `tradeoff` 非空 | `questions[i].options[j].tradeoff: empty` |
 | 至少两个选项 | 决定至少需要两个选项 |
 | 同一题内标签唯一且不是保留标签（`Other (type your own)`、`Chat about this`、`Next →`） | 逐项指明 |
-| 不设 `multi` | 不支持；拆成多个问题 |
 | `recommended` 是选项下标 | 指明非法值 |
-| 证据 ≤ 6 条；`lines` 为 `N` 或 `N-M` 且跨度 ≤ 80 行 | 指明第几条与跨度 |
-| 演示只给 `frames` 和 `path` 之一 | `….demo: give exactly one of frames (an animation you write) or path (an animation or video file)` |
-| 2–12 帧且没有空帧；`interval_ms` 是 300 到 5000 的整数，且只能配 `frames` | 指明帧数、第几帧或间隔 |
-| `path` 以 `.gif`、`.png`、`.apng`、`.webp`、`.mp4`、`.mov`、`.webm`、`.mkv` 或 `.m4v` 结尾 | 指明路径与可用扩展名 |
+| 证据 ≤ 6 条；`end` 只能配 `start`、不能在它之前，且一段 ≤ 80 行 | 指明第几条、行号与跨度 |
+| 2–12 帧且没有空帧；`interval_ms` 在 300 到 5000 之间 | 指明帧数、第几帧或间隔 |
+| 文件演示的 `path` 以 `.gif`、`.png`、`.apng`、`.webp`、`.mp4`、`.mov`、`.webm`、`.mkv` 或 `.m4v` 结尾 | 指明路径与可用扩展名 |
 
 ## ANSI 页面
 
@@ -152,7 +152,7 @@ sequenceDiagram
 ```
 index.ts           插件入口：注册 ask、校验、挂载全屏 overlay、委托
 src/schema.ts      原生字段 + brief/tradeoff、zod 参数、逐题校验
-src/brief.ts       按工作目录解析 path:lines，限界读取
+src/brief.ts       按工作目录读取证据行段（path、start、end），限界读取
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
 src/state.ts       每题状态（光标、答案、Other 输入框、折叠、滚动、演示播放）与当前标签
 src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（describe）、按键与事件、倒计时

@@ -40,7 +40,7 @@ describe("loadDemo", () => {
 	const dir = mkdtempSync(join(tmpdir(), "ask-more-demo-"));
 
 	it("reports a missing file instead of failing the ask", async () => {
-		expect(await loadDemo(demoSchema.parse({ path: "missing.gif" }), dir, "native", 64, undefined)).toEqual({
+		expect(await loadDemo(demoSchema.parse({ kind: "file", path: "missing.gif" }), dir, "native", 64, undefined)).toEqual({
 			kind: "error",
 			path: "missing.gif",
 			error: tr("file not found", "文件不存在"),
@@ -49,7 +49,7 @@ describe("loadDemo", () => {
 
 	it("reports a file that is not an image it can play", async () => {
 		writeFileSync(join(dir, "fake.gif"), "plain text");
-		expect(await loadDemo(demoSchema.parse({ path: "fake.gif" }), dir, "native", 64, undefined)).toMatchObject({
+		expect(await loadDemo(demoSchema.parse({ kind: "file", path: "fake.gif" }), dir, "native", 64, undefined)).toMatchObject({
 			kind: "error",
 			error: tr("not a GIF, PNG or WebP image", "不是 GIF、PNG 或 WebP 图片"),
 		});
@@ -58,13 +58,13 @@ describe("loadDemo", () => {
 	it("hands Tern the image bytes as they are", async () => {
 		const gif = Buffer.from("R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=", "base64");
 		writeFileSync(join(dir, "dot.gif"), gif);
-		const loaded = await loadDemo(demoSchema.parse({ path: "dot.gif", caption: " dot " }), dir, "native", 64, undefined);
+		const loaded = await loadDemo(demoSchema.parse({ kind: "file", path: "dot.gif", caption: " dot " }), dir, "native", 64, undefined);
 		expect(loaded).toMatchObject({ kind: "image", mime: "image/gif", caption: "dot" });
 		if (loaded?.kind === "image") expect(Buffer.from(loaded.bytes).equals(gif)).toBe(true);
 	});
 
 	it("plays frames at the default interval when none is given", async () => {
-		expect(await loadDemo(demoSchema.parse({ frames: [{ body: "a" }, { body: "b", caption: "" }] }), dir, "ansi", 64, undefined)).toEqual({
+		expect(await loadDemo(demoSchema.parse({ kind: "frames", frames: [{ body: "a" }, { body: "b", caption: " " }] }), dir, "ansi", 64, undefined)).toEqual({
 			kind: "frames",
 			frames: [{ body: "a" }, { body: "b" }],
 			intervalMs: 1200,

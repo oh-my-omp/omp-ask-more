@@ -6,6 +6,7 @@
       "name": "omp-ask-more",
       "devDependencies": {
         "@oh-my-pi/pi-agent-core": "latest",
+        "@oh-my-pi/pi-ai": "latest",
         "@oh-my-pi/pi-coding-agent": "latest",
         "@oh-my-pi/pi-tui": "latest",
         "@oh-my-pi/pi-utils": "latest",
