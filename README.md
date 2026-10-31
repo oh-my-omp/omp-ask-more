@@ -52,6 +52,25 @@ tern plugin install github.com/oh-my-omp/omp-ask-more/tern
 
 or `tern plugin link /path/to/omp-ask-more/tern` while developing. Either one reloads Tern's plugins; no restart is needed. It gives the ask sheet the sans text face of omp's other overlays and, in the Console chat style, the gutter the question's `?` marker hangs in. Without it the sheet works and shows the brief in the terminal face.
 
+## UI language
+
+Ask-more runs on OMP, not Pi. Its UI labels and notifications resolve their language when text is generated:
+
+1. `OMOMP_LANG`, trimmed and case-insensitive, if it is `en` or `zh`.
+2. The `omomp-lang` section in the agent directory returned by OMP's `getAgentDir()` (normally `~/.omp/agent`). Exactly one of `omomp.yml`, `omomp.yaml`, `omomp.json` or `omomp.toml` must exist; multiple files are ambiguous and ignored. The section must contain only `language`, with the exact value `en` or `zh`; malformed files or invalid sections are ignored.
+3. The first nonempty, trimmed value of `LC_ALL`, `LC_MESSAGES`, then `LANG`: a case-insensitive `zh` prefix means Chinese; anything else means English.
+4. English.
+
+For example, in the agent directory's `omomp.yml`:
+
+```yaml
+omomp-lang:
+  language: zh
+```
+
+Environment variables are read on each resolution. Only the agent configuration is cached for the process; restart OMP after changing it. Project `.omp/` files do not set the UI language. Text sent to the model stays English. The Tern companion is styles only and has no separate language setting.
+
+
 ## What you see
 
 One page per question:

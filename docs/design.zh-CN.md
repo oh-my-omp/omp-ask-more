@@ -175,7 +175,7 @@ src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒
 src/settings.ts    注册在 omp 设置表里的 askMore.* 设置，从发起提问的会话取快照
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
-src/i18n.ts        界面标签取自 OMOMP_LANG / LC_*；协议字段保持英文
+src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文
 src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾的规则
 src/description.ts 面向模型的工具描述
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白

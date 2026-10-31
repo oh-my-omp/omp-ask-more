@@ -175,7 +175,7 @@ src/result.ts      Answer variants, AskToolDetails construction, cancelled, time
 src/settings.ts    the askMore.* settings in omp's registry, snapshotted from the asking session
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
-src/i18n.ts        UI labels from OMOMP_LANG / LC_*; protocol fields stay English
+src/i18n.ts        UI labels: live OMOMP_LANG, cached agent omomp-lang, live LC_* / LANG; protocol fields stay English
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/description.ts the model-facing tool description
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
