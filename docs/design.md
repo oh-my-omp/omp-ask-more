@@ -120,22 +120,23 @@ When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTo
 ```mermaid
 sequenceDiagram
   participant I as index.ts
-  participant S as settings (session)
+  participant S as native plugin settings
   participant C as AskMoreComponent
   participant N as notify.ts
-  I->>S: readTimeoutSettings (snapshot)
+  I->>S: await readTimeoutSettings (snapshot)
   I->>I: timeoutPolicy → off / decide / notify
   I->>C: mount with policy and notify callback
-  C->>C: idle timer (askMore.timeout), restarted by any input
+  C->>C: idle timer (timeout), restarted by any input
   C->>N: notify(due) when idle ends under notify
   N-->>N: terminal notification, command in background
-  C->>C: return timer (askMore.returnTimeout)
+  C->>C: return timer (returnTimeout)
   C->>I: Submission timeout with the answers so far
   I->>I: timedOutResult, no ctx.abort()
 ```
 
-- **Settings.** `src/settings.ts` registers `askMore.timeout`, `askMore.returnTimeout`, `askMore.onExpiry`, `askMore.notify.terminal` and `askMore.notify.command` (env `OMP_ASK_MORE_NOTIFY_COMMAND`, marked as a credential) with omp's `register` (`@oh-my-pi/pi-coding-agent/config/registry`), the way omp-roundtable registers its own. The registry is process-wide and rejects a second registration of an id, while the plugin module can be evaluated more than once in a process, so the handles live in a `globalThis` slot. Values are read from the asking session's settings (`AgentRegistry.global().get(ctx.agent.id).session.settings`, as omp-todo-more reads native ones) once per ask, after validation and before the evidence loads.
-- **Policy.** `src/timeout.ts` parses that snapshot into `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`. `askMore.timeout: 0` is `off`; no channel with `decide` is `decide`, with `wait` is `off`. A command whose `Setting.provenance` is `project` is left out and becomes a problem `index.ts` shows as a warning.
+- **Settings.** `package.json` declares `timeout`, `returnTimeout`, `onExpiry`, `notify.terminal` and `notify.command` in `omp.settings`; manifest defaults are the single source of truth. `src/settings.ts` awaits `getPluginSettings("omp-ask-more", ctx.cwd)` from `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader`, then validates whole seconds and setting types into one snapshot, after question validation and before evidence loads. The API merges global plugin settings and project `.omp/plugin-overrides.json`, but applies neither defaults nor environment variables. The plugin applies manifest defaults and reads `OMP_ASK_MORE_NOTIFY_COMMAND` itself; an explicitly set environment variable wins, including an empty value. There is no session registry lookup or process-global settings slot.
+- **Command trust.** The host exposes merged values but not provenance. The plugin reads the same API at the working directory and at `/`: root-level override files are machine-admin files and form part of the trusted global baseline. A command differing from that baseline is treated as project-sourced and refused. An identical command is already the user's global choice, so it remains trusted. A trusted environment command wins without a baseline read. This uses only the mapped host API; no plugin-side file selection or parsing is duplicated. Settings errors carry structured variants and are rendered in the resolved UI language at the notification boundary.
+- **Policy.** `src/timeout.ts` parses that snapshot into `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`. `timeout: 0` is `off`; no channel with `decide` is `decide`, with `wait` is `off`. A project-sourced command is left out and becomes a structured problem that `index.ts` renders as a localized warning, without discarding the allowed project timeout settings.
 - **Clock.** The countdown belongs to the component, on the render clock's `scheduleAfter`, so it starts once the sheet is built (loading evidence and demos does not count) and every timer is cancelled on a phase change, on submit and on dispose. `handleInput`, `handleNativeEvent` and the Other field's own `handleNativeEvent` (`OtherInput`, since Tern sends its edit/undo events to the field, not the sheet) restart the idle phase. The phases are `stopped | idle | notified{at, due, timer}`. A change made by a timer calls `requestComponentRender`, because no input follows to redraw the sheet. Expiry goes through the same single completion gate as submit and cancel, as `Submission { kind: "timeout", answers }`; `index.ts` returns `timedOutResult` and does not call `ctx.abort()`.
 - **Notification.** `index.ts` builds the callback; `src/notify.ts` sends `TERMINAL.sendNotification({ title: "omp", body, type: "ask", urgency: "normal", actions: "focus" })` (`@oh-my-pi/pi-tui`, which picks OSC 99, OSC 9 or BEL per terminal and writes through the active terminal, so it reaches the terminal under the alternate screen and in Tern) and runs the command through `ptree.exec(["sh", "-c", command])` with the `OMP_ASK_MORE_*` variables, a 30-second timeout, and no await: the ask's clock never waits for a channel. A failure is a warning naming only the outcome.
 - **Native settings.** The native `ask.timeout` (`packages/coding-agent/src/modes/settings.ts:1266-1294`) auto-selects the recommended option and also bounds `cfg://` approvals; the native `ask.notify` (`:1296-1307`) fires when the dialog opens (`packages/coding-agent/src/tools/ask.ts:592-604`). Neither matches this behaviour, so neither is read; the native ask still applies both when ask-more delegates to it.
@@ -172,12 +173,13 @@ src/state.ts       per-question state (cursor, answer, Other field, folding, scr
 src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events, the countdown
 src/nodes.ts       the Tern content in the native ask roles, and the sheet's button acts (SheetAct)
 src/result.ts      Answer variants, AskToolDetails construction, cancelled, timed-out and rejected results
-src/settings.ts    the askMore.* settings in omp's registry, snapshotted from the asking session
+src/settings.ts    native plugin settings and command provenance, validated and snapshotted once per ask
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels: live OMOMP_LANG, cached agent omomp-lang, live LC_* / LANG; protocol fields stay English
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
-src/description.ts the model-facing tool description
+src/description.ts model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
+src/topics/        shipped routing, rounds and results markdown bodies
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
 test/              validation, native projection, evidence windows and quoted text, the ANSI long-line cut, demo loading,
                    half-block rows, the timeout policy and result, the skill rule, and the Tern sheet driven through

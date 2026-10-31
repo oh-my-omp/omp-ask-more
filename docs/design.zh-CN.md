@@ -120,22 +120,23 @@ Other 输入框是 pi-tui `Input`，每题一个：它的值是文本的唯一�
 ```mermaid
 sequenceDiagram
   participant I as index.ts
-  participant S as 会话设置
+  participant S as 原生插件设置
   participant C as AskMoreComponent
   participant N as notify.ts
-  I->>S: readTimeoutSettings（快照）
+  I->>S: await readTimeoutSettings（快照）
   I->>I: timeoutPolicy → off / decide / notify
   I->>C: 带着策略和通知回调挂载
-  C->>C: 空闲计时（askMore.timeout），任何输入都重新开始
+  C->>C: 空闲计时（timeout），任何输入都重新开始
   C->>N: notify 策略下空闲结束时 notify(due)
   N-->>N: 终端通知；命令在后台运行
-  C->>C: 回来计时（askMore.returnTimeout）
+  C->>C: 回来计时（returnTimeout）
   C->>I: Submission timeout，带已给出的答案
   I->>I: timedOutResult，不调用 ctx.abort()
 ```
 
-- **设置。** `src/settings.ts` 用 omp 的 `register`（`@oh-my-pi/pi-coding-agent/config/registry`）注册 `askMore.timeout`、`askMore.returnTimeout`、`askMore.onExpiry`、`askMore.notify.terminal` 与 `askMore.notify.command`（环境变量 `OMP_ASK_MORE_NOTIFY_COMMAND`，标为凭据），做法与 omp-roundtable 注册自己的设置一样。设置表是整个进程共用的，同一个 id 注册第二次会报错，而插件模块在一个进程里可能被求值不止一次，所以这些句柄放在 `globalThis` 的一个槽里。值从发起提问的会话读取（`AgentRegistry.global().get(ctx.agent.id).session.settings`，与 omp-todo-more 读取原生设置的方式相同），每次 ask 读一次，时机在校验之后、加载证据之前。
-- **策略。** `src/timeout.ts` 把这份快照解析成 `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`。`askMore.timeout: 0` 为 `off`；没有渠道时，`decide` 为 `decide`，`wait` 为 `off`。`Setting.provenance` 为 `project` 的命令不进入渠道，而成为一条问题，由 `index.ts` 显示为警告。
+- **设置。** `package.json` 在 `omp.settings` 中声明 `timeout`、`returnTimeout`、`onExpiry`、`notify.terminal` 与 `notify.command`；清单中的默认值是唯一来源。`src/settings.ts` 等待 `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader` 的 `getPluginSettings("omp-ask-more", ctx.cwd)`，然后校验整数秒与各项类型，生成一份快照，时机在问题校验之后、加载证据之前。API 合并全局插件设置与项目 `.omp/plugin-overrides.json`，但不应用默认值或环境变量。插件自行应用清单默认值并读取 `OMP_ASK_MORE_NOTIFY_COMMAND`；明确设置的环境变量优先，包括空值。不再查找会话设置表，也没有进程全局设置槽。
+- **命令信任。** 宿主只公开合并后的值，不提供来源。插件分别在工作目录和 `/` 调用同一个 API；根目录覆盖文件属于机器管理员配置，视为可信全局基线的一部分。与基线不同的命令被视为项目来源并拒绝；相同命令已是用户自己的全局选择，因此仍可信。可信环境变量命令优先，此时无需读取基线。实现只使用已映射的宿主 API，不在插件中重复文件选择或解析。设置错误保留结构化变体，在通知边界按解析出的界面语言生成文字。
+- **策略。** `src/timeout.ts` 把这份快照解析成 `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`。`timeout: 0` 为 `off`；没有渠道时，`decide` 为 `decide`，`wait` 为 `off`。项目来源的命令不进入渠道，而成为结构化问题，由 `index.ts` 生成本地化警告，其余允许的项目超时设置不会被丢弃。
 - **时钟。** 倒计时属于组件，挂在渲染时钟的 `scheduleAfter` 上，所以面板建好才开始计时（加载证据和演示的时间不算），每次切换阶段、提交和销毁时都取消它持有的全部计时器。`handleInput`、`handleNativeEvent`，以及 Other 输入框自己的 `handleNativeEvent`（`OtherInput`：Tern 把 edit/undo 事件直接发给输入框，而不是发给面板）都会让空闲阶段重新开始。阶段为 `stopped | idle | notified{at, due, timer}`。由计时器引起的变化会调用 `requestComponentRender`，因为之后没有输入来触发重画。到期走与提交、取消同一个唯一的收尾入口，即 `Submission { kind: "timeout", answers }`；`index.ts` 返回 `timedOutResult`，不调用 `ctx.abort()`。
 - **通知。** 回调由 `index.ts` 构造；`src/notify.ts` 发出 `TERMINAL.sendNotification({ title: "omp", body, type: "ask", urgency: "normal", actions: "focus" })`（`@oh-my-pi/pi-tui`，它按终端选择 OSC 99、OSC 9 或 BEL，并经当前终端写出，所以在 alternate screen 下和 Tern 里都能到达终端），并通过 `ptree.exec(["sh", "-c", command])` 运行命令，带上 `OMP_ASK_MORE_*` 变量和 30 秒超时，且不等待它结束：ask 的时钟从不等任何渠道。失败只产生一条只写结果的警告。
 - **原生设置。** 原生 `ask.timeout`（`packages/coding-agent/src/modes/settings.ts:1266-1294`）会自动选推荐项，还限制 `cfg://` 审批；原生 `ask.notify`（`:1296-1307`）在对话框打开时发通知（`packages/coding-agent/src/tools/ask.ts:592-604`）。两者都不符合这里的行为，所以都不读取；ask-more 委托给原生 ask 时，原生 ask 仍按它们执行。
@@ -172,12 +173,13 @@ src/state.ts       每题状态（光标、答案、Other 输入框、折叠、�
 src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（describe）、按键与事件、倒计时
 src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动作（SheetAct）
 src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒绝结果
-src/settings.ts    注册在 omp 设置表里的 askMore.* 设置，从发起提问的会话取快照
+src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生成一次快照
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
 src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文
 src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾的规则
-src/description.ts 面向模型的工具描述
+src/description.ts 面向模型的用途、topic 指针与正文加载；index.ts 注册带类型的 docTopics
+src/topics/        随包分发的 routing、rounds 与 results markdown 正文
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
 test/              校验、原生投影、证据行段与文字证据、ANSI 长行截断、演示加载、半块画面、超时策略与结果、
                    skill 规则，以及经 pi-tui reconciler 与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）

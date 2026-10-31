@@ -10,7 +10,7 @@
 
 原生 `ask` 太弱，模型也不用它把话说清楚，于是决定都在 chat 里做：“grill”一类的 skill 不能指望宿主有 ask 工具，只能在对话里问用户。原生工具其实已有承载更多内容的字段——`question` 按 Markdown 渲染，每个选项都有自由文本 `preview`——但它的 prompt 要求模型把标签写短、从不提 `preview`，对话框又挂在 composer 里，标题最多四行、整块最多占终端 70%。
 
-本插件要求每个问题写明现状/决定/后果、每个选项写明取舍，鼓励引用真实的文件行和命令输出、画示意图和放演示动画，并把作答界面画成全屏。工具说明要求模型把所有需要用户回答的问题都交给 `ask`，skill 要求在 chat 里问的问题也一样；用户调用的 skill 送到模型时，末尾也带着这条规则。模型是否照做因模型而异（见[已知限制](#已知限制)）。
+本插件要求每个问题写明现状/决定/后果、每个选项写明取舍，鼓励引用真实的文件行和命令输出、画示意图和放演示动画，并把作答界面画成全屏。`xd://ask/routing` topic 要求模型把所有需要用户回答的问题都交给 `ask`，skill 要求在 chat 里问的问题也一样；用户调用的 skill 送到模型时，末尾也带着这条规则。模型是否照做因模型而异（见[已知限制](#已知限制)）。
 
 ## 演示视频
 
@@ -113,23 +113,38 @@ omomp-lang:
 
 ## 超时与通知
 
-打开的 ask 在没人操作时倒计时。这些设置是 omp 设置，与原生设置一样从 `~/.omp/agent/config.yml`、项目的 `.omp/config.yml`、`--config` 或 `cfg://` 读取；每次 ask 打开时读取一次，改动从下一次 ask 生效。
+打开的 ask 在没人操作时倒计时。这些是原生**插件设置**，由 `package.json` 的 `omp.settings` 声明。全局值通过 `/settings` → Plugins → `omp-ask-more` 或 `omp plugin config set omp-ask-more <key> <value>` 设置；项目值写入 `.omp/plugin-overrides.json`，覆盖全局值。每次 ask 打开时读取并校验一份快照，改动从下一次 ask 生效。超时值必须为 0 到 2147483 之间的整数秒。
 
 | 设置 | 默认 | 含义 |
 |---|---|---|
-| `askMore.timeout` | `1800` | 无操作多少秒后进入第一步；`0` 关闭计时 |
-| `askMore.notify.terminal` | `true` | 在这一步发终端通知（OSC 99、OSC 9 或 BEL，取终端支持的那种） |
-| `askMore.notify.command` | 未设置 | 在这一步以 `sh -c` 运行的 shell 命令；也可用 `OMP_ASK_MORE_NOTIFY_COMMAND`。来自项目配置时忽略并给出警告 |
-| `askMore.returnTimeout` | `1200` | 通知之后留给你回来的秒数 |
-| `askMore.onExpiry` | `decide` | 最后一段倒计时结束时：`decide` 把未答的问题交给模型，`wait` 让 ask 一直开着 |
+| `timeout` | `1800` | 无操作多少秒后进入第一步；`0` 关闭计时 |
+| `notify.terminal` | `true` | 在这一步发终端通知（OSC 99、OSC 9 或 BEL，取终端支持的那种） |
+| `notify.command` | 未设置 | 在这一步以 `sh -c` 运行的 shell 命令；`OMP_ASK_MORE_NOTIFY_COMMAND` 优先，包括空值（关闭命令）。与可信全局基线不同的项目命令被忽略并给出警告 |
+| `returnTimeout` | `1200` | 通知之后留给你回来的秒数 |
+| `onExpiry` | `decide` | 最后一段倒计时结束时：`decide` 把未答的问题交给模型，`wait` 让 ask 一直开着 |
+
+例如项目 `.omp/plugin-overrides.json` 可以缩短倒计时，而不提供 shell 命令：
+
+```json
+{
+  "settings": {
+    "omp-ask-more": {
+      "timeout": 60,
+      "returnTimeout": 30,
+      "notify.terminal": true,
+      "onExpiry": "decide"
+    }
+  }
+}
+```
 
 ```mermaid
 stateDiagram-v2
   Open --> Answered: 你作答
-  Open --> Notified: askMore.timeout 内无操作，且有渠道开启
-  Open --> Expired: askMore.timeout 内无操作，且没有渠道开启
+  Open --> Notified: timeout 内无操作，且有渠道开启
+  Open --> Expired: timeout 内无操作，且没有渠道开启
   Notified --> Open: 任何操作
-  Notified --> Expired: askMore.returnTimeout 内无操作
+  Notified --> Expired: returnTimeout 内无操作
   Expired --> Decided: onExpiry 为 decide
   Expired --> Waiting: onExpiry 为 wait
 ```
@@ -153,13 +168,11 @@ stateDiagram-v2
   输出被忽略，30 秒后被结束。非零退出、被结束或启动失败都显示一条只写结果的警告，因为命令里可能带 token；不重试，失败也不改变 ask。
 - 密钥放在命令读取的环境里，不写进命令文字。例如由启动 omp 的一方导出 `NTFY_TOPIC`：
 
-  ```yaml
-  askMore:
-    notify:
-      command: 'curl -fsS -d "$OMP_ASK_MORE_BODY" "https://ntfy.sh/$NTFY_TOPIC"'
+  ```sh
+  omp plugin config set omp-ask-more notify.command 'curl -fsS -d "$OMP_ASK_MORE_BODY" "https://ntfy.sh/$NTFY_TOPIC"'
   ```
 
-- 项目配置不能设置命令：否则克隆来的仓库可以借 `.omp/config.yml` 在你的机器上运行程序，并决定你的通知发往哪里。环境变量、`--config`、运行时覆盖和全局配置可以设置。
+- 项目覆盖不能引入命令：否则克隆来的仓库可以借 `.omp/plugin-overrides.json` 在你的机器上运行程序，并决定你的通知发往哪里。请通过插件设置界面/CLI 全局设置，或使用可信的环境变量。项目值与可信全局基线完全相同时可以使用，因为运行的仍是你已经选定的命令。机器管理员设置的根目录覆盖也属于此基线。项目命令被拒绝时，其余项目超时设置仍然生效。
 - 这里不使用原生 `ask.timeout` 与 `ask.notify`：它们属于原生对话框，`ask.timeout` 在那里会替你选推荐项。
 
 ## 模型发出什么、收到什么
@@ -172,11 +185,11 @@ stateDiagram-v2
 
 工具按严格工具调用注册，provider 会把模型的参数限定在 schema 之内。参数形状也是按此设计的：演示是两种之一，`{kind: "frames", frames, interval_ms?}` 或 `{kind: "file", path}`；证据也是两种之一，`{kind: "file", path, start?, end?}` 用数字指明行号而不是文本，或 `{kind: "text", source, text, lang?}`。严格模式下，模型把没用到的可选字段都填成 `null`，omp 在检查调用之前把它们去掉。
 
-工具说明讲的是 `ask` 做什么、什么时候用：
+工具说明只保留用途和指向 `docTopics()` 返回的纯正文 topic 的指针：`xd://ask/routing`（提问及 skill/工作流映射）、`xd://ask/rounds`（对话框行为、批次与重试）、`xd://ask/results`（答案变体）。它们共同说明：
 
 - `ask` 打开一个全屏对话框，每个问题一个标签页，显示简报和选项，一直等到用户作答。光标起始停在 `recommended` 选项上，用户按回车就采纳推荐，相当于回答“是”。答案作为工具结果返回，模型在同一轮里接着做。
 - 凡是模型需要用户回答的问题都必须（MUST）交给 `ask`：决定、偏好、范围、只有用户知道的事实、有风险或不可逆的步骤前的确认。绝不（NEVER）把这类问题写在回复里，也不以它结束本轮。
-- skill、工作流或其他指令要求提问、访谈、确认或让用户挑选时也一样，包括指令说在对话里问、或规定问题在回复里长什么样的时候：这类指令假定没有对话框，有 `ask` 时，调用它就是在照指令办。说明用通用的话把这类问题的各部分对应到 `ask`（编号或标题 → `header`，背景与分析 → `brief`，候选项与推荐 → 带 `recommended` 的 `options`，等用户回答 → 这次调用本身）；该指令的其余要求照旧。
+- skill、工作流或其他指令要求提问、访谈、确认或让用户挑选时也一样，包括指令说在对话里问、或规定问题在回复里长什么样的时候：这类指令假定没有对话框，有 `ask` 时，调用它就是在照指令办。routing topic 用通用的话把这类问题的各部分对应到 `ask`（编号或标题 → `header`，背景与分析 → `brief`，候选项与推荐 → 带 `recommended` 的 `options`，等用户回答 → 这次调用本身）；该指令的其余要求照旧。
 - 不问工具查得到的事实，不问本该自己做的选择。
 - 写给没看过会话的人；一轮里彼此独立的问题放进同一次调用，指令要求一次问一题时每题一次调用，选项依赖某个答案的问题放到后一次调用；被拒的调用会列出全部问题，模型改好后重新调用。
 - 怎样读结果；结果里某题为 `id: (timed out: …)` 时由模型自己决定这一题，并说明选了什么。
@@ -270,7 +283,7 @@ ask({
 - **print 与没有原生 ask 的 RPC** 收到拒绝；原生工具会中止整个操作。
 - **plan mode 下同样计时**；原生 ask 在那里会关闭自己的超时。没有 `multi`，没有 note。
 - **对话记录里的卡片把超时的题显示为 `Cancelled`**：所有 `ask` 结果都由原生渲染器绘制，它没有“未作答、交给模型”这种状态。模型读到的是 `(timed out: …)`。
-- **没有 TUI 的会话里**生效的是原生 `ask.timeout` 与 `ask.notify`，`askMore.*` 设置不起作用。
+- **没有 TUI 的会话里**生效的是原生 `ask.timeout` 与 `ask.notify`，本插件的超时设置不起作用。
 - **终端通知只在终端会把 OSC 99、OSC 9 或 BEL 变成通知时出现**；通知命令需要 POSIX `sh`。
 - **普通终端里的演示很粗。** 文件按 64 × 20 格播放、每格两个像素：动作看得出，录屏里的小字看不清，所以 caption 要写清看什么。每帧最多重写 20 行 24 位色（画面复杂时约 16–17 KB），慢速 SSH 下会有感觉。画面宽度在 ask 打开时就定了，不随终端大小变化。
 - **文字证据没有核对。** ask-more 按模型写的原样显示，标题是模型写的来源；只有文件证据由 ask-more 自己读取。

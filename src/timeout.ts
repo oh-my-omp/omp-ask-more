@@ -6,13 +6,13 @@ export const EXPIRY_VALUES = ["decide", "wait"] as const;
 /** When the last countdown ends: hand the unanswered questions to the model, or keep waiting. */
 export type Expiry = (typeof EXPIRY_VALUES)[number];
 
-/** `askMore.notify.command` as configured; a project config may not run commands. */
+/** `notify.command` as configured; a project config may not run commands. */
 export type CommandSetting = { readonly kind: "unset" } | { readonly kind: "set"; readonly command: string; readonly fromProject: boolean };
 
 export interface TimeoutSettings {
-	/** `askMore.timeout`: idle seconds before the first step; 0 turns timing off. */
+	/** `timeout`: idle seconds before the first step; 0 turns timing off. */
 	readonly timeoutSeconds: number;
-	/** `askMore.returnTimeout`: seconds after a notification for the user to come back. */
+	/** `returnTimeout`: seconds after a notification for the user to come back. */
 	readonly returnSeconds: number;
 	readonly onExpiry: Expiry;
 	readonly terminal: boolean;
@@ -32,14 +32,26 @@ export type TimeoutPolicy =
 	/** Idle for `idleMs`: notify through every channel, then `then`. */
 	| { readonly kind: "notify"; readonly idleMs: number; readonly channels: readonly [Channel, ...Channel[]]; readonly then: AfterNotice };
 
+export type PolicyProblem = { readonly kind: "project-command" };
+
+export function policyProblemText(problem: PolicyProblem): string {
+	switch (problem.kind) {
+		case "project-command":
+			return tr(
+				"notify.command is ignored in a project config; set it through /settings → Plugins, omp plugin config set, or OMP_ASK_MORE_NOTIFY_COMMAND",
+				"已忽略项目配置中的 notify.command；请通过 /settings → Plugins、omp plugin config set 或 OMP_ASK_MORE_NOTIFY_COMMAND 设置",
+			);
+	}
+}
+
 export interface ParsedPolicy {
 	readonly policy: TimeoutPolicy;
 	/** Settings that were set but not used, each with the reason. */
-	readonly problems: readonly string[];
+	readonly problems: readonly PolicyProblem[];
 }
 
 export function timeoutPolicy(settings: TimeoutSettings): ParsedPolicy {
-	const problems: string[] = [];
+	const problems: PolicyProblem[] = [];
 	const channels: Channel[] = [];
 	if (settings.terminal) channels.push({ kind: "terminal" });
 	const command = settings.command;
@@ -48,7 +60,7 @@ export function timeoutPolicy(settings: TimeoutSettings): ParsedPolicy {
 			break;
 		case "set":
 			if (command.fromProject) {
-				problems.push("askMore.notify.command is ignored in a project config; set it in ~/.omp/agent/config.yml or OMP_ASK_MORE_NOTIFY_COMMAND");
+				problems.push({ kind: "project-command" });
 			} else {
 				channels.push({ kind: "command", command: command.command });
 			}

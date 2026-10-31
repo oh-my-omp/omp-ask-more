@@ -8,19 +8,20 @@
  * questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions } from "@oh-my-pi/pi-coding-agent";
+import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
 import { loadQuestionDemos } from "./src/demo.ts";
-import { DESCRIPTION } from "./src/description.ts";
+import { DESCRIPTION, docTopics } from "./src/description.ts";
+import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
-import { readTimeoutSettings } from "./src/settings.ts";
-import { type TimeoutPolicy, timeoutPolicy } from "./src/timeout.ts";
+import { readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
+import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/timeout.ts";
 
 /** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
 let asking = false;
@@ -78,8 +79,8 @@ async function ask(
 	asking = true;
 	try {
 		// The settings as they are now; a config change applies from the next ask.
-		const { policy, problems } = timeoutPolicy(readTimeoutSettings(ctx));
-		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${problem}`, "warning");
+		const { policy, problems } = timeoutPolicy(await readTimeoutSettings(ctx));
+		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${policyProblemText(problem)}`, "warning");
 		const [evidence, demos] = await Promise.all([
 			Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd))),
 			// Tern plays image bytes itself; the ANSI page draws decoded frames as wide as the page.
@@ -109,7 +110,8 @@ async function ask(
 			return cancelledResult(questions);
 		}
 		// The rich surface failed before it could be answered: fall back rather than lose the ask.
-		ctx.ui.notify?.(`ask-more: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		const detail = error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error);
+		ctx.ui.notify?.(`ask-more: ${tr("Could not open the full-screen dialog", "无法打开全屏对话框")}: ${detail}`, "warning");
 		return delegate(ctx, questions, signal, onUpdate);
 	} finally {
 		asking = false;
@@ -117,10 +119,11 @@ async function ask(
 }
 
 export default function askMore(pi: ExtensionAPI): void {
-	pi.registerTool({
+	const tool = {
 		name: "ask",
-		label: "Ask",
+		label: tr("Ask", "询问"),
 		description: DESCRIPTION,
+		docTopics,
 		parameters: parametersSchema,
 		approval: "read",
 		// Strict tool calling: the provider constrains the arguments to the schema, and omp turns every
@@ -130,7 +133,8 @@ export default function askMore(pi: ExtensionAPI): void {
 		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
-	});
+	} satisfies ToolDefinition<typeof parametersSchema> & { docTopics(): Readonly<Record<string, string>> };
+	pi.registerTool(tool);
 	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
 	// place left to carry the rule. Registering costs omp a clone of the history per model call.
 	pi.on("context", event => {

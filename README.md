@@ -10,7 +10,7 @@ Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verif
 
 The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
 
-This plugin requires every question to carry where/what/how and every option its tradeoff, invites real file lines, quoted output, diagrams and demo animations, and draws the answer surface full screen. Its tool description tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
+This plugin requires every question to carry where/what/how and every option its tradeoff, invites real file lines, quoted output, diagrams and demo animations, and draws the answer surface full screen. Its `xd://ask/routing` topic tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
 
 ## Demo videos
 
@@ -113,23 +113,38 @@ The plain-terminal page and videos need `ffmpeg`/`ffprobe` on `PATH`; a missing 
 
 ## Timeout and notifications
 
-An open ask counts down while nobody touches it. The settings are omp settings, read like native ones from `~/.omp/agent/config.yml`, a project's `.omp/config.yml`, `--config` or `cfg://`; each ask reads them when it opens, so a change applies from the next ask.
+An open ask counts down while nobody touches it. These are native **plugin settings**, declared in `package.json` under `omp.settings`. Set global values in `/settings` → Plugins → `omp-ask-more` or with `omp plugin config set omp-ask-more <key> <value>`. Project values go in `.omp/plugin-overrides.json` and override global ones. Each ask reads and validates one snapshot when it opens; a change applies from the next ask. Timeout values must be whole seconds from 0 to 2147483.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `askMore.timeout` | `1800` | seconds without input before the first step; `0` turns timing off |
-| `askMore.notify.terminal` | `true` | at that step, a terminal notification (OSC 99, OSC 9 or BEL, whichever the terminal takes) |
-| `askMore.notify.command` | unset | at that step, a shell command run as `sh -c`; also `OMP_ASK_MORE_NOTIFY_COMMAND`. Ignored, with a warning, when it comes from a project config |
-| `askMore.returnTimeout` | `1200` | seconds after the notification for you to come back |
-| `askMore.onExpiry` | `decide` | when the last countdown ends: `decide` hands the unanswered questions to the model, `wait` keeps the ask open |
+| `timeout` | `1800` | seconds without input before the first step; `0` turns timing off |
+| `notify.terminal` | `true` | at that step, a terminal notification (OSC 99, OSC 9 or BEL, whichever the terminal takes) |
+| `notify.command` | unset | at that step, a shell command run as `sh -c`; `OMP_ASK_MORE_NOTIFY_COMMAND` takes precedence, even when empty (which disables the command). A project command differing from the trusted global baseline is ignored with a warning |
+| `returnTimeout` | `1200` | seconds after the notification for you to come back |
+| `onExpiry` | `decide` | when the last countdown ends: `decide` hands the unanswered questions to the model, `wait` keeps the ask open |
+
+For example, a project `.omp/plugin-overrides.json` can shorten the countdown without providing a shell command:
+
+```json
+{
+  "settings": {
+    "omp-ask-more": {
+      "timeout": 60,
+      "returnTimeout": 30,
+      "notify.terminal": true,
+      "onExpiry": "decide"
+    }
+  }
+}
+```
 
 ```mermaid
 stateDiagram-v2
   Open --> Answered: you answer
-  Open --> Notified: askMore.timeout without input, a channel on
-  Open --> Expired: askMore.timeout without input, no channel on
+  Open --> Notified: timeout without input, a channel on
+  Open --> Expired: timeout without input, no channel on
   Notified --> Open: any input
-  Notified --> Expired: askMore.returnTimeout without input
+  Notified --> Expired: returnTimeout without input
   Expired --> Decided: onExpiry decide
   Expired --> Waiting: onExpiry wait
 ```
@@ -153,13 +168,11 @@ stateDiagram-v2
   Its output is ignored and it is killed after 30 seconds. A non-zero exit, a kill or a failed start shows a warning naming only the outcome, since the command may carry a token; nothing is retried, and a failure never changes the ask.
 - Keep secrets in the environment the command reads, not in its text. For example, with `NTFY_TOPIC` exported by whoever starts omp:
 
-  ```yaml
-  askMore:
-    notify:
-      command: 'curl -fsS -d "$OMP_ASK_MORE_BODY" "https://ntfy.sh/$NTFY_TOPIC"'
+  ```sh
+  omp plugin config set omp-ask-more notify.command 'curl -fsS -d "$OMP_ASK_MORE_BODY" "https://ntfy.sh/$NTFY_TOPIC"'
   ```
 
-- A project config may not set the command: a cloned repository's `.omp/config.yml` could otherwise run a program on your machine and choose where your notifications go. The environment variable, `--config`, a runtime override and the global config may.
+- A project override may not introduce a command: a cloned repository's `.omp/plugin-overrides.json` could otherwise run a program on your machine and choose where your notifications go. Set it globally through the plugin settings UI/CLI, or use the trusted environment variable. A project value identical to the trusted global baseline is allowed because it runs only the command you already chose. Machine-admin root-level overrides are included in that baseline. Other project timeout settings still apply when a project command is refused.
 - The native `ask.timeout` and `ask.notify` are not used here: they belong to the native dialog, where `ask.timeout` picks the recommended option for you.
 
 ## What the model sends and gets
@@ -172,11 +185,11 @@ The parameters are the native ones, without `multi`, plus extension fields:
 
 The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The shapes are written for it: a demo is one of two kinds, `{kind: "frames", frames, interval_ms?}` or `{kind: "file", path}`, and so is an evidence entry, `{kind: "file", path, start?, end?}`, whose lines are numbers, never text, or `{kind: "text", source, text, lang?}`. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
 
-The tool description says what `ask` does and when to use it:
+The tool description contains the purpose and pointers to body-only topics served by `docTopics()`: `xd://ask/routing` (questions and skill/workflow mapping), `xd://ask/rounds` (dialog behavior, batching and retries), and `xd://ask/results` (answer variants). Together they explain:
 
 - `ask` opens a full-screen dialog, one tab per question with its brief and options, and blocks until the user answers. The cursor starts on the `recommended` option, so Enter accepts the recommendation, the same as answering "yes". The answers come back as the tool result and the model goes on in the same turn.
 - The model MUST put every question whose answer it needs from the user through `ask`: a decision, a preference, the scope, a fact only the user knows, a confirmation before a risky or irreversible step. It NEVER writes such questions in its reply or ends a turn on one.
-- This holds when a skill, workflow or other instruction tells it to ask, interview, confirm or let the user choose, including when the instruction says to ask in chat or prescribes how the questions look in the reply: such instructions assume there is no dialog, and with `ask` available, calling it is how the model follows them. The description maps the parts of such a question onto `ask` in general terms (number or title → `header`, background and analysis → `brief`, choices and the recommendation → `options` with `recommended`, waiting for the answers → the call itself); everything else the instruction requires still applies.
+- This holds when a skill, workflow or other instruction tells it to ask, interview, confirm or let the user choose, including when the instruction says to ask in chat or prescribes how the questions look in the reply: such instructions assume there is no dialog, and with `ask` available, calling it is how the model follows them. The routing topic maps the parts of such a question onto `ask` in general terms (number or title → `header`, background and analysis → `brief`, choices and the recommendation → `options` with `recommended`, waiting for the answers → the call itself); everything else the instruction requires still applies.
 - It does not ask for facts its tools can find or for choices that are its own to make.
 - It writes for someone who has not read the session; the independent questions of a round go in one call, or one per call when the instruction asks one at a time, and a question whose options depend on an answer goes in a later call; a rejected call lists every problem, and the model fixes them and calls again.
 - How to read the result, and that a question reading `id: (timed out: …)` is the model's to decide, saying what it chose.
@@ -270,7 +283,7 @@ They read the native result shape, so they work the same with the native `ask`.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.
 - **The timeout runs in plan mode too**; the native ask turns its own timeout off there. No `multi`, no notes.
 - **The transcript card shows a timed-out question as `Cancelled`**: every `ask` result is drawn by the native renderer, which has no state for "unanswered, left to the model". The model reads `(timed out: …)`.
-- **In sessions without the TUI** the native `ask.timeout` and `ask.notify` apply and the `askMore.*` settings do nothing.
+- **In sessions without the TUI** the native `ask.timeout` and `ask.notify` apply and this plugin's timeout settings do nothing.
 - **A terminal notification shows only where the terminal turns OSC 99, OSC 9 or BEL into one**; the notify command needs a POSIX `sh`.
 - **Plain-terminal demos are coarse.** A file plays at 64 × 20 cells, two pixels per cell: motion reads, small text inside a recording does not, so the caption says what to watch. Each frame rewrites up to 20 rows of 24-bit color (about 16–17 KB for a busy picture), noticeable over a slow SSH link. The picture's width is fixed when the ask opens and does not follow a resize.
 - **Quoted text evidence is unchecked.** ask-more draws it as the model wrote it, under the source the model names; only file evidence is read by ask-more itself.

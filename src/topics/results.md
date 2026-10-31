@@ -1,0 +1,1 @@
+Each result line is `id: label` (a choice), `id: "text"` (the user's own answer), `id: (cancelled)` (unanswered), or `id: (timed out: …)`: no answer in time, so decide it yourself, state what you chose, and continue.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { answerResult, timedOutResult } from "../src/result.ts";
 import { type AskQuestion, questionSchema } from "../src/schema.ts";
-import { type TimeoutSettings, timeoutPolicy } from "../src/timeout.ts";
+import { type TimeoutSettings, policyProblemText, timeoutPolicy } from "../src/timeout.ts";
 
 const BASE: TimeoutSettings = { timeoutSeconds: 1800, returnSeconds: 1200, onExpiry: "decide", terminal: true, command: { kind: "unset" } };
 
@@ -35,7 +35,17 @@ describe("timeoutPolicy", () => {
 		const parsed = timeoutPolicy({ ...BASE, terminal: false, command: { kind: "set", command: "curl evil", fromProject: true } });
 		expect(parsed.policy).toEqual({ kind: "decide", idleMs: 1_800_000 });
 		expect(parsed.problems).toHaveLength(1);
-		expect(parsed.problems[0]).toContain("askMore.notify.command");
+		expect(parsed.problems[0]).toEqual({ kind: "project-command" });
+		const old = process.env.OMOMP_LANG;
+		try {
+			process.env.OMOMP_LANG = "zh";
+			expect(policyProblemText({ kind: "project-command" })).toContain("已忽略项目配置");
+			process.env.OMOMP_LANG = "en";
+			expect(policyProblemText({ kind: "project-command" })).toContain("ignored in a project config");
+		} finally {
+			if (old === undefined) delete process.env.OMOMP_LANG;
+			else process.env.OMOMP_LANG = old;
+		}
 	});
 });
 

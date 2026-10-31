@@ -10,7 +10,14 @@
 	},
 	"files": ["index.ts", "src", "tern"],
 	"omp": {
-		"extensions": ["./index.ts"]
+		"extensions": ["./index.ts"],
+		"settings": {
+			"timeout": { "type": "number", "default": 1800, "min": 0, "max": 2147483, "step": 1, "description": "Whole idle seconds before the first step; 0 disables timing" },
+			"returnTimeout": { "type": "number", "default": 1200, "min": 0, "max": 2147483, "step": 1, "description": "Whole seconds after notification before the model decides" },
+			"onExpiry": { "type": "enum", "values": ["decide", "wait"], "default": "decide", "description": "Decide unanswered questions or keep waiting after the countdown" },
+			"notify.terminal": { "type": "boolean", "default": true, "description": "Send a terminal notification when idle time expires" },
+			"notify.command": { "type": "string", "env": "OMP_ASK_MORE_NOTIFY_COMMAND", "secret": true, "description": "Trusted shell notification command; project-sourced commands are ignored" }
+		}
 	},
 	"scripts": {
 		"check": "tsc --noEmit -p tsconfig.json",

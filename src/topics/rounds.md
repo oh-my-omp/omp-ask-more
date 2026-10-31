@@ -1,0 +1,3 @@
+Each question is a tab with its brief and options; the cursor starts on your `recommended` option, so the user accepts your recommendation with Enter (the same as answering "yes"), picks another option, or types their own answer. The answers return as this tool's result, and you continue in the same turn.
+
+Write for someone who has not read this session. Put the independent questions of a round in one call, or one question per call when the instruction asks one at a time; a question whose options depend on an answer goes in a later call. A rejected call lists every problem: fix them and call `ask` again.
