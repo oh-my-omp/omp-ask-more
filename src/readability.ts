@@ -11,8 +11,8 @@ export type Surface = "sheet" | "native";
 export const DEFECTS = ["undefined_terms", "missing_context", "options_indistinct"] as const;
 export type Defect = (typeof DEFECTS)[number];
 
-/** Probability of a defect at which a question is rejected. */
-export const DEFECT_THRESHOLD = 0.5;
+/** Probability of a defect at which a question is rejected; chosen with `bun eval/readability.ts`. */
+export const DEFECT_THRESHOLD = 0.6;
 
 export type QuestionFailure = { readonly id: string; readonly defects: readonly Defect[] };
 
