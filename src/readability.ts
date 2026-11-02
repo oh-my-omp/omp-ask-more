@@ -1,9 +1,14 @@
 // The readability gate: before a human sees an ask, the session's judge role decides whether each
 // question can be understood by someone who sees only the dialog. A question the judge finds hard
 // to read rejects the call with a fixed rewrite instruction per defect, and the model asks again.
-import type { Judge, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
+import type { JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import { tr } from "./i18n.ts";
 import { type AskQuestion, nativeQuestion } from "./schema.ts";
+
+/** The part of the host's judge the gate uses: yes/no questions over one state. */
+export interface NoulJudge {
+	judge(request: JudgmentRequest<Record<string, NoulQuestion>>, options: { signal: AbortSignal }): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
+}
 
 /** Where the questions will be shown, which decides what text the reader actually gets. */
 export type Surface = "sheet" | "native";
@@ -107,7 +112,7 @@ export function readabilityVerdict(questions: readonly AskQuestion[], scores: De
 }
 
 /** Ask the judge about every question of the call at once. */
-export async function judgeReadability(judge: Judge, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal): Promise<DefectScores> {
+export async function judgeReadability(judge: NoulJudge, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal): Promise<DefectScores> {
 	const result = await judge.judge(readabilityRequest(questions, surface), { signal });
 	return defectScores(questions, result.answers);
 }
@@ -136,7 +141,7 @@ export type Gate = { readonly kind: "pass" } | { readonly kind: "reject"; readon
  * only the caller's own abort cancels it.
  */
 export async function readabilityGate(
-	judge: Judge,
+	judge: NoulJudge,
 	questions: readonly AskQuestion[],
 	surface: Surface,
 	signal: AbortSignal | undefined,

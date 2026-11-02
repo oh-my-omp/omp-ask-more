@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { readTimeoutSettings, SettingsError, settingsErrorText } from "../src/settings.ts";
+import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "../src/settings.ts";
 import { DESCRIPTION, docTopics } from "../src/description.ts";
 
 let cwd: string;
@@ -69,6 +69,15 @@ describe("native plugin settings", () => {
 		expect(settingsErrorText(error)).toContain("整数秒");
 		process.env.OMOMP_LANG = "en";
 		expect(settingsErrorText(error)).toContain("whole seconds");
+	});
+
+	it("judges readability by default, honours false, and rejects a non-boolean", async () => {
+		await override({});
+		expect(await readReadabilityJudge({ cwd })).toBe(true);
+		await override({ "readability.judge": false });
+		expect(await readReadabilityJudge({ cwd })).toBe(false);
+		await override({ "readability.judge": "false" });
+		await expect(readReadabilityJudge({ cwd })).rejects.toBeInstanceOf(SettingsError);
 	});
 });
 
