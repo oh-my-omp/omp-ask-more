@@ -25,14 +25,16 @@ const questions: readonly AskQuestion[] = parametersSchema.parse({
 	],
 }).questions;
 
-type Seen = { state: unknown; keys: string[] };
+type Seen = { state: string; keys: string[] };
 
-/** A judge that answers every key from `score` and records what it was shown. */
-function scripted(score: (key: string) => number, seen: Seen[] = []): NoulJudge {
+/** A judge that answers each defect of the question its state shows from `score`, and records what it was shown. */
+function scripted(score: (question: string, defect: string) => number, seen: Seen[] = []): NoulJudge {
 	return {
 		async judge(request) {
-			seen.push({ state: JSON.parse(String(request.state)), keys: Object.keys(request.questions) });
-			return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { noul: score(key) }])) };
+			const state = String(request.state);
+			const question = questions.find(candidate => state.includes(candidate.question))?.question ?? "";
+			seen.push({ state, keys: Object.keys(request.questions) });
+			return { answers: Object.fromEntries(Object.keys(request.questions).map(key => [key, { noul: score(question, key) }])) };
 		},
 	};
 }
@@ -53,7 +55,9 @@ const noWarn = (message: string) => {
 describe("readability gate", () => {
 	it("rejects only the questions whose defects reach the threshold, naming each defect", async () => {
 		const gate = await readabilityGate(
-			scripted(key => (key === "q1_undefined_terms" ? DEFECT_THRESHOLD : key === "q1_options_indistinct" ? 0.9 : key === "q0_missing_context" ? DEFECT_THRESHOLD - 0.01 : 0)),
+			scripted((question, defect) =>
+				question.startsWith("met") ? (defect === "undefined_terms" ? DEFECT_THRESHOLD : defect === "options_indistinct" ? 0.9 : 0) : defect === "missing_context" ? DEFECT_THRESHOLD - 0.01 : 0,
+			),
 			questions,
 			"sheet",
 			undefined,
@@ -72,24 +76,27 @@ describe("readability gate", () => {
 		expect(await readabilityGate(scripted(() => DEFECT_THRESHOLD - 0.01), questions, "sheet", undefined, noWarn)).toEqual({ kind: "pass" });
 	});
 
-	it("judges the full sheet, but only the native fields when the native dialog shows the ask", async () => {
+	it("judges each question alone: the full sheet, or only the native fields when the native dialog shows the ask", async () => {
 		const seen: Seen[] = [];
 		await readabilityGate(scripted(() => 0, seen), questions, "sheet", undefined, noWarn);
 		const native = await readabilityGate(scripted(() => 1, seen), questions, "native", undefined, noWarn);
-		const [sheet, nativeSeen] = seen;
-		expect(sheet?.keys).toHaveLength(6);
-		expect(JSON.stringify(sheet?.state)).toContain("每次失败都立即重发");
-		expect(JSON.stringify(sheet?.state)).toContain("不迁移，但重复写继续");
-		expect(JSON.stringify(nativeSeen?.state)).not.toContain("每次失败都立即重发");
-		expect(JSON.stringify(nativeSeen?.state)).not.toContain("不迁移，但重复写继续");
-		expect(JSON.stringify(nativeSeen?.state)).not.toContain('"id"');
+		expect(seen).toHaveLength(4);
+		const [retrySheet, metSheet, retryNative] = seen;
+		expect(retrySheet?.keys).toEqual(["undefined_terms", "missing_context", "options_indistinct"]);
+		expect(retrySheet?.state).toContain("每次失败都立即重发");
+		expect(retrySheet?.state).toContain("不迁移，但重复写继续");
+		expect(retrySheet?.state).not.toContain("met 后要电平还是边沿");
+		expect(metSheet?.state).not.toContain("重试应该怎么做");
+		expect(retryNative?.state).not.toContain("每次失败都立即重发");
+		expect(retryNative?.state).not.toContain("不迁移，但重复写继续");
+		expect(retryNative?.state).not.toContain('"id"');
 		expect(native.kind === "reject" && native.problems.at(-1)).toContain("the brief and tradeoffs are not shown");
 	});
 
 	it("asks without the check, with a warning, when the judge fails or answers incompletely", async () => {
 		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("every judge candidate failed")) };
 		const incomplete: NoulJudge = { judge: async () => ({ answers: {} }) };
-		for (const [judge, expected] of [[failing, "every judge candidate failed"], [incomplete, "no answer for q0_undefined_terms"]] as const) {
+		for (const [judge, expected] of [[failing, "every judge candidate failed"], [incomplete, "no answer for undefined_terms"]] as const) {
 			const warnings: string[] = [];
 			expect(await readabilityGate(judge, questions, "sheet", undefined, message => warnings.push(message))).toEqual({ kind: "pass" });
 			expect(warnings).toHaveLength(1);
