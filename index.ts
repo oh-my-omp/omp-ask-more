@@ -8,7 +8,9 @@
  * questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import type { Judge } from "@oh-my-pi/pi-ai";
+import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
@@ -17,10 +19,11 @@ import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
+import { type Gate, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
-import { readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
+import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/timeout.ts";
 
 /** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
@@ -28,19 +31,66 @@ let asking = false;
 
 /** The native dialog when this session cannot host the richer surface: the whole batch at once. */
 async function delegate(
-	ctx: ExtensionContext,
+	invoke: NonNullable<ExtensionContext["invokeTool"]>,
 	questions: readonly AskQuestion[],
 	signal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
 ): Promise<AgentToolResult<AskToolDetails>> {
-	const invoke = ctx.invokeTool;
-	if (invoke === undefined) {
-		return rejectedResult(["ask needs an interactive session, and no native ask is available to delegate to here"]);
-	}
 	return invoke<AskToolDetails>(
 		{ questions: questions.map(nativeQuestion) },
 		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
 	);
+}
+
+/**
+ * The session's judge role chain, billed to the session; undefined when the role resolves no
+ * model. The session model is not added: an unavailable judge means no readability check.
+ */
+function sessionJudge(ctx: ExtensionContext): Judge | undefined {
+	const session = AgentRegistry.global()
+		.list()
+		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
+	if (session == null) return undefined;
+	const chain = resolveJudge({
+		settings: session.settings,
+		registry: session.modelRegistry,
+		sessionId: session.sessionId,
+		metadataResolver: provider => session.agent.metadataForProvider(provider),
+		purpose: "ask-readability",
+		onUsage: journalJudgmentUsage(session.sessionManager),
+		telemetry: session.agent.telemetry,
+		cache: sharedJudgmentCache(),
+		costGate: session.costGate,
+	});
+	return chain.primaryModel() === undefined ? undefined : chain;
+}
+
+/** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. */
+async function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal | undefined): Promise<Gate> {
+	const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
+	let enabled: boolean;
+	try {
+		enabled = await readReadabilityJudge(ctx);
+	} catch (error) {
+		warn(error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error));
+		return { kind: "pass" };
+	}
+	if (!enabled) return { kind: "pass" };
+	const judge = sessionJudge(ctx);
+	return judge === undefined ? { kind: "pass" } : readabilityGate(judge, questions, surface, signal, warn);
+}
+
+/** The result that ends the call at the gate; undefined when the ask goes on. */
+function gateResult(ctx: ExtensionContext, questions: readonly AskQuestion[], gate: Gate): AgentToolResult<AskToolDetails> | undefined {
+	switch (gate.kind) {
+		case "pass":
+			return undefined;
+		case "reject":
+			return rejectedResult(gate.problems);
+		case "cancelled":
+			ctx.abort();
+			return cancelledResult(questions);
+	}
 }
 
 /**
@@ -73,11 +123,20 @@ async function ask(
 	if (!checked.ok) return rejectedResult(checked.problems);
 	const questions = checked.questions;
 
-	if (!(ctx.hasUI && ctx.mode === "tui")) return delegate(ctx, questions, signal, onUpdate);
+	if (!(ctx.hasUI && ctx.mode === "tui")) {
+		const invoke = ctx.invokeTool;
+		if (invoke === undefined) {
+			return rejectedResult(["ask needs an interactive session, and no native ask is available to delegate to here"]);
+		}
+		return gateResult(ctx, questions, await screen(ctx, questions, "native", signal)) ?? delegate(invoke, questions, signal, onUpdate);
+	}
 	if (asking) return rejectedResult(["another ask is open in this session; answer it before asking again"]);
 
+	// Held through the readability check too, so a parallel ask cannot slip in while the judge runs.
 	asking = true;
 	try {
+		const stopped = gateResult(ctx, questions, await screen(ctx, questions, "sheet", signal));
+		if (stopped !== undefined) return stopped;
 		// The settings as they are now; a config change applies from the next ask.
 		const { policy, problems } = timeoutPolicy(await readTimeoutSettings(ctx));
 		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${policyProblemText(problem)}`, "warning");
@@ -112,7 +171,8 @@ async function ask(
 		// The rich surface failed before it could be answered: fall back rather than lose the ask.
 		const detail = error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error);
 		ctx.ui.notify?.(`ask-more: ${tr("Could not open the full-screen dialog", "无法打开全屏对话框")}: ${detail}`, "warning");
-		return delegate(ctx, questions, signal, onUpdate);
+		const invoke = ctx.invokeTool;
+		return invoke === undefined ? rejectedResult([`ask could not open its dialog: ${detail}`]) : delegate(invoke, questions, signal, onUpdate);
 	} finally {
 		asking = false;
 	}
