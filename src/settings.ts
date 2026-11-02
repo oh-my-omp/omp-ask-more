@@ -13,7 +13,8 @@ type SettingProblem =
 	| { readonly kind: "seconds"; readonly key: "timeout" | "returnTimeout" }
 	| { readonly kind: "expiry" }
 	| { readonly kind: "terminal" }
-	| { readonly kind: "command" };
+	| { readonly kind: "command" }
+	| { readonly kind: "readability" };
 
 export class SettingsError extends Error {
 	constructor(readonly problem: SettingProblem) {
@@ -33,6 +34,8 @@ export function settingsErrorText(error: SettingsError): string {
 			return tr("notify.terminal must be true or false", "notify.terminal 必须为 true 或 false");
 		case "command":
 			return tr("notify.command must be a string", "notify.command 必须是字符串");
+		case "readability":
+			return tr("readability.judge must be true or false", "readability.judge 必须为 true 或 false");
 	}
 }
 
@@ -75,4 +78,12 @@ export async function readTimeoutSettings(ctx: Pick<ExtensionContext, "cwd">): P
 		? commandSetting(env, "trusted")
 		: commandSetting(settings["notify.command"], settings["notify.command"] === baseline?.["notify.command"] ? "trusted" : "project");
 	return { timeoutSeconds, returnSeconds, onExpiry, terminal, command };
+}
+
+/** Whether the readability gate asks the judge; read when each ask is called, before any dialog. */
+export async function readReadabilityJudge(ctx: Pick<ExtensionContext, "cwd">): Promise<boolean> {
+	const raw: unknown = (await getPluginSettings(PLUGIN, ctx.cwd))["readability.judge"];
+	const value = raw === undefined ? defaults["readability.judge"].default : raw;
+	if (typeof value !== "boolean") throw new SettingsError({ kind: "readability" });
+	return value;
 }
