@@ -1,0 +1,1383 @@
+{
+	"calls": [
+		{
+			"id": "toolu_01LZPfFhbmzUArnqhix1FSTb",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "env_blocker",
+					"header": "soroi 阻塞",
+					"question": "soroi 未实现期间，Lab 内的 AI 会话（讨论、节点编辑助手等）跑在哪个 env 上？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "加过渡规则：local 服务默认 Lab",
+							"tradeoff": "立刻能做真实端到端的 AI 会话与 Proposal 暂存；代价是设计里多一条要随 Lab 部署记录出现而作废的过渡规则",
+							"description": "与 PEPGENT_DEFAULT_LAB 对称：Lab 部署记录写入前，本地 daemon 作为默认 Lab 的唯一 env；写入后作废",
+							"cost": "改 pepgent.md §3 C1、lab-gateway 的 env 选取一节"
+						},
+						{
+							"label": "先推动 soroi 交付最小 ConfigGet/Check",
+							"tradeoff": "设计不改、无过渡债；代价是 pepgent 侧的 Lab AI 会话全部等 soroi",
+							"holds_when": "soroi 的最小 daemon 协议能在近期交付"
+						},
+						{
+							"label": "现在只做身份、shell 与 Draft 故事",
+							"tradeoff": "零设计改动、零外部依赖；代价是期间没有任何真实的 Lab 路径，只有 ViewModel 与草稿 UI"
+						}
+					],
+					"brief": {
+						"where": "C1：会话 env 只能从该 Lab 的 daemon 集合 ∩ presence 中选（docs/design/pepgent/pepgent.md:134）；K1：daemon 集合唯一来源是 soroi 实例配置表的 ConfigGet（:198）；soroi 尚未实现（:24）；现有会话默认 envId='local'（apps/web/src/server/persistence/session-store.ts:166-168）。",
+						"what": "在 soroi 出现前，Lab 内的 AI 会话没有合法的 env 来源。设计没有过渡规则，而改设计或等待外部项目是产品与排期取舍。",
+						"how": "选过渡规则：先改 C1 与 lab-gateway 文档，第一条真实切片立即可做。选等 soroi：只做身份与 shell，Lab 切片排在 soroi 之后。选只做草稿：交付身份、shell 和 Draft/* 故事。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "docs/design/pepgent/pepgent.md",
+								"start": 129,
+								"end": 135,
+								"note": "Proposal、AgentSession 与 C1"
+							},
+							{
+								"kind": "file",
+								"path": "docs/design/pepgent/pepgent.md",
+								"start": 196,
+								"end": 205,
+								"note": "K1–K8"
+							}
+						],
+						"risks": [
+							"过渡规则若不随部署记录作废，会变成第二份 daemon 来源"
+						]
+					}
+				},
+				{
+					"id": "first_slice",
+					"header": "第一切片",
+					"question": "第一条端到端的 Lab 垂直切片选哪一页？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "节点库 + 节点编辑助手",
+							"tradeoff": "原型与设计最吻合，能验证 Proposal 四态、按节点分组、单条撤回；应用一步依赖 soroi Check",
+							"description": "定义目录根来自 web 的 Lab 部署记录（pepgent.md:185），读 preset 不经 soroi"
+						},
+						{
+							"label": "讨论",
+							"tradeoff": "复用现有聊天最多；但讨论结论不是 Proposal，验证不到应用路径，且多人讨论冲突未解",
+							"description": "Proposal 只针对节点定义、workflow 草稿、镜像清单（pepgent.md:129）"
+						},
+						{
+							"label": "容器设置 + 镜像助手",
+							"tradeoff": "Komodo 现成、能做到构建；但 komodo.url 只来自 ConfigGet，提前做要存第二份端点，违反 K1"
+						}
+					],
+					"brief": {
+						"where": "原型 AI4S-Node-Library-Hi-Fi.dc.html 的编辑范围、暂存改动、单条撤回、全部应用，与 web.md:74 的 Proposal drafting→pending→applied|discarded 一一对应；讨论页（AI4S-Discussions-Hi-Fi.dc.html）多人、邀请、AI 回复开关与会话键 (labId, sub, 种类, Scope) 冲突。",
+						"what": "第一条真实路径决定 Proposal、MCP 端点、专有组件这些共享积木先被谁验证。",
+						"how": "选节点库：先做定义仓库读取、MCP 工具、Proposal 存储与暂存区，应用接 Check。选讨论：先把 conversation 改造成讨论种类。选镜像：先做 Komodo 客户端。"
+					}
+				},
+				{
+					"id": "multi_human",
+					"header": "多人讨论",
+					"question": "原型讨论页中多个研究者与 AI 在同一线程对话，怎么处理？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "裁掉：一人一会话",
+							"tradeoff": "daemon 仍是 transcript 唯一权威，不改设计；代价是失去原型的多人线程与邀请",
+							"description": "保持 (labId, sub, 种类, Scope) 会话键；删除 session-collaboration"
+						},
+						{
+							"label": "消息都进 agent，服务器加作者前缀",
+							"tradeoff": "不建第二份 transcript；代价是每条人类消息都耗 token，AI 需被指示可不回复",
+							"description": "会话键去掉 sub，writer 都能提交，作者只在前缀里"
+						},
+						{
+							"label": "改设计：web 自建人类消息日志",
+							"tradeoff": "最贴近原型；代价是与“不为 transcript 另建 store”（web.md:46）和 H4 冲突，要重写同步模型"
+						}
+					],
+					"brief": {
+						"where": "原型 S-042 参与者 JD、LW + AI，新建讨论可邀请成员（AI4S-Discussions-Hi-Fi.dc.html:244-245,280-287）；设计会话键含 sub、两个 writer 不共用 agent（web.md:85），session-collaboration 整项删除（renderer.md:98）。",
+						"what": "多人讨论是产品语义，设计明确排除了它，原型又把它作为核心交互。",
+						"how": "裁掉：讨论按设计做成单人专有组件。前缀方案：改 web.md 会话键与 renderer §4.3。自建日志：改 web.md、server-runtime 持久化与 hub-client H4。"
+					}
+				},
+				{
+					"id": "conflict_features",
+					"header": "冲突功能",
+					"question": "原型里与已定设计冲突的功能怎么处理？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "裁掉冲突部分，自动化留待单独设计",
+							"tradeoff": "不动已定决定；成员页、配额审批、设备排程、暂停下游、SSH 部署 controller 全删，A-01/04/05 这类事件→AI 会话的自动化另开设计",
+							"description": "集群页改为该 Lab 唯一 Komodo 里按 tag 分组的 Server"
+						},
+						{
+							"label": "全部裁掉，含自动化页",
+							"tradeoff": "范围最小；自动化页整页不做"
+						},
+						{
+							"label": "保留并重写相关设计",
+							"tradeoff": "最贴原型；代价是推翻 N24、D1、N14 与非目标，牵动 Keycloak、soroi 契约"
+						}
+					],
+					"brief": {
+						"where": "成员页的 Owner/Researcher/Student/Guest、配额、邀请（AI4S-Settings-Hi-Fi.dc.html:161-173,299-305）违反 N19/N24；自动化 A-02 暂停下游违反 D1，A-03 是设备排程（非目标，pepgent.md:9,124）；连接集群里每个集群各有 controller（AI4S-Connect-Cluster-Hi-Fi.dc.html:266-285）违反 N14/L2。",
+						"what": "这些是你此前已做出的决定与原型之间的冲突，只有你能决定是否推翻。",
+						"how": "裁掉：阶段 0 文档只记录映射与排除。保留：先改 pepgent.md 相关决定，再排实现。"
+					}
+				},
+				{
+					"id": "extra_ai_panels",
+					"header": "多余 AI 面板",
+					"question": "原型 11 个页面都挂 AI 面板，设计只有 5 种专有组件；首页、实验列表、数据集、集群、设置、自动化 6 页的 AI 面板怎么办？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "新增一种只读“Lab 问答”种类",
+							"tradeoff": "保留原型右栏体验；新种类无 Proposal 工具、只读当前 Lab，需在 web.md 种类表加一行"
+						},
+						{
+							"label": "裁掉这 6 页的 AI 面板",
+							"tradeoff": "不改设计；代价是这些页面右栏只放检查器"
+						}
+					],
+					"brief": {
+						"where": "AI-Panel 在原型中是一个通用组件，各页以 scope-label/scope-value/seed/prompts 传入上下文（AI-Panel.dc.html:79,94-110）；web.md:77-83 只定义镜像助手、节点编辑助手、编排助手、运行助手、讨论五种。",
+						"what": "这 6 页的 AI 没有作用对象与工具档位定义，属于产品范围。",
+						"how": "新增种类：web.md §3 加种类与 Scope，renderer 加对应组件。裁掉：这些页面的右栏只放检查器。"
+					}
+				},
+				{
+					"id": "visual",
+					"header": "视觉",
+					"question": "原型的配色与字体（#3a7b76 青色、Source Serif/Sans、JetBrains Mono）怎么落地？",
+					"recommended": 0,
+					"options": [
+						{
+							"label": "沿用现有 token，只取布局与密度",
+							"tradeoff": "零设计系统改动；外观与原型不同色、不同字体"
+						},
+						{
+							"label": "改主题源：主色与标题字族",
+							"tradeoff": "更接近原型；只改 pepgentTheme.ts 与 pepgent-tokens.css，不抄字面量"
+						}
+					],
+					"brief": {
+						"where": "约定 04 要求 Astryx token、light-dark、6/10/12 圆角、Geist 字族、typography role（docs/conventions/04-css-and-design-system.md:11-18）；renderer.md 非目标包含“视觉稿、像素与 token”；原型色表与字体见 AI4S-prototype/CLAUDE.md:48-66。",
+						"what": "品牌外观是你的偏好，约定只规定落点。",
+						"how": "沿用：Draft 故事与页面全用语义 token。改主题：先在主题源改主色与标题字族，再画页面。"
+					}
+				}
+			],
+			"labels": {
+				"conflict_features": "hard"
+			}
+		},
+		{
+			"id": "toolu_01Nt38Yc3ugt5w6rL9icNL5L",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "moat-app1-boundary",
+					"header": "moat-app1 边界",
+					"question": "moat-app1 的边界以哪份为准？",
+					"options": [
+						{
+							"label": "Moat 控制面：Komodo Core（加 Moat 组件）",
+							"tradeoff": "名称和 Moat 拓扑文档一致；app01 时代的个人 app 和 agent 执行负载都在边界外"
+						},
+						{
+							"label": "homelab 控制面：只放 Komodo Core",
+							"tradeoff": "边界最窄；其余服务全部在边界外，是否保留按下面各题逐个决定"
+						},
+						{
+							"label": "app01 继任：控制面 + 个人常驻 app",
+							"tradeoff": "按 #78；但 agent 执行负载和测试夹具仍在边界外"
+						}
+					],
+					"brief": {
+						"where": "名称、Moat deployment-topology §1、homelab-tf#78、apps/vms/110.yaml 头注释各自写了不同的边界（见上方分析）。",
+						"what": "三份来源互相矛盾，只有你能定哪份算数。它决定 VM110 上哪些服务是越界。",
+						"how": "选定后改写 110.yaml 头注释作为唯一的边界声明，越界的服务进入下面各题的去留决定。"
+					}
+				},
+				{
+					"id": "onecli",
+					"header": "onecli",
+					"question": "onecli（Moat 的凭据网关）自 10-10 启动以来没有任何请求。退役吗？",
+					"options": [
+						{
+							"label": "退役",
+							"tradeoff": "按 K6：删除声明、停掉容器、保留卷；释放约 110 MiB"
+						},
+						{
+							"label": "保留",
+							"tradeoff": "继续常驻，并把它写进这台 VM 的边界声明"
+						}
+					],
+					"brief": {
+						"where": "VM110 的 onecli 和 onecli-postgres，由 homelab-apps 的 [[stack]] onecli 声明。",
+						"what": "它在 Moat 拓扑里是凭据网关；Moat 的其余部分已退役，是否还有别的消费者只有你知道。",
+						"how": "退役走 K6；保留则写进边界。"
+					}
+				},
+				{
+					"id": "homepage",
+					"header": "homepage",
+					"question": "homepage 上次有人访问是 10-11（我的 headless 验证），页面里还列着已不存在的服务。退役吗？",
+					"options": [
+						{
+							"label": "退役",
+							"tradeoff": "释放约 225 MiB；去掉一个需要跟着每次退役同步维护的清单"
+						},
+						{
+							"label": "保留并修正条目",
+							"tradeoff": "删掉已退役服务的卡片，继续常驻"
+						}
+					],
+					"brief": {
+						"where": "VM110 的 homepage-lan、homepage-vpn、homepage-proxy，由 homelab-apps 声明。",
+						"what": "它是 app01 时代的个人导航页；你是否还在用，我从日志只能看到没有真实访问。",
+						"how": "退役走 K6；保留则在 homelab-apps 修正服务清单。"
+					}
+				},
+				{
+					"id": "fixtures",
+					"header": "测试夹具",
+					"question": "hello-world（webhook 冒烟测试）和 runner-canary（GARM 发布链路样板）是否继续常驻在 moat-app1？",
+					"options": [
+						{
+							"label": "两个都退役",
+							"tradeoff": "控制面 VM 上不再有测试夹具；以后要验证发布链路时临时部署"
+						},
+						{
+							"label": "只退役 hello-world",
+							"tradeoff": "runner-canary 继续作为常驻的发布链路验收样板"
+						},
+						{
+							"label": "都保留",
+							"tradeoff": "把「测试夹具」写进这台 VM 的边界"
+						}
+					],
+					"brief": {
+						"where": "hello-world（homelab-apps，0 流量）；runner-canary（独立仓库自带 Sync，7 天日志 0 行，有自己的 CF tunnel）。",
+						"what": "它们不是服务，是发布和 webhook 链路的验收夹具。夹具要不要常驻，是运维策略问题。",
+						"how": "退役走 K6（runner-canary 的 tunnel 按身份对象保留）。"
+					}
+				},
+				{
+					"id": "paseo",
+					"header": "paseo",
+					"question": "paseo 是 agent 执行负载（两个 daemon），不在 moat-app1 任何一份边界声明里，但确实有人在用。它应该在哪里？",
+					"options": [
+						{
+							"label": "迁到边界包含 agent 执行的 VM",
+							"tradeoff": "需要你指定哪台 VM 的边界包含它；按 migration-ab-verification 做 A/B 迁移"
+						},
+						{
+							"label": "留在 moat-app1，写进边界",
+							"tradeoff": "边界放宽为「控制面 + paseo」；内存压力只能靠清退其他服务来缓解"
+						},
+						{
+							"label": "退役",
+							"tradeoff": "释放约 650 MiB；paseo 的 Keycloak 前置和 tunnel 按身份对象保留"
+						}
+					],
+					"brief": {
+						"where": "VM110 上的 paseo Stack（6 个容器，其中 daemon 各 384 MiB 上限），由 homelab-apps 声明；公网入口经 cf-ingress 和 Keycloak 前置。",
+						"what": "它和这台 VM 的任何边界都不符。现有 VM 里哪一台的名称和边界本来就包含它，我不应该替你定。",
+						"how": "选迁移时请在备注里写目标 VM；选保留或退役则按对应方式处理。"
+					}
+				},
+				{
+					"id": "trading",
+					"header": "trading",
+					"question": "trading-agent 上 OpenD 自 05-31 起就是停止状态，Stack `trading` 从未部署过。这台机的交易负载还要吗？",
+					"options": [
+						{
+							"label": "交易负载保留，只清除孤儿记录",
+							"tradeoff": "OpenD 和 trading Core 保留；删掉没有声明的 Stack `trading` 记录"
+						},
+						{
+							"label": "OpenD 也退役",
+							"tradeoff": "这台机只剩 trading Core 空跑；是否保留 VM 本身另行决定"
+						}
+					],
+					"brief": {
+						"where": "VM130：OpenD 容器 exited 0、restart=no，最后一次 DeployStack 是 06-01；homelab-trading 仍声明 opend 的 deploy=true。bookmark-service 已按 #564 退役，会直接停掉。",
+						"what": "交易负载是不是有意停的，只有你知道。",
+						"how": "保留：只清除孤儿记录；退役：按 K6 处理 opend 的声明。"
+					}
+				}
+			],
+			"labels": {
+				"moat-app1-boundary": "hard",
+				"homepage": "readable"
+			}
+		},
+		{
+			"id": "toolu_0154AUNTgE5hZAYU3wwMpm3z",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "hapi-hub",
+					"header": "hapi hub",
+					"question": "hapi runner 已按 #592 退役，但 VM110 上 homelab-apps 仍声明并运行 hapi hub Stack（约 170 MiB，外加 hapi tunnel）。hapi hub 也算退役吗？",
+					"options": [
+						{
+							"label": "hub 也退役",
+							"tradeoff": "VM110 释放约 190 MiB；删除 Stack 声明、停掉容器、cf-ingress 的 hapi tunnel 一并退役，数据卷保留"
+						},
+						{
+							"label": "hub 保留",
+							"tradeoff": "继续占用 VM110 内存，只在重新规划时考虑迁到别的 VM"
+						}
+					],
+					"brief": {
+						"where": "VM110 moat-app1：hapi-hub（running，约 170 MiB）、hapi-cloudflared；声明在 homelab-apps komodo/syncs/stacks.toml 的 [[stack]] hapi。",
+						"what": "#592 记录操作员说「hapi早就退役了」，但当时只删了 runner 的部署声明，明确不动 hub Stack。从仓库和代码无法判断 hub 是否仍在使用。",
+						"how": "选退役：按 K6 删除声明、停掉容器、保留卷，并删 cf-ingress hapi tunnel。选保留：只把它纳入 VM 重新规划。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "homelab-tf#592 范围边界",
+								"text": "不在范围: hapi hub Stack（homelab-apps 的 [[stack]] name = \"hapi\"）、cf-ingress 的 hapi tunnel、omv/pve 主机上的 runner 数据与 unit。"
+							}
+						]
+					}
+				},
+				{
+					"id": "operator-tools",
+					"header": "主机工具",
+					"question": "PVE 宿主机和 OMV 上手动装了 hapi-runner、tern-remote，OMV 还有 claude、uv 和 /root/work 下的工作区，都没有声明。这些怎么处理？",
+					"options": [
+						{
+							"label": "全部移出，另建专用 VM",
+							"tradeoff": "hypervisor 和 NAS 只做本职；需要新建一台声明式的操作员工具 VM，作为 RFC 的一个 child"
+						},
+						{
+							"label": "hapi-runner 停掉，tern 保留并声明",
+							"tradeoff": "hapi-runner 按退役处理；tern 写进 pve-host role，OMV 上的 tern 和工作区移走"
+						},
+						{
+							"label": "hapi-runner 停掉，其余保持现状",
+							"tradeoff": "改动最少，但 hypervisor 和 NAS 上仍留着未声明的工具"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "PVE：hapi-runner.service 0.16.6（约 117 MiB，root，10-13 启动）、tern-remote.service。OMV：hapi-runner.service 0.17.4、root 用户的 tern-remote、claude-code、/root/work/* 多个工作区、未启用的 media-migrate.service。",
+						"what": "hapi runner 已按 #592 退役，但两台主机上的 unit 仍在运行，和 memos 是同一种违约。tern 和工作区是不是在用的操作员工具，只有你知道。",
+						"how": "hapi-runner 按 K6 处理：disable、停止、保留数据。tern 和工作区按你的选择：移到专用 VM、写进 IaC 声明，或者不动。"
+					}
+				},
+				{
+					"id": "pve-extras",
+					"header": "PVE 杂项",
+					"question": "PVE 宿主机上还有 glances、ndpresponder（vmbr0 IPv6 NDP 代理）、Samba、每 2 分钟 curl ipv6.ip.sb 的 root cron，全部未声明。怎么处理？",
+					"options": [
+						{
+							"label": "ndpresponder 写进 pve-host role，其余删除",
+							"tradeoff": "保住宿主机和 guest 的 IPv6，去掉没有主人的服务；Samba 和 cron 用途不明，删除后影响需要你确认没问题"
+						},
+						{
+							"label": "全部写进 pve-host role",
+							"tradeoff": "现状不变，只补声明"
+						},
+						{
+							"label": "全部删除",
+							"tradeoff": "宿主机最干净；如果 IPv6 依赖 ndpresponder，IPv6 会中断"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "PVE：/usr/local/bin/ndpresponder -i vmbr0 -n 2400:2410:bf70:5500::0/64；glances -s -B 127.0.0.1；smbd/nmbd/winbind（只有 homes、printers 共享）；crontab */2 curl -m 6 -s ipv6.ip.sb。",
+						"what": "这些都没有声明，用途只能推断：curl cron 看起来是 IPv6 保活或探测。只有你知道哪些是真正需要的。",
+						"how": "要保留的写进 _shared/ansible/roles/pve-host，跑 make pve-host 落地；要删除的停服务、卸载，并在 PR 里留证据。"
+					}
+				},
+				{
+					"id": "omv-media",
+					"header": "OMV 媒体栈",
+					"question": "OMV 上有 28 个 Docker 容器和 5 个 Podman 容器，由 OMV 的 compose 插件生成（jellyfin、*arr、qbittorrent、aria2、filebrowser、watchtower 等），没有放在 git 或 km 里。它们归谁管？",
+					"options": [
+						{
+							"label": "保留 OMV 插件管理，作为文档化的例外",
+							"tradeoff": "改动小；把 OMV 设备自管的边界写进 state-authority-map，同时修掉坏容器和重复的 filebrowser"
+						},
+						{
+							"label": "迁进 km（homelab-apps 新增 Stack）",
+							"tradeoff": "统一由 git 声明、webhook 部署；工作量大，watchtower 和 podman 的自动更新要拆掉"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "VM101 OMV：compose 文件头写着 '# This file is auto-generated by openmediavault'；只有 opencloud 是 km Stack。还有一个从未启动的 download-qbittorrent（网络命名空间指向已不存在的容器）、4 个 filebrowser 实例、watchtower 加 podman-auto-update。",
+						"what": "app 归属判据要求 compose app 进 km，但 OMV 本身在 IaC 之外，是由 UI 管理的设备。要不要把它算作例外，属于架构取舍。",
+						"how": "选例外：写进文档，只修坏容器、去掉重复。选迁移：在 RFC 里给它一个 child，按 homelab-apps 的模式逐个迁移。"
+					}
+				},
+				{
+					"id": "vm-constraint",
+					"header": "VM 规划边界",
+					"question": "重新规划 VM 时，「调整内存容量禁止」指的是哪种范围？",
+					"options": [
+						{
+							"label": "单台 VM 不加内存，可以重新分配和新建",
+							"tradeoff": "可以把 workload 挪到空闲 VM（soroi 有 8 GiB，平时只用约 0.8 GiB），也可以按职责新建或拆分 VM；宿主机还有约 37 GiB 未分配"
+						},
+						{
+							"label": "所有 VM 的配置都不变，只挪 workload",
+							"tradeoff": "只在现有 5 台 VM 之间搬迁；soroi 和 trading 的专用定位要改"
+						},
+						{
+							"label": "可以调整，只是不能用加内存来掩盖问题",
+							"tradeoff": "先按职责重新划分；调整大小只作为规划结果出现，不作为对症修补"
+						}
+					],
+					"recommended": 2,
+					"brief": {
+						"where": "宿主机 62 GiB，运行中的 guest 合计 25.25 GiB。VM110 只有 2.5 GiB，同时跑 Komodo Core、数据库和 6 个 app Stack，每晚 OOM。soroi（8 GiB）和 trading（2 GiB）基本空闲；trading 上实际跑的是已退役的 bookmark-service。",
+						"what": "你说调整内存是禁止选项，但重新规划必然涉及 VM 的职责和容量。不同理解会让方案完全不同。",
+						"how": "这个答案决定 RFC 里目标布局的约束条件和 child 的切分方式。"
+					}
+				},
+				{
+					"id": "komodo-backup",
+					"header": "Komodo 备份",
+					"question": "Komodo 自带的每晚 Backup Core Database（出厂默认、没有任何声明）怎么处理？",
+					"options": [
+						{
+							"label": "在 homelab-komodo 里声明：保留备份，降低 Stats 采集频率并缩短保留期",
+							"tradeoff": "备份变成显式声明；Stats 体积大幅缩小，全表扫描不再撑爆内存；但备份仍和数据库在同一块盘上"
+						},
+						{
+							"label": "声明并关闭定时备份",
+							"tradeoff": "去掉每晚峰值；workload 声明都在 git，可以重建，但 User、ApiKey 和历史记录不再有任何备份"
+						},
+						{
+							"label": "声明保留，并加异地拷贝",
+							"tradeoff": "真正可恢复；需要选定异地目标（例如 OMV 或 R2），工作量最大"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "两个 Core 上都有 Backup Core Database，每天 01:00 JST 执行，是首次初始化时自动创建的，从未修改。homelab Core 上 Stats 占 882 MB（每 15 秒采集、保留 14 天），从 10-15 起备份每晚失败；trading Core 每次成功。",
+						"what": "要不要备份、保护什么，属于运维策略，代码和文档都没有定。",
+						"how": "选定后由 homelab-komodo 的 komodo-core role 通过 API 声明这个 Procedure 的配置，同时调整 KOMODO_MONITORING_INTERVAL 和 KOMODO_KEEP_STATS_FOR_DAYS，再跑两个 Core 的 playbook 落地。"
+					}
+				}
+			],
+			"labels": {
+				"operator-tools": "readable"
+			}
+		},
+		{
+			"id": "toolu_01NDTmJ5hyZzerQbKYAbnyP9",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "formal",
+					"header": "正式执行",
+					"question": "一步要怎样才算正式执行、进入 store？",
+					"options": [
+						{
+							"label": "确认即正式执行",
+							"tradeoff": "改动最少；确认后不带挡板把这一步的代码再跑一遍，结果写进 store，试探的结果直接丢弃",
+							"description": "确认锁定这一步的代码和输入 atom，宿主据此正式跑一次"
+						},
+						{
+							"label": "确认时直接收下试探结果",
+							"tradeoff": "不用再跑一遍；但和“试探不进 store”冲突，带挡板的试探也不能确认",
+							"description": "不带挡板的试探在确认时把结果写进 store"
+						},
+						{
+							"label": "正式执行是单独的一次调用",
+							"tradeoff": "试探和正式完全分开；要另设一种调用，AI 要多做一步",
+							"description": "确认只锁定这一步，之后用单独的正式调用执行"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "design/eval.md：“正式运行与测试”写“只有正式运行进 store，测试和试探从头到尾不进 store”；“试探与确认”写“只有最后那次 eval 写进 store，成为正式的一步”；占位表写“试探的结果由宿主持有，确认时写入 store”。",
+						"what": "文档没有写正式执行是怎么发生的：确认是触发一次正式执行，还是直接收下试探结果，还是另有一种调用。三处说法互相冲突，只能由你定。",
+						"how": "按你的选择改写“试探与确认”“正式运行与测试”和占位表，让三处只表达一种含义。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "design/eval.md",
+								"start": 138,
+								"end": 145,
+								"note": "试探与确认"
+							},
+							{
+								"kind": "file",
+								"path": "design/eval.md",
+								"start": 169,
+								"end": 173,
+								"note": "正式运行与测试"
+							},
+							{
+								"kind": "file",
+								"path": "design/eval.md",
+								"start": 190,
+								"end": 190,
+								"note": "我写的占位，和上面冲突"
+							}
+						]
+					}
+				}
+			],
+			"labels": {
+				"formal": "hard"
+			}
+		},
+		{
+			"id": "toolu_017Qo9TbMDFWobKESVFkQc6S",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "scope",
+					"header": "soroi 指什么",
+					"question": "“soroi”这个名字要覆盖到哪一层？",
+					"brief": {
+						"where": "design/ 下四份文档：soroi.md（值与捕获模型）、layers.md（从 AI4S 原型推出的待补层）、subagent.md（omp fork 重写 subagent）、remote.md（Komodo/Slurm/k8s 后端）。",
+						"what": "四份文档把四层东西都叫 soroi：值与捕获模型、omp fork（进程化 subagent、IRC、多读方）、执行后端、AI4S 业务界面。soroi.md:17 说“soroi 只负责值和捕获”，但 soroi.md:126-131 又把后端、omp 插件、omp fork 都列成 soroi 的组成。你自己也用过两种范围：“捕获和记录本质上只是 omp 里所需要的自定义插件”“就是做几个插件”，以及“soroi 的前端原型”“这是 soroi 的业务层”。名字覆盖到哪一层，代码和文档都决定不了，只能你定。",
+						"how": "选定后我按这个范围重写 soroi.md 的定义和组成表：范围外的部分改称“soroi 的宿主”“soroi 的执行层”或“建在 soroi 上的应用”，不再写成 soroi 自身的组成。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "design/soroi.md",
+								"start": 120,
+								"end": 131,
+								"note": "组成表把后端、omp 插件、omp fork、执行底座都列为 soroi 的组成"
+							},
+							{
+								"kind": "file",
+								"path": "design/remote.md",
+								"start": 72,
+								"end": 72,
+								"note": "store 只在这里被点名，四份文档都没定义它"
+							}
+						]
+					},
+					"options": [
+						{
+							"label": "引擎 + 自有宿主与执行层",
+							"tradeoff": "soroi 包括值/记录模型、omp fork 和执行后端；AI4S 是建在 soroi 上的应用，界面需求另归平台",
+							"description": "omp fork 和后端仍归 soroi 所有，但写明它们是宿主和执行层，不是核心"
+						},
+						{
+							"label": "整个产品",
+							"tradeoff": "AI4S 平台、omp fork、插件、后端全叫 soroi；“像 omp 变体”成为如实描述，核心和交付形态要在文档里另行区分",
+							"description": "soroi = 实验室平台本身"
+						},
+						{
+							"label": "只有引擎",
+							"tradeoff": "soroi 只是值、捕获和记录的模型加 store；omp fork 与后端另起名字，名字最清楚，但要多维护两个名字",
+							"description": "fork 和后端是外部依赖"
+						}
+					],
+					"recommended": 0
+				},
+				{
+					"id": "authority",
+					"header": "Pure 的权威",
+					"question": "一个 Pure 的身份由谁持有：store，还是 eval kernel？",
+					"brief": {
+						"where": "soroi.md:21-28 把 Pure 写成 kernel 里的值：读取即登记、未消费即警告（soroi.md:102）。layers.md:25-29 又要求：记录比 kernel 活得久、旧值能在后续会话里重新成为 Pure、跨会话的消费关系可查；layers.md:47 要求函数和输入都相同就复用旧记录。",
+						"what": "这些要求只有在 Pure 的身份由 store 发放（键为函数版本 + 输入），kernel 里的 Pure 只是句柄时才成立。现有文档两种写法并存，store 本身也没有定义。不先定权威，记录、复用、来源这些 soroi 独有的部分就写不下去，而这正是 soroi 区别于“omp + 插件 + 后端”的地方。",
+						"how": "选 store 时，soroi.md 的重心移到记录模型：store 是值的唯一权威，Pure/Capture 是客户端 API，消费规则和未消费警告落在 store 的事实上。选 kernel 时，store 只是 kernel 值的日志副本，跨会话复用要另行定义。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "design/layers.md",
+								"start": 23,
+								"end": 30,
+								"note": "记录、跨会话引用与复用的要求"
+							},
+							{
+								"kind": "file",
+								"path": "design/soroi.md",
+								"start": 21,
+								"end": 28,
+								"note": "Pure 目前写成 kernel 内的值"
+							}
+						]
+					},
+					"options": [
+						{
+							"label": "store 持有，Pure 是句柄",
+							"tradeoff": "复用、来源、跨会话引用都由一个模型推出；soroi.md 要重写，重心从 Pure 语义移到记录模型",
+							"holds_when": "复用和来源属于核心，而不只是 GUI 要的功能"
+						},
+						{
+							"label": "kernel 持有，store 是副本",
+							"tradeoff": "soroi.md 基本不改；跨会话复用和引用要另加规则把 kernel 值和 store 记录对上",
+							"holds_when": "一次会话内的捕获就够，跨会话只用于查看"
+						}
+					],
+					"recommended": 0
+				}
+			],
+			"labels": {
+				"scope": "readable"
+			}
+		},
+		{
+			"id": "toolu_01N5XHhF2eptuovt8nEmqoJX",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "judge_scope",
+					"header": "judge 用法",
+					"question": "tool://task/judge 里的“意图分析”，主要分析谁的意图？",
+					"brief": {
+						"where": "草稿 agent/extensions/tool-topics/TOPIC-task-judge.md（未提交）。eval 里 judge() 实测可用：单次约 0.5 秒，能识别出一个 assignment 塞了两件事（single=0.33），也能判出结果满足验收（done=1）；judgeBatch 正确分出 research/change/mixed 三类。",
+						"what": "两位评审都要求删掉草稿中的拆分、isolated、完成度三条判断，因为 task-split-check、isolation-nudge、task-completion-judge 已经在派发和交付时自动做了。删完之后 topic 主写哪种用法，取决于你说的“意图”指什么，代码和文档里找不到答案。",
+						"how": "选 A：topic 主写给不是模型自己写的批量条目分诊，再按标签决定派发方式；judgeBatch 的具体写法指向 tool://eval/workflow。选 B：topic 主写用户请求有多种合理理解时，先列出候选理解，用 judge 选一个再写 assignment。选 C：两种都写，A 在前。三种都会删掉重复钩子的那三条，加一句“这些检查钩子已经在做”，然后跑真实会话验证。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "discuss:divergent 评审",
+								"text": "judge 只能看到你传进去的 state；主模型读用户消息时有完整上下文，让一个看不到上下文的小模型判断‘追问状态还是新任务’，结果更差，还多一步。"
+							},
+							{
+								"kind": "text",
+								"source": "discuss:steady 评审",
+								"text": "when: before classifying ambiguous request intent with eval judge to shape a task assignment"
+							},
+							{
+								"kind": "text",
+								"source": "本会话实测：task-completion-judge 日志判定 done，但交付结果里没有 completion_judge 字段",
+								"text": "Structured / StructuredOn 两次结果都只有 {\"answer\"|\"result\": \"DELTA\"}"
+							}
+						]
+					},
+					"options": [
+						{
+							"label": "A：给条目分诊",
+							"tradeoff": "钩子覆盖不到的地方最有用，judge 只看条目文本也够；但不涉及用户请求本身",
+							"description": "给审计发现、issue、session 行、多份结果打标签，再按标签分派：task 共享或隔离、agent()、或丢弃"
+						},
+						{
+							"label": "B：理解有歧义的请求",
+							"tradeoff": "贴合“意图分析”的字面意思；但主模型本身有完整上下文，judge 带来的增益有限",
+							"description": "先列出候选理解，用 judge 从中选一个，再写 assignment"
+						},
+						{
+							"label": "C：两者都写，A 在前",
+							"tradeoff": "覆盖最全；topic 更长，when 行也更难写得准",
+							"description": "以 A 为主，B 作为一条补充"
+						}
+					],
+					"recommended": 0
+				}
+			],
+			"labels": {
+				"judge_scope": "readable"
+			}
+		},
+		{
+			"id": "toolu_01SZo6u5Kzd1YpsBGpDCxHCs",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "original",
+					"header": "对照对象",
+					"question": "“对照原始的差异”里的“原始”，指的是用户原话（原始意图），还是 astra 会话里的原设计？",
+					"options": [
+						{
+							"label": "用户原话（原始意图）",
+							"tradeoff": "每份系统文档只标出哪些是原话直接给的、哪些是本设计推导的；不引入新旧设计对照，也不违反“不留遗留层”",
+							"description": "差异 = 本设计相对用户原话多出、改动或补全的部分"
+						},
+						{
+							"label": "astra 会话里的原设计",
+							"tradeoff": "需要先从 astra 会话把原设计整理出来，再逐系统写差异；这是新旧设计对照，与“不留遗留层”的默认规则冲突，以你的指令为准",
+							"description": "差异 = 现在的设计相对 astra 原设计改了什么"
+						},
+						{
+							"label": "两者都要",
+							"tradeoff": "工作量最大；文档里同时出现原话对照和原设计对照两套内容",
+							"description": "先对原话，再对 astra 原设计"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "design/intent-register.md 第 0 节有原话来源的会话 id 和 entry；design/intent-audit.md 对照的是一份已删除的“旧稿”（:3），不是你的原话，也不是 astra 的原设计。系统文档 §1 现在只有意图编号和原话片段。",
+						"what": "你在上一个会话里说过：“文档里没有一个字提到原始意图，详细的来源是什么，对照原始的差异”。你也说过“原本良好的有边界的复杂的设计”，而那次任务是接手 astra 的设计。所以“原始”有两种读法，按哪一种做，文档内容完全不同。",
+						"how": "选原话：系统文档 §1 改为“意图编号 → 原话直接给出的 / 本设计推导的”，详细来源统一放在 intent-register，intent-audit.md 拆掉。选 astra 原设计：先由只读调查从 astra 会话整理出原设计，再逐系统写出差异。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "design/intent-audit.md",
+								"start": 3,
+								"end": 3,
+								"note": "现有对照对象是已删除的旧稿"
+							},
+							{
+								"kind": "file",
+								"path": "design/intent-register.md",
+								"start": 7,
+								"end": 13,
+								"note": "原话来源与会话 id"
+							}
+						]
+					}
+				},
+				{
+					"id": "scope",
+					"header": "范围",
+					"question": "“现有的文档全部修复”是否包括 faces/、fw/、partition/ 下的调查底稿？",
+					"options": [
+						{
+							"label": "只修 design/ 下的 13 份",
+							"tradeoff": "调查底稿保持原样作为证据；修复集中在设计文档",
+							"description": "overview、connections、9 份系统文档、intent-register、intent-audit"
+						},
+						{
+							"label": "调查底稿也修",
+							"tradeoff": "多出约 40 份、共约 4MB 的调查报告，要按同一套标准审计和删改，耗时长，而且可能改动证据本身",
+							"description": "faces/、fw/、partition/ 全部按同一套审计标准处理"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "pepgent-pm-new 下有 design/（13 份设计文档），以及 faces/、fw/、partition/（调查子 agent 写的取证报告，例如 partition/MainActivity.md 有 1.5MB）。",
+						"what": "调查底稿记录的是取证事实，不是设计，所以“不写代码规则”这类设计文档规则未必适用；但你说的是“全部”。",
+						"how": "只修 design/：调查底稿不动，设计文档引用它们作为证据。也修底稿：先审计再删改，改动的是证据文本。"
+					}
+				}
+			],
+			"labels": {
+				"original": "readable"
+			}
+		},
+		{
+			"id": "toolu_01WsTbxVhrHZj8MpykDhSyPC",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "push",
+					"header": "完成时的反应",
+					"question": "omp 里每完成一项 todo，你希望 AIRI 怎么反应？",
+					"options": [
+						{
+							"label": "更新认知 + 她自己决定要不要说一句",
+							"tradeoff": "像旁边有人看着你干活，偶尔夸一句；不会每项都打扰，也不进聊天记录",
+							"description": "后台更新她知道的进度，同时发一条通知，由她判断要不要开口（AIRI 的 spark:notify）"
+						},
+						{
+							"label": "只悄悄更新认知",
+							"tradeoff": "完全不打扰；她只在你问起时才提",
+							"description": "只更新她知道的进度（AIRI 的 context:update），不触发任何回复"
+						},
+						{
+							"label": "当成一条消息发给她，必回复",
+							"tradeoff": "每项都会回一句并留在聊天记录里；子任务一多会很吵",
+							"description": "等同于有人在聊天框里告诉她「某某完成了」（AIRI 的 input:text）"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "AIRI 桌面版本地有个消息通道 ws://127.0.0.1:6121/ws，外部程序用 AIRI 自己生成的密钥（~/Library/Application Support/ai.moeru.airi/server-channel-config.json）登录后可以往里发三种消息。omp 这边，omp-todo-more 每次 DONE 都会在工具结果里带上「这次完成了哪些项」，另一个 omp 插件可以监听到。",
+						"what": "三种消息对你的打扰程度完全不同，这是口味问题，代码决定不了。",
+						"how": "我会写一个 omp 插件：每个 omp 进程启动时连上 AIRI，把这个进程当前全部 todo 交给她（这就是你说的「初始化」）；之后每次完成按你选的方式推送；omp 进程退出时 AIRI 自动忘掉它的 todo。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "packages/plugin-protocol/src/types/events.ts",
+								"start": 1284,
+								"end": 1324,
+								"note": "spark:notify：通知角色，模型可以选择不回应"
+							},
+							{
+								"kind": "file",
+								"path": "packages/core-agent/src/agents/spark-notify/agent.ts",
+								"start": 87,
+								"end": 93,
+								"note": "提示词明确允许她不出声"
+							}
+						]
+					}
+				},
+				{
+					"id": "scope",
+					"header": "算哪些 worker",
+					"question": "子代理（task:mid/low 这类派出去干活的 worker）的 todo 也要推给 AIRI 吗？",
+					"options": [
+						{
+							"label": "只推主会话",
+							"tradeoff": "信息干净，一个 omp 窗口对应一条进度；看不到子代理内部的细步骤",
+							"description": "每个 omp 主会话的 todo 才算"
+						},
+						{
+							"label": "主会话和子代理都推",
+							"tradeoff": "最完整；但并行派活时一次会涌进很多条，AIRI 要读的内容也多",
+							"description": "子代理也有自己的 todo，一起推"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "omp-todo-more 给 task:high/mid/low/free 子代理也装了 todo 工具，每个子代理有自己的 todo；插件能通过 ctx.agent.kind 分辨 main 还是 sub。",
+						"what": "子代理的 todo 是主任务的拆细步骤，推不推影响信息量和噪音。",
+						"how": "选只推主会话：插件忽略 kind=sub 的会话。选都推：子代理的 todo 挂在它的主会话下面一起交给 AIRI。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/index.ts",
+								"start": 73,
+								"end": 78,
+								"note": "子代理也装了 todo 工具"
+							}
+						]
+					}
+				},
+				{
+					"id": "history",
+					"header": "按天回看",
+					"question": "要不要让 AIRI 能回答「我昨天/今天都干了什么」这种按天的问题？",
+					"options": [
+						{
+							"label": "要，加一个按日期查询的工具",
+							"tradeoff": "她能回答任意一天完成了什么；多一个查询工具要写和维护",
+							"description": "从 omp 已经存在磁盘上的会话记录里，按日期找出完成的 todo"
+						},
+						{
+							"label": "不要，只管正在运行的",
+							"tradeoff": "最简单；omp 进程关掉后她就不知道那些事了",
+							"description": "只有运行中 omp 的 todo 和期间推送的完成事件"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "AIRI 收到的进度只存在内存里，重启就没了；但 omp 每个会话的 todo 每次变化都已经写进 ~/.omp/agent/sessions/**/*.jsonl，带时间戳。",
+						"what": "「每天都在干什么」需要能回看过去，记录本来就在 omp 的会话文件里，只差一个读取工具。",
+						"how": "选要：做一个 AIRI 能调用的查询工具（接到 AIRI 的 MCP 设置里），按日期读 omp 会话文件、列出当天完成的项；不另存一份数据。选不要：只做推送和初始化。",
+						"evidence": [
+							{
+								"kind": "file",
+								"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/src/commit.ts",
+								"start": 14,
+								"end": 33,
+								"note": "每次 todo 变化都写进会话记录"
+							}
+						]
+					}
+				}
+			],
+			"labels": {
+				"history": "readable"
+			}
+		},
+		{
+			"id": "toolu_01PVZ85TNurfPfyodd6vU1w1",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "harness",
+					"header": "Agent 跑在哪",
+					"question": "远程 Agent 体的 harness 放在哪边：留在本机的 omp subagent、只把工具执行放到远程，还是按模板在远程机器上起一个独立 harness（Claude Code、Codex 等）？",
+					"brief": {
+						"where": "design/layers.md:9 写着“`Agent` 体按智能体模板启动，模板规定 harness”，出处是原型的“设置·智能体模板”页（lab-assistant 用 Claude Code，verdict-scorer 用 Codex CLI，lit-scout 用 Pi，oc-sandbox 用 OpenCode）。但前面讨论的结论是“eval 启动的是 omp 自己的 subagent”。两者对远程运行的要求完全不同。",
+						"what": "三个后端的调研结论：Komodo、Slurm、k8s 都只管启动、状态、中止和日志，都不提供文件进出和运行后浏览，也都不保证远程能连回 soroi。harness 放在哪边，决定了缺的这两块由谁补、怎么补。这是产品取向，代码和文档定不了。",
+						"how": "选本机：每个后端只需实现 open / exec / close 三个操作，文件进出走 exec 上的 tar 管道，由本机中间件主动拉取；不需要远程连回，模板镜像不用改，Slurm 计算节点也不需要能访问模型 API。选远程：每个模板运行环境都要带一个 runner，负责拉输入、交回结果、上传文件、结束时上传工作目录；soroi 要有远程能访问的 gateway 和 store；后端适配器是 launch / status / tail / abort。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "local://Slurm.md:94（Princeton 站点政策）",
+								"text": "compute-node internet API access via proxy/default is very limited and preapproved … general internet access is not supported.",
+								"note": "远程连回在实验室集群上通常是最难拿到的前提"
+							},
+							{
+								"kind": "text",
+								"source": "local://Komodo.md:15",
+								"text": "RunStackService automatically removes the one-off container. Its unmounted writable filesystem is therefore not a post-run artifact store.",
+								"note": "选远程 harness 时，文件必须在容器退出前推出去"
+							},
+							{
+								"kind": "text",
+								"source": "本会话工具清单 remote_env_init / container_exec",
+								"text": "Open an interactive PTY in the current remote-build container through Komodo",
+								"note": "omp 里已有“agent 在本机、工作区在 Komodo 容器里”的同类机制（只看了描述，没读实现）"
+							}
+						],
+						"risks": [
+							"选本机：每次工具调用都要跨一次网络，频繁跑 bash 的 agent 会变慢；智能体模板页的“按模板选 harness”变成只选模型和模板文件",
+							"选远程：runner + gateway + store 是最大的一块工作；每个站点都要放行从计算节点到 soroi 和模型 API 的出口"
+						]
+					},
+					"options": [
+						{
+							"label": "本机 omp subagent，工具远程执行",
+							"tradeoff": "整体最小，不需要远程连回；代价是 harness 固定为 omp，工具调用有网络延迟",
+							"description": "适配器 open / exec / close；文件由本机中间件经 exec 拉取"
+						},
+						{
+							"label": "按模板在远程起 harness",
+							"tradeoff": "保留原型里每个模板选不同 harness；代价是要做 runner、gateway、store，并依赖站点放行出口",
+							"description": "适配器 launch / status / tail / abort；runner 推送文件和结果"
+						},
+						{
+							"label": "两种都要",
+							"tradeoff": "覆盖全部场景；代价是两套数据通路都要做，适配器要同时支持两组操作",
+							"description": "omp subagent 走本机形态，第三方 harness 走远程形态"
+						}
+					],
+					"recommended": 0
+				},
+				{
+					"id": "k8sfront",
+					"header": "k8s 前端",
+					"question": "标准 k8s 的“类 Komodo”前端，默认用哪种？",
+					"brief": {
+						"where": "Komodo 2.3 不支持 k8s（路线图上标为 Undecided）。调研过的候选：Rancher、Portainer、Karmada、OCM、Argo Workflows、Kueue、Volcano、Tekton，详见 local://K8sFront.md。",
+						"what": "你说 k8s 可以引入一个类似 Komodo 的东西。几个候选能力差别很大，而且不论选哪个，soroi 这一侧调用的都是同一套 k8s API，差别只在连接方式和要额外运维的组件。",
+						"how": "选 kubeconfig：模板目录记录集群 context 和 namespace，适配器直接用 @kubernetes/client-node 操作 Job/Pod，不多部署任何东西。选 Rancher：适配器不变，只是 kubeconfig 指向 Rancher 代理；下游集群的 agent 主动连 Rancher，soroi 只连一个入口，但要运维一整套 Rancher。选 Argo：k8s 后端改走 Argo 的 Workflow、模板和 artifact，和另外两个后端的数据通路就不一样了。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "local://K8sFront.md:92",
+								"text": "Rancher explicitly says the authentication proxy forwards all Kubernetes API calls and generates downstream kubeconfigs that proxy through Rancher.",
+								"note": "Rancher 是最接近 Komodo 的“一个入口管多个集群”"
+							},
+							{
+								"kind": "text",
+								"source": "local://K8sFront.md:13",
+								"text": "Argo Workflows is the closest execution-oriented match … ordinary Argo is not itself a fleet-wide job gateway.",
+								"note": "Argo 强在模板和 artifact，不管多集群"
+							}
+						]
+					},
+					"options": [
+						{
+							"label": "kubeconfig 为默认，Rancher 可选",
+							"tradeoff": "不多部署组件；集群多了再把 kubeconfig 指向 Rancher，适配器代码不用改",
+							"description": "同一个 Job 适配器，两种连接配置"
+						},
+						{
+							"label": "必须经 Rancher",
+							"tradeoff": "和 Komodo 一样只连一个入口；代价是要运维完整的 Rancher 管理面",
+							"description": "Rancher 代理是唯一连接方式"
+						},
+						{
+							"label": "Argo Workflows",
+							"tradeoff": "自带模板、运行对象和 artifact 浏览；代价是 k8s 的数据通路和另外两个后端不同，而且不管多集群",
+							"description": "k8s 后端改走 Workflow"
+						}
+					],
+					"recommended": 0
+				}
+			],
+			"labels": {
+				"k8sfront": "readable"
+			}
+		},
+		{
+			"id": "toolu_01CwAabzTfwQ7XFZFjn9hvge",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "delivery",
+					"header": "交付",
+					"question": "DuckDB 是原生依赖（duckdb.node + 62.6 MB libduckdb.dylib），omp-config 更新器只复制 .ts 文件、不带 node_modules。用什么方式把它交付到宿主？",
+					"recommended": 0,
+					"brief": {
+						"where": "实测：@duckdb/node-api 在真实编译版 omp 18.15.0 的扩展代码里静态 import 后能执行 read_ndjson（local://EngineHostDelivery.md）。更新器 managedPlain 只管扩展 .ts（agent/extensions/omp-config-autoupdate/omp-config-update.ts:368-386）。插件的依赖经 omp install 装进 ~/.omp/plugins/node_modules，omp-unified-exec 带 @xterm/headless 就是先例。",
+						"what": "能力归哪个仓库，以及原生依赖走哪条交付通道。你的插件范式规则规定能力由声明它的仓库拥有、走宿主原生通道。",
+						"how": "选插件：新建插件仓库，把 session-urls 整体迁过去（session://、session_query、TS 加载器、DuckDB）；omp-config 删掉旧扩展和相关文档，install-plugins.sh 加一行；先装插件、再删旧文件，避免同一个 scheme 或工具被注册两次。仓库 owner 和名字之后在正文问你。选更新器：让 omp-config 更新器对带 package.json 的扩展执行 bun install，需要改更新器的托管规则。",
+						"risks": [
+							"插件方案：插件仍要 import 宿主内部子路径（session-entries、history-storage 等），要在真实二进制里验证能加载",
+							"更新器方案：更新器会变成和 omp install 平行的第二个包管理器"
+						]
+					},
+					"options": [
+						{
+							"label": "新插件仓库，整体迁出 session-urls",
+							"tradeoff": "依赖由宿主原生的插件机制交付，单一归属；代价是新建仓库、迁移代码，omp-config 删掉旧扩展",
+							"holds_when": "按插件范式规则，能力由声明它的仓库拥有"
+						},
+						{
+							"label": "omp-config 更新器安装扩展依赖",
+							"tradeoff": "代码留在 omp-config；代价是更新器要管理 node_modules 和原生产物，违背现有归属边界",
+							"holds_when": "不愿新增仓库"
+						}
+					]
+				},
+				{
+					"id": "semantics",
+					"header": "语义行",
+					"question": "active branch、补全后的工具调用、会话元数据等语义关系，SQL 从哪里拿？",
+					"recommended": 0,
+					"brief": {
+						"where": "session-urls 的语义不在 JSONL 字面上：active branch 按 OMP 的 resolveSessionLeafId 回放得到（events.ts:533-543），工具调用要靠任意位置的 toolResult 和 tool_execution_start 记录补全，recap 和 prompt 历史在 history.db 里。DuckDB 直接读原始 JSONL 时，调用和结果按 filename+call_id 对上了 1,027/1,029 个，但这是全文件口径，会把废弃分支也算进去。",
+						"what": "要不要在连接里保留规范化结果的快照。这直接关系到会不会再出现一份副本。",
+						"how": "选每次现算：每次 sql 调用只为请求里点名的会话跑 TS 加载器，结果作为本次调用的临时关系，用完即丢；原始 JSONL 通过 read_ndjson 直接查。选显式物化：调用方执行 materialize 后，结果作为连接内的临时表保留，带来源和生成时刻，不会自动刷新。选只给原始数据：SQL 只能查原始 JSONL，语义要调用方在 SQL 里自己重建。",
+						"risks": [
+							"每次现算：同一会话每次调用都要重新规范化，731 MB 的会话约需 6 秒",
+							"显式物化：本质还是一份快照，会过期",
+							"只给原始数据：join 会把废弃分支算进去，而且不报错"
+						]
+					},
+					"options": [
+						{
+							"label": "每次调用现算，用完即丢",
+							"tradeoff": "不存任何语义快照，结果始终来自源文件；代价是每次调用都要重新规范化"
+						},
+						{
+							"label": "显式 materialize 成连接内临时表",
+							"tradeoff": "重复查询快；代价是保留一份会过期的快照"
+						},
+						{
+							"label": "只提供原始 JSONL 关系",
+							"tradeoff": "实现最简单；代价是语义由 AI 在 SQL 里重建，容易出现静默错误"
+						}
+					]
+				},
+				{
+					"id": "lifetime",
+					"header": "中间表",
+					"question": "agent 用 CREATE TEMP TABLE 显式创建的中间表，应该跟着哪个对象的生命周期走？",
+					"recommended": 0,
+					"brief": {
+						"where": "扩展闭包按 live AgentSession runner 存活：/new、resume、fork 复用同一个 runner，只发 session_switch；子代理各有自己的 runner；session_shutdown 在 dispose 时触发，处理器超时 2 秒（local://ToolSessionLifecycle.md）。宿主能否感知 eval 内核被重置，没有核实。",
+						"what": "中间表的结束锚点。这取决于你对\"REPL 中间结果\"的预期，代码定不了。",
+						"how": "跟持久会话：/new、resume、fork 时清空，shutdown 时关闭连接。跟 runner：中间表在 /new 之后还在，可能漏到下一个会话。跟 eval 内核：需要先证明宿主能感知内核重置，否则做不到。",
+						"risks": [
+							"跟持久会话：子代理被 park 后再 revive 会丢失中间表",
+							"跟 runner：会话 A 的中间表会留到会话 B"
+						]
+					},
+					"options": [
+						{
+							"label": "持久会话（切换会话时清空）",
+							"tradeoff": "中间表只属于当前会话，边界清楚；代价是 /new 后要重建"
+						},
+						{
+							"label": "runner（进程内一直保留）",
+							"tradeoff": "跨 /new 还在；代价是会话之间串数据"
+						},
+						{
+							"label": "eval 内核",
+							"tradeoff": "和 REPL 变量同生共死；代价是要先验证宿主能感知内核重置，可能做不到"
+						}
+					]
+				},
+				{
+					"id": "export",
+					"header": "导出",
+					"question": "导出中间结果到文件，走哪条路径？",
+					"recommended": 0,
+					"brief": {
+						"where": "DuckDB 的 SQL 可以读任意文件，可以用 COPY TO 写任意路径，也可以 INSTALL/LOAD 扩展；实测 COPY TO parquet 能写也能读回（local://DuckDbCorpusProbe.md）。",
+						"what": "导出这个副作用归谁管、怎么审批。",
+						"how": "选单独的 export 动作：sql 动作在引擎层关掉外部文件访问（enable_external_access / allowed_paths，是否生效待验证），导出只能用 export，必须给出路径和格式，按 write 审批。选完整 SQL：sql 可以直接 COPY TO，整个工具都按 write 审批。",
+						"risks": [
+							"单独 export：引擎层的访问限制在 node-api 2.0 下是否生效，还要实测",
+							"完整 SQL：名叫 session_query 的工具实际能读写宿主上的任意文件"
+						]
+					},
+					"options": [
+						{
+							"label": "单独的 export 动作，显式给出路径",
+							"tradeoff": "副作用边界清楚；代价是多一个动作"
+						},
+						{
+							"label": "完整 SQL，可以直接 COPY TO",
+							"tradeoff": "最灵活；代价是工具能读写任意文件"
+						}
+					]
+				}
+			],
+			"labels": {
+				"export": "readable"
+			}
+		},
+		{
+			"id": "toolu_01HU3YDtQnzDoP6YV5UdAejo",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "trigger",
+					"header": "Met 触发语义",
+					"question": "judge monitor 判定为 met 后，屏幕继续变化但仍满足意图时，要每个检查周期都再唤醒一次，还是只在从 not_met 变成 met 时唤醒？",
+					"options": [
+						{
+							"label": "边沿：变为 met 才唤醒",
+							"tradeoff": "一次状态只唤醒一次；两段 met 之间没被判到 not_met 时会合并成一次",
+							"description": "met 后需要先判到一次 not_met 才能再次返回"
+						},
+						{
+							"label": "电平：每次判到 met 都唤醒",
+							"tradeoff": "和 regex 每批匹配都返回一致；满足后屏幕持续刷新会每周期唤醒，直到 max_returns(默认10)",
+							"description": "相同屏幕仍跳过，只对变化后的屏幕重复返回"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "fork-features/monitor-subscription.ts: regex 模式每批匹配行是一个事件，算一次 return，默认 max_returns=10。judge 每个间隔（默认 60s）对当前可见屏幕问一次 met/not_met，屏幕与上次已判屏幕相同则跳过。",
+						"what": "judge 的答案描述的是状态，不是事件。用户只规定了“意图+最后一屏、间隔默认 60 秒”，没规定 met 持续成立时重复唤醒的语义，代码和约定都决定不了。",
+						"how": "选边沿：记录上一次判定结果，仅 not_met→met 时发 monitor_judge_match。选电平：每次 met 都发，直到 max_returns。两者都只在进程 End 时结束（End 不判）。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "discuss:divergent review",
+								"text": "A changing screen where the intent stays true would still fire every interval, up to max_returns (default 10). That's about 10 wakes over 10 minutes, all saying the same thing."
+							}
+						]
+					}
+				},
+				{
+					"id": "failure",
+					"header": "判定失败处理",
+					"question": "一次 judge 调用失败（judge 链所有模型都失败、超时 30 秒或答案无效）时，agent 侧怎么知道？",
+					"options": [
+						{
+							"label": "通知 agent，monitor 继续重试",
+							"tradeoff": "暂时性故障可自愈；需记录连续失败段，每段只通知一次",
+							"description": "每段连续失败第一次发 monitor_judge_failed 通知 agent；成功判定后重置；不计 max_returns、不结束 monitor"
+						},
+						{
+							"label": "通知 agent 并结束 monitor",
+							"tradeoff": "状态最干净，agent 立即改用别的方式；一次网络抖动也会结束 monitor，需要 agent 重建",
+							"description": "像达到 max_returns 一样结束，通知携带错误文本"
+						},
+						{
+							"label": "只给人弹 warning，monitor 继续重试",
+							"tradeoff": "实现最小，和 stop gate 一致；等待中的 agent 不知道，最长要等 20 分钟沉默提醒",
+							"description": "ctx.ui.notify，同一订阅同一原因去重"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "fork-features/stop-gate.ts 的判定失败只用 ctx.ui.notify 提醒人，因为 stop gate 有后备检测器。monitor 没有后备检测器：等待的 agent 只靠 monitor 通知唤醒，沉默提醒默认 20 分钟后才发。",
+						"what": "运行期 judge 失败要通知谁、要不要结束 monitor，是取舍问题；两位评审意见相反（steady 支持通知并继续，divergent 支持通知并结束）。",
+						"how": "选项一新增 monitor_judge_failed 通知，monitor 下个周期重试。选项二复用 max_returns 的结束路径，再加失败通知。选项三只给人发 UI warning。启动时就没有 judge 模型，三种都直接返回 judge_unavailable 错误。",
+						"evidence": [
+							{
+								"kind": "text",
+								"source": "discuss:steady review",
+								"text": "推荐 (b)：每个连续 failure streak 的第一次失败发送一次 agent-facing notice；成功判断后重置；不计 max_returns、不结束 monitor。"
+							},
+							{
+								"kind": "text",
+								"source": "discuss:divergent review",
+								"text": "I back (c), end the monitor with an agent-facing failure notice: by the time a throw reaches you, all fallbacks have failed; what's left is mostly persistent."
+							}
+						]
+					}
+				}
+			],
+			"labels": {
+				"trigger": "hard"
+			}
+		},
+		{
+			"id": "toolu_019f7qzmXUbjYcCeJErfcz1h",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "naming",
+					"header": "目录命名",
+					"question": "“所有 pepgent 本地 repo 都要用 pepgent- 开头，这个改为 iac”，我理解有两种可能，你指的是哪一种？",
+					"options": [
+						{
+							"label": "目录名用远端仓库名",
+							"tradeoff": "~/Ext/code/pepgent/ 下为 omp-soroi-eval、omp-soroi-subagent、pepgent、pepgent-doc、remote、soroi、iac；session bucket 自然都以 -Ext-code-pepgent- 开头",
+							"preview": "~/Ext/code/pepgent/iac\n~/Ext/code/pepgent/soroi\n~/Ext/code/pepgent/pepgent-doc"
+						},
+						{
+							"label": "目录名加 pepgent- 前缀",
+							"tradeoff": "每个目录都叫 pepgent-<远端名>，路径里 pepgent 会出现两次",
+							"preview": "~/Ext/code/pepgent/pepgent-iac\n~/Ext/code/pepgent/pepgent-soroi\n~/Ext/code/pepgent/pepgent-doc（已有前缀，不重复加）\n~/Ext/code/pepgent/pepgent（仓库本身就叫 Pepgent）"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "七个仓库的远端名：omp-soroi-eval、omp-soroi-subagent、Pepgent、pepgent-doc、remote、soroi、iac；只有 soroic 的本地名和远端名不同",
+						"what": "你上一轮的回答既说了“pepgent- 开头”，又说了“改为 iac”，第一种理解对应后半句，第二种理解对应前半句",
+						"how": "第一种：只有 soroic 改名；第二种：除 pepgent 和 pepgent-doc 外全部改名，session bucket 的名字跟着变"
+					}
+				},
+				{
+					"id": "live_wt",
+					"header": "旧哈希 worktree",
+					"question": "保留在原地的 7 个 ~/Ext/worktrees/*-bf9de1c worktree，将来被删除时，它们的 session 会从 soroi 的 /resume 里消失。还是保留原地吗？",
+					"options": [
+						{
+							"label": "仍保留原地",
+							"tradeoff": "现在不动它们，也不打断可能在里面跑的东西；删掉某个 worktree 后，它的 session 只能用 omp --resume <id> 找回"
+						},
+						{
+							"label": "改名成 *-951532d",
+							"tradeoff": "用 git worktree move 改名，并同步 session bucket 和 header，删除后 session 仍能列出；其中 3 个有未提交改动，正在里面跑的 session 会被打断"
+						}
+					],
+					"recommended": 1,
+					"brief": {
+						"where": "omp 把已删除 worktree 的 session bucket 按名字里的哈希归到主仓库（session-paths.ts:260-288）。哈希用主仓库路径算，旧路径算出来是 bf9de1c，新路径 ~/Ext/code/pepgent/soroi 算出来是 951532d",
+						"what": "上一轮你选了原地保留，但当时没说清这个后果：只要 worktree 还在，git worktree list 就能列出它的 session；一旦删掉，就只剩靠哈希匹配，而旧哈希已经对不上新路径",
+						"how": "已经删除的 3 个 worktree（redesign、wt-20261006-002410、wt-20261016-164030），它们的 bucket 无论你选哪个都改成 951532d；这个问题只决定 7 个还在的 worktree 怎么处理"
+					}
+				}
+			],
+			"labels": {
+				"naming": "readable"
+			}
+		},
+		{
+			"id": "toolu_01E1T98AHnc71YAjFkBMVRYz",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "pepgent_repo",
+					"header": "pepgent 仓库",
+					"question": "~/Ext/code/pepgent 目前本身就是 Pepgent/Pepgent 仓库，正好占着新父目录的路径。它挪进去以后叫什么？",
+					"options": [
+						{
+							"label": "pepgent/pepgent",
+							"tradeoff": "沿用现有的小写目录名；session bucket 变成 -Ext-code-pepgent-pepgent"
+						},
+						{
+							"label": "pepgent/Pepgent",
+							"tradeoff": "和远端仓库名一致，大小写和其它几个仓库不统一"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "~/Ext/code/pepgent 是一个 git 仓库，origin=https://github.com/Pepgent/Pepgent.git",
+						"what": "新布局要求 ~/Ext/code/pepgent 变成父目录，这个仓库只能挪进子目录，子目录名需要你定",
+						"how": "先把它暂存到 /tmp，建好父目录，再挪回所选的子路径；它的 5 个 session 迁到对应的 bucket"
+					}
+				},
+				{
+					"id": "soroic_name",
+					"header": "soroic 名称",
+					"question": "soroic 的远端是 Pepgent/iac。迁移后的目录名是保留 soroic，还是改成 iac？",
+					"options": [
+						{
+							"label": "保留 soroic",
+							"tradeoff": "目录名和习惯都不变；和远端名不一致"
+						},
+						{
+							"label": "改成 iac",
+							"tradeoff": "和远端名一致；以后靠 soroic 这个名字找它会找不到"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "~/Ext/code/soroic，origin=https://github.com/Pepgent/iac.git，有 7 个 session",
+						"what": "这次迁移的目标路径写的是 {repo}，本地目录名和远端仓库名在这里不一致",
+						"how": "选哪个名字，就决定新路径和 session bucket 名（-Ext-code-pepgent-soroic 或 -Ext-code-pepgent-iac）"
+					}
+				},
+				{
+					"id": "worktrees",
+					"header": "linked worktree",
+					"question": "soroi 和 pepgent-doc 的 linked worktree（~/Ext/worktrees/*-bf9de1c，以及 ~/Ext/orca/workspaces 下的 soroi、pepgent-doc 工作区）是原地保留，还是一起挪？",
+					"options": [
+						{
+							"label": "原地保留并修复",
+							"tradeoff": "只跑 git worktree repair，不动 Orca 工作区；managed worktree 的目录名仍带旧哈希 bf9de1c"
+						},
+						{
+							"label": "~/Ext/worktrees 下的也改名",
+							"tradeoff": "把 7 个 *-bf9de1c 用 git worktree move 改成 *-951532d，和 omp 的命名规则一致；其中有 2 个带未提交改动"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "~/Ext/worktrees/ 下有 7 个 wt-*-bf9de1c（bf9de1c 是 omp 用 ~/Ext/code/soroi 算出的哈希，新路径算出来是 951532d）；Orca 工作区有 soroi/hraesvelg、soroi/snapper、pepgent-doc/remora",
+						"what": "这些不是独立仓库，但它们的 .git 指回主仓库，omp 也靠 git worktree list 列出它们的 session",
+						"how": "原地保留：修复 git 元数据后 /resume 照样能列出；改名：worktree 的目录、session bucket 和 header cwd 一起改"
+					}
+				},
+				{
+					"id": "clones",
+					"header": "t*/m 克隆",
+					"question": "~/Ext/worktrees/t<10位十六进制>/m 下有 274 个独立的 soroi clone，看起来是测试时临时生成的。它们也要挪吗？",
+					"options": [
+						{
+							"label": "不动",
+							"tradeoff": "它们是独立 clone，不依赖主仓库路径，留在原地也照常能用"
+						},
+						{
+							"label": "也挪到 pepgent 下",
+							"tradeoff": "会往 ~/Ext/code/pepgent 里塞进 274 个临时 clone"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "~/Ext/worktrees/t0067b5a7b/m 等 274 个目录，origin 都是 Pepgent/soroi，大多只有 1 行未提交改动",
+						"what": "它们确实是 Pepgent 仓库的 clone，但不是你平时直接工作的仓库",
+						"how": "选不动：排除在迁移之外；选挪：逐个移动，并迁移对应的 session"
+					}
+				},
+				{
+					"id": "external",
+					"header": "其它工具配置",
+					"question": "Orca、Tern、Codex、Claude 的配置里也记着旧路径。要不要一起改？",
+					"options": [
+						{
+							"label": "一起改",
+							"tradeoff": "迁移后这些工具还能认出项目；改 Orca 的状态文件时 Orca 必须关着"
+						},
+						{
+							"label": "只迁 omp",
+							"tradeoff": "这些工具会丢失项目记录，需要你自己重新添加"
+						}
+					],
+					"recommended": 0,
+					"brief": {
+						"where": "Orca orca-data.json（soroi、pepgent、pepgent-doc 三个项目及其工作区状态）、codex-pane-accounts.json；Tern files.json（remote、soroi）；~/.codex/config.toml（soroi）；~/.claude.json（soroi、pepgent）；omp 给 remote 起的 lsp-mux daemon",
+						"what": "你的要求只提到 omp session，但挪走仓库会让这些工具里的项目指向不存在的路径",
+						"how": "改：逐个文件做精确的路径映射，改前备份到 /tmp；不改：只处理 omp"
+					}
+				}
+			],
+			"labels": {
+				"soroic_name": "readable"
+			}
+		},
+		{
+			"id": "toolu_016PsR7DwHLmGwMxRRGCYNZ2",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "semantics",
+					"header": "开关语义",
+					"question": "定义写了 contextFiles 后，三字段选出的集合是 subagent 的全部上下文文件与规则（白名单，未选中的原生注入被移除），还是只在原生注入上追加？",
+					"recommended": 0,
+					"brief": {
+						"where": "实测 task:free 的 systemPrompt：generic-rules、domain-rules 各 1 次，~/.claude/rules 的规则正文都在；项目级 CLAUDE.md 也由 omp 原生传入，只有 AGENTS.md 被剔除。",
+						"what": "只追加时，files 里选 CLAUDE.md 或 *.rule.md 是空操作，scope=project 也挡不住已注入的用户级规则；白名单才让三字段都有效。这是行为取舍，归用户决定。",
+						"how": "白名单：写了字段即以三字段为准，主 agent 没注入的仍不注入，paths 例外。追加：只补 AGENTS.md 和 paths，files/scope 只影响补进来的部分。"
+					},
+					"options": [
+						{
+							"label": "白名单",
+							"tradeoff": "三字段完全决定 subagent 看到什么；代价是扩展要从 prompt 中移除原生注入的规则和 CLAUDE.md",
+							"holds_when": "想按 agent 精确裁剪上下文",
+							"cost": "扩展需识别并删除 repo-rules/原生 rules 注入段"
+						},
+						{
+							"label": "只追加",
+							"tradeoff": "实现简单、不碰原生注入；代价是 files 里的 CLAUDE.md、*.rule.md 和 scope 对已注入内容无效",
+							"holds_when": "只想给 subagent 补 AGENTS.md 和自定义路径",
+							"cost": "只做注入"
+						}
+					]
+				}
+			],
+			"labels": {
+				"semantics": "hard"
+			}
+		}
+	]
+}
