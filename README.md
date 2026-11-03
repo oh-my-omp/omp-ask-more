@@ -263,15 +263,11 @@ One ask is open at a time; a second call is rejected instead of opening a second
 
 ## Readability check
 
-Before you see an ask, OMP's `judge` role reads each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it, as someone who sees only that dialog and has not read the session. It checks for three defects:
+Before you see an ask, OMP's `judge` role rates each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it: how much a software engineer who sees only that dialog, and has not seen the agent's work, would need to know beyond it to make the decision. The levels run from "nothing: every name and reference is common knowledge or explained" to "the decision is built on codes, names or earlier decisions the dialog never explains".
 
-- the choice depends on a code, state, identifier or coined term that the text never explains;
-- the text does not say what is being decided, why now, or what it affects;
-- the options do not say what each one does or how they differ.
+A question rated at 0.685 of the top level or more rejects the whole call before anything opens. The rejection names each such question and tells the model to say in plain words what each name, code or earlier decision is; on the native dialog it adds that the brief and tradeoffs are not shown there. The model rewrites and calls again; nothing caps the rounds.
 
-A question with a defect rejects the whole call before anything opens. The rejection names each failing question and what to fix; on the native dialog it adds that the brief and tradeoffs are not shown there. The model rewrites and calls again; nothing caps the rounds.
-
-The judge is OMP's `judge` role chain, resolved the way OMP resolves it for its own judgments: the models of `modelRoles.judge` and its fallbacks, then, only when that chain holds no native judgment model, the session model as OMP's fallback. Each question is one request, all sent at once and billed to the session as `ask-readability`. How much it catches depends on what the `judge` role is: on 15 real asks the native `futureppo-jev/decision-model-preview` rejected none of the five that were hard to read, while `anthropic/claude-opus-5-5` in the role rejected four of them and none of the ten readable ones ([verification](docs/verification.md#readability-check)). Measure a judge on the labelled asks with `bun run eval:readability` in a directory whose settings bind it.
+The judge is OMP's `judge` role chain, resolved the way OMP resolves it for its own judgments: the models of `modelRoles.judge` and its fallbacks, then, only when that chain holds no native judgment model, the session model as OMP's fallback. Each question is one request, all sent at once and billed to the session as `ask-readability`. On 15 real asks the native `futureppo-jev/decision-model-preview` rejected four of the five that were hard to read and none of the ten readable ones ([verification](docs/verification.md#readability-check)). The request is shaped for such native judgment models; measure another `judge` role on the labelled asks with `bun run eval:readability` in a directory whose settings bind it.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -296,7 +292,7 @@ They read the native result shape, so they work the same with the native `ask`.
 ## Known limitations
 
 - **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/kimi-k2.7-code` put its first round into `ask` in 15 of 15 runs with the rule appended to the invoked skill, against 11 of 15 with the same code without it, eleven different requests across the runs. With the tool description alone, before the rule was added, `opencode-go/deepseek-v4.1-flash` (9 of 9 runs), `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`, and `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`. Without this plugin deepseek and kimi asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
-- **The readability check is only as good as the `judge` role, and its labels are the agent's.** A native judgment model rejects almost nothing on these asks. The 15 labelled asks in `eval/readability-labelled.json` were labelled by the agent that built the check: two requests for your labels timed out unanswered. Relabel them and rerun `bun run eval:readability` before trusting the numbers. A rejection names the defect, not the term to explain.
+- **The readability threshold rests on 15 asks the agent labelled itself.** Two requests for your labels timed out unanswered; the hard and readable scores sit 0.03 apart around the threshold, and a chat model in the `judge` role scores on another scale (`claude-opus-5-5` rejected two of the five). Relabel `eval/readability-labelled.json` and rerun `bun run eval:readability` before trusting the numbers. A rejection says what kind of thing to explain, not which term.
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

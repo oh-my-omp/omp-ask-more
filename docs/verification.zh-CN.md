@@ -177,22 +177,22 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 
 **整批 state。** 第一版把整次调用放进一个 state 判断。`conflict_features` 的 brief 引用了决定编号 N19、N24、D1、N14、L2，却没说它们是什么；它在七题的调用里 `undefined_terms` 得 0.91，单独判断只得 0.05。原生 judge 整批跑时“标记”了 320 题中的 55 题，逐题跑复现不出来。现在每题单独一次请求。
 
-**判断模型**，使用现行评判标准，在绑定了各个 `judge` 角色的目录下运行 `bun run eval:readability`；opus 在 0.3 到 0.8 的每个阈值上结果都相同：
+**第一版请求**把原题 JSON 原样发出，配三个是非问题（未解释的词、缺背景、选项分不清），每个都以同一段 500 字的读者描述开头，问的是“文字从没解释过的词”这种缺失。原生 judge 对 43 题一题都没拦。同一路数的另外四种形式——改成纯文本、只问一个是非题、三选一、读者描述仍写在指令里的四档评分——把难懂题排在可读题之前的概率与随机无异（AUC 0.42–0.57）；逐个名词问文字是否说明了 `N19`、`K6` 是什么时，它对每个名词都答“没有”，包括已经把这些编号解释清楚的改写版 `conflict_features`。
 
-| `judge` 角色 | 43 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
-|---|---|---|---|---|---|
-| `futureppo-jev/decision-model-preview`（原生） | 0 | – | 0.00 | 0.00 | 14 次中 0 次 |
-| `anthropic/claude-opus-5-5` | 两次运行分别 8、9 | 1.00 | 0.60 | 0.00 | 14 次中 0 次 |
+**现行请求**按 TypeSafe 给 System One 判定模型的用法来写：state 是 `reader` 和 `dialog` 两个命名字段；一句点名这两个字段的简短指令；一个四档、每档描述一种情形的 Score。同样条件下，按这种写法试的六种形式里它排序最好（AUC 0.85，两次运行结果相同）；是非题“Can the `reader` understand, from `dialog` alone, what decision they are asked to make?”为 0.75，分档换两种措辞分别为 0.56 和 0.71。用 `bun run eval:readability` 测得：
 
-opus 拦下了 `conflict_features`、`moat-app1-boundary` 和 `semantics`，放过了 `trigger`（通过 `met`、`not_met` 和 `max_returns` 来讲边沿唤醒与电平唤醒）和 `formal`（挡板、试探这类自造词）。早先的 `undefined_terms` 措辞（“a project-specific name … that the shown text never explains”）让 opus 对 15 题中的 14 题回答“是”；现行措辞只算做选择要依赖的词。
+| `judge` 角色 | 阈值 | 43 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
+|---|---|---|---|---|---|---|
+| `futureppo-jev/decision-model-preview`（原生） | 0.685 | 8 | 1.00 | 0.80 | 0.00 | 14 次中 0 次 |
+| `futureppo-jev/decision-model-preview`（原生） | 0.7 | 6 | 1.00 | 0.60 | 0.00 | 14 次中 0 次 |
+| `anthropic/claude-opus-5-5` | 0.685 | 6 | 1.00 | 0.40 | 0.00 | 14 次中 0 次 |
 
-**原生 judge 换其他请求形式。** 把题目渲染成纯文本而不是 JSON，分别问成关于未解释名词的是非题、关于读者能否不问就做选择的是非题、三选一和四档评分：难懂题排在可读题之前的概率与随机无异（AUC 0.42–0.57）。逐个名词问文字是否说明了 `N19`、`D1`、`#78`、`K6` 是什么时，它对每道题里抽出的每个名词都答“没有”，包括已经把这些编号解释清楚的改写版 `conflict_features`。这些形式都没有采用。
+原生分数：难懂的 `conflict_features` 0.78、`formal` 0.77、`moat-app1-boundary` 0.70、`trigger` 0.70、`semantics` 0.43；可读的 0.14–0.67，改写版 `conflict_features` 0.67。阈值 0.685 落在这个只有 0.03 宽的间隔里。在更大的 136 题语料上，原生 judge 在 0.685 处拦下 17 题。
 
 | 检查 | 命令 | 观察结果 |
 |---|---|---|
-| 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无错误；75 通过、0 失败，其中包括检查的结论（缺陷恰好等于阈值时拒绝，略低于阈值时放行）、每题一次请求且按面板或原生字段构造、判断模型出错、答案不全和超过截止时间时各放行并只警告一次、调用方中止时取消，以及 `readability.judge` 的默认值、`false` 与非布尔值 |
-| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`；让模型把文件里的 `conflict_features` 原样发出，标题改过，免得被缓存的判定作答 | 对话框按原文打开；会话文件里有一条 `model_usage`：用途 `ask-readability`、角色 `typesafe`、`futureppo-jev/decision-model-preview`、1,024 输入 token。更早一次用存档原标题时没有记录：宿主落盘的判定缓存用评测时的结果作答了 |
-| `judge` 角色换成聊天模型 | 同上，`modelRoles.judge: anthropic/claude-opus-5-5`；要求被拒时改写 | 第一次调用返回 `ask rejected: - question "conflict_features" is hard to understand … it relies on project-specific names, identifiers or states it never explains; …`；模型把 brief 改写成不用编号的说法（成员由统一身份目录管理、不做配额、每个实验室一套容器管理平台）后再次调用，这次打开了面板，`enter` 返回 `conflict_features: 只裁掉冲突部分，自动化留待单独设计`。会话文件里有两条 `model_usage`：用途 `ask-readability`、角色 `judge`、`anthropic/claude-opus-5-5` |
-| 关闭设置 | `.omp/plugin-overrides.json` 里设 `readability.judge: false`（在判断模型改为宿主链之前运行；检查在解析任何判断模型之前就返回，那次改动碰不到这条路径） | 第一次调用就按原文打开了对话框；会话文件里没有 `ask-readability` 记录 |
+| 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无错误；75 通过、0 失败，其中包括检查的结论（高于阈值的题拒绝，低于的放行）、每题一次请求且按面板或原生字段构造、state 里没有题目 id、判断模型出错和超过截止时间时各放行并只警告一次、调用方中止时取消，以及 `readability.judge` 的默认值、`false` 与非布尔值 |
+| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，原生 `judge` 角色；让模型把文件里的 `conflict_features` 原样发出，被拒时改写 | 第一次调用返回 `ask rejected: - question "conflict_features" is hard to understand … it relies on names, codes, references or earlier decisions it never explains; …`；模型说明了 N19/N24/D1/N14 是设计文档里的条目、各自定了什么，再次调用，这次打开了面板，`enter` 返回 `conflict_features: 裁掉冲突部分，事件自动化的部分另开设计`。会话文件里有两条 `model_usage`：用途 `ask-readability`、角色 `typesafe`、`futureppo-jev/decision-model-preview`（520 和 758 输入 token） |
+| 关闭设置 | `.omp/plugin-overrides.json` 里设 `readability.judge: false`（在请求改版之前运行；检查在构造任何请求之前就返回） | 第一次调用就按原文打开了对话框；会话文件里没有 `ask-readability` 记录 |
 
 尚未在 runtime 验证：原生对话框上的检查（需要 `ctx.invokeTool` 存在而 `ui.custom` 不存在）、会话模型作为 OMP 兜底作答（需要一条完全没有原生模型的 `judge` 链）、会话里判断模型出错或超时（只有单元测试覆盖）、由人给出的标签。

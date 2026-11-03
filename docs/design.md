@@ -89,11 +89,11 @@ Validation runs at the tool boundary, before any UI opens, checks every question
 
 ## Readability check
 
-After validation and before either dialog, `index.ts#screen` reads `readability.judge` and, when it is on and a judge resolves, runs `src/readability.ts#readabilityGate`; the thresholds, rubric text and deadline live there.
+After validation and before either dialog, `index.ts#screen` reads `readability.judge` and, when it is on and a judge resolves, runs `src/readability.ts#readabilityGate`; the request, levels, threshold and deadline live there.
 
-- **One state per question.** Each question is judged alone, as its surface shows it (the authored question on the sheet, `nativeQuestion` on the native dialog), because the reader sees one question per page. One state for the whole call with rubrics pointing at `questions[i]` made the scores follow the index: a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone.
-- **Independent defects.** One yes/no question per defect rather than one choice, because a question can lack context and explanations at once. The term defect counts only terms the choice depends on: asked about any unexplained project term, every real ask failed.
-- **Fixed rejection text.** The model reads the failing question's `id` and a fixed instruction per defect, not judge output, and asks again; no round counter, since every call is judged afresh.
+- **One state per question.** Each question is judged alone, as its surface shows it (the authored question on the sheet, `nativeQuestion`'s fields on the native dialog), because the reader sees one question per page. One state for the whole call with questions pointing at `questions[i]` made the scores follow the index: a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone.
+- **Request shape.** The request follows TypeSafe's guidance for System One judges. The state holds two named fields, `reader` (who reads the dialog) and `dialog` (title, question, situation, decision, consequences and options, under plain names, nothing else the reader does not see), so the context is sent once. The question is one short instruction that names both fields, a Score whose four levels each describe a situation, since each level is judged on its own. The first version repeated a 500-character reader description in each of three yes/no questions, asked about absence ("a term the text never explains") and sent the authored JSON as is; the native judge's answers to it were at chance.
+- **Fixed rejection text.** The model reads the failing question's `id` and one fixed instruction, not judge output, and asks again; no round counter, since every call is judged afresh.
 - **Which judge.** OMP's own `resolveJudge` with the session model, the same chain OMP's judgments use: the plugin adds no model choice of its own, so the `judge` role decides and the session model answers only when OMP itself falls back to it (no native judgment model in the chain). The session's settings, registry, ledger and cost gate come from the `AgentSession` registered in `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings.
 - **Failure.** A judge that fails or does not answer lets the ask through with a warning, since the check must never stand between the user and a decision; the caller's own abort still cancels the ask.
 
@@ -166,7 +166,7 @@ sequenceDiagram
 | Unanswered questions | the Review page lists them; submitting still sends the rest, an unanswered question reads `id: (cancelled)` (as in the native dialog) |
 | Cancel (`esc`, `Cancel all`, abort signal) | `ctx.abort()`, then every question as `(cancelled)`; nothing already answered is submitted |
 | Concurrent asks | one in flight, readability check included; a second call is rejected instead of opening a second sheet |
-| Hard to read | `ask rejected:` with each failing question and its defects before anything opens; the model asks again |
+| Hard to read | `ask rejected:` with each failing question before anything opens; the model asks again |
 | Timeout | the answers given so far, the rest as `(timed out: …)` for the model to decide; no `ctx.abort()` |
 | Approval | `approval: "read"`, matching `ask.ts:544-551` |
 | Failure inside the surface | `ui.notify` warning, then delegation of the whole batch to the native dialog |
@@ -191,7 +191,7 @@ src/component.ts   one component: the ANSI page (render) and the Tern content (d
 src/nodes.ts       the Tern content in the native ask roles, and the sheet's button acts (SheetAct)
 src/result.ts      Answer variants, AskToolDetails construction, cancelled, timed-out and rejected results
 src/settings.ts    native plugin settings and command provenance, validated and snapshotted once per ask
-src/readability.ts the readability check: per-question states per surface, defect rubrics, verdict, rejection text, deadline
+src/readability.ts the readability check: per-question state per surface, the score question, threshold, rejection text, deadline
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels: live OMOMP_LANG, cached agent omomp-lang, live LC_* / LANG; protocol fields stay English

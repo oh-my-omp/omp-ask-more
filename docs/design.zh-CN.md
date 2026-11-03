@@ -89,11 +89,11 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 ## 可读性检查
 
-校验之后、任何对话框之前，`index.ts#screen` 读取 `readability.judge`；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`；阈值、评判标准文字和截止时间都在那里。
+校验之后、任何对话框之前，`index.ts#screen` 读取 `readability.judge`；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`；请求、分档、阈值和截止时间都在那里。
 
-- **每题一个 state。** 每题单独判断，按它所在界面实际显示的内容（面板上是原题，原生对话框上是 `nativeQuestion`），因为读者一页只看到一题。整次调用放进一个 state、让评判标准指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
-- **缺陷互不排斥。** 每种缺陷一个是非问题，而不是一个单选，因为同一题可能既缺背景又缺解释。名词缺陷只算做选择要依赖的词：问成“有没有未解释的项目名词”时，每条真实 ask 都不合格。
-- **固定的拒绝文字。** 模型读到的是不合格题的 `id` 和每种缺陷对应的固定说明，不是判断模型的输出，然后重新提问；不计轮数，因为每次调用都重新判断。
+- **每题一个 state。** 每题单独判断，按它所在界面实际显示的内容（面板上是原题，原生对话框上是 `nativeQuestion` 的字段），因为读者一页只看到一题。整次调用放进一个 state、让问题指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
+- **请求的形式。** 按 TypeSafe 给 System One 判定模型的用法来写。state 只有两个命名字段：`reader`（谁在读这个对话框）和 `dialog`（标题、问题、现状、决定、后果和选项，用平白的字段名，不含读者看不到的东西），上下文只发一次。问题是一句点名这两个字段的简短指令，类型是 Score，四个分档各描述一种情形，因为每一档都是单独拿来和 state 比对的。第一版在三个是非问题里各重复一段 500 字的读者描述，问的是“文字从没解释过的词”这种缺失，还把原始 JSON 原样发出；原生 judge 对它的回答与随机无异。
+- **固定的拒绝文字。** 模型读到的是不合格题的 `id` 和一条固定说明，不是判断模型的输出，然后重新提问；不计轮数，因为每次调用都重新判断。
 - **用哪个判断模型。** 直接用 OMP 自己的 `resolveJudge`，并传入会话模型，与 OMP 自己做判定时走同一条链：插件不另做模型选择，所以由 `judge` 角色判断；只有 OMP 自己退到会话模型时（链里没有原生判定模型），会话模型才作答。会话的 settings、registry、账本和 cost gate 取自 `AgentRegistry.global()` 里与上下文 `sessionManager` 对应的 `AgentSession`，因为扩展上下文本身不带 settings。
 - **失败。** 判断模型出错或没有结果时放行并警告，因为检查不能挡在用户和决定之间；调用方自己中止时仍取消 ask。
 
@@ -166,7 +166,7 @@ sequenceDiagram
 | 未作答的题 | 汇总页列出；提交仍会发送其余答案，未作答的题为 `id: (cancelled)`（与原生对话框一致） |
 | 取消（`esc`、`全部取消`、abort signal） | `ctx.abort()`，然后所有题都为 `(cancelled)`；已作答的部分不提交 |
 | 并发 | 同时只允许一个，可读性检查也算在内；第二次调用被拒绝，而不是再开一张面板 |
-| 难懂 | 任何界面打开前返回 `ask rejected:`，列出每道不合格的题及其缺陷；模型重新调用 |
+| 难懂 | 任何界面打开前返回 `ask rejected:`，列出每道不合格的题；模型重新调用 |
 | 超时 | 返回已给出的答案，其余为 `(timed out: …)` 由模型决定；不调用 `ctx.abort()` |
 | 审批 | `approval: "read"`，与 `ask.ts:544-551` 一致 |
 | 表面内部失败 | `ui.notify` 警告，然后把整批委托给原生对话框 |
@@ -191,7 +191,7 @@ src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（descr
 src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动作（SheetAct）
 src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒绝结果
 src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生成一次快照
-src/readability.ts 可读性检查：按界面构造的逐题 state、缺陷评判标准、结论、拒绝文字、截止时间
+src/readability.ts 可读性检查：按界面构造的逐题 state、打分问题、阈值、拒绝文字、截止时间
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
 src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文
