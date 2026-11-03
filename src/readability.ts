@@ -1,123 +1,97 @@
-// The readability gate: before a human sees an ask, the session's judge role decides whether each
-// question can be understood by someone who sees only the dialog. A question the judge finds hard
-// to read rejects the call with a fixed rewrite instruction per defect, and the model asks again.
-import type { JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
+// The readability gate: before a human sees an ask, the session's judge role rates how much each
+// question leans on knowledge the dialog does not give. A question rated too high rejects the call
+// with a fixed rewrite instruction, and the model asks again.
+//
+// The request follows TypeSafe's guidance for System One judges (docs.typesafe.ai): the reader and
+// the dialog are named fields of the state, sent once; the question is one short instruction that
+// points at them by name; the levels describe situations, each judged on its own.
+import type { JsonValue, JudgmentRequest, ScoreQuestion } from "@oh-my-pi/pi-ai";
 import { tr } from "./i18n.ts";
-import { type AskQuestion, nativeQuestion } from "./schema.ts";
+import type { AskQuestion } from "./schema.ts";
 
-/** The part of the host's judge the gate uses: yes/no questions over one state. */
-export interface NoulJudge {
-	judge(request: JudgmentRequest<Record<string, NoulQuestion>>, options: { signal: AbortSignal }): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
+/** The part of the host's judge the gate uses: one score question over one state. */
+export interface ScoreJudge {
+	judge(request: JudgmentRequest<{ need: ScoreQuestion }>, options: { signal: AbortSignal }): Promise<{ readonly answers: { readonly need: { readonly score: number } } }>;
 }
 
 /** Where the questions will be shown, which decides what text the reader actually gets. */
 export type Surface = "sheet" | "native";
 
-export const DEFECTS = ["undefined_terms", "missing_context", "options_indistinct"] as const;
-export type Defect = (typeof DEFECTS)[number];
+const READER = "A software engineer who sees only this dialog. They have not seen the AI agent's earlier work, its files or its notes.";
+
+/** Lowest to highest; the answer's `score` is the probability-weighted level index. */
+const LEVELS: ScoreQuestion["criteria"] = [
+	"Nothing: every name and reference is common knowledge or explained in the dialog",
+	"One or two minor names are unexplained, but the decision is still clear",
+	"Several names, codes or references are unexplained, so parts of the decision are unclear",
+	"The decision is built on codes, names or earlier decisions the dialog never explains",
+];
+
+const NEED: ScoreQuestion = {
+	type: "score",
+	instructions: "How much does the `reader` need to know beyond `dialog` to make the decision?",
+	criteria: LEVELS,
+};
 
 /**
- * Probability of a defect at which a question is rejected. A chat judge answers each defect yes or
- * no, so any threshold between 0 and 1 splits it the same way; a native judge's probabilities stay
- * below it on the labelled asks (`bun eval/readability.ts`).
+ * Score, as a fraction of the top level, at which a question is rejected: between the highest
+ * readable (0.67) and the hard questions above it (0.70–0.78) on the labelled asks with the native
+ * judge; `bun run eval:readability`, docs/verification.md#readability-check.
  */
-export const DEFECT_THRESHOLD = 0.6;
+export const NEED_THRESHOLD = 0.685;
 
-export type QuestionFailure = { readonly id: string; readonly defects: readonly Defect[] };
+type JsonObject = { readonly [key: string]: JsonValue };
 
-export type ReadabilityVerdict =
-	| { readonly kind: "readable" }
-	| { readonly kind: "unreadable"; readonly failures: readonly QuestionFailure[] };
+/** `{ [key]: value }`, or nothing when the value is absent. */
+function field(key: string, value: string | undefined): JsonObject {
+	return value === undefined ? {} : { [key]: value };
+}
 
-const AUDIENCE =
-	"The state is one question of a dialog, exactly as the reader sees it on its own page. The reader is technically competent but sees only this dialog: they have not read the agent's session and do not know its project-specific names, identifiers, internal states, abbreviations or earlier decisions. Common engineering vocabulary (HTTP, Git, cache, API, regex, database) needs no explanation. Length, complexity, writing style, language and spelling are not defects, and whether the decision is right or the question needed is not judged.";
-
-const RUBRICS: Readonly<Record<Defect, NoulQuestion>> = {
-	undefined_terms: {
-		type: "noul",
-		instructions: `${AUDIENCE} Project names that only label things (a repository, a service, a product) are fine when the text says enough about what they do for the choice. Is there a term the reader must understand to tell what the options mean or how they differ, whose meaning the shown text never gives, so that the reader cannot make the choice?`,
-		criteria: {
-			true: "Telling the options apart depends on an unexplained code, state, identifier or coined term, so the reader cannot make the choice.",
-			false: "The reader can tell what each option means; any unexplained names are labels the choice does not depend on.",
-		},
-	},
-	missing_context: {
-		type: "noul",
-		instructions: `${AUDIENCE} Taking every term as understood, does the shown text leave the reader unable to tell what is being decided, what situation forces the decision now, or what the decision affects?`,
-		criteria: {
-			true: "The shown text leaves unclear what is decided, why it must be decided now, or what it affects.",
-			false: "The shown text states what is decided, why now, and what it affects.",
-		},
-	},
-	options_indistinct: {
-		type: "noul",
-		instructions: `${AUDIENCE} Is the reader unable to tell from the shown text what each option would do and how the options differ?`,
-		criteria: {
-			true: "At least one option's effect is not stated, or two options cannot be told apart.",
-			false: "Each option's effect, and how it differs from the others, is stated.",
-		},
-	},
-};
-
-/** What the model is told to fix; fixed text, never judge output. */
-const REWRITES: Readonly<Record<Defect, string>> = {
-	undefined_terms: "it relies on project-specific names, identifiers or states it never explains; explain each in plain words or replace it with a plain description",
-	missing_context: "it does not say what is being decided, why it must be decided now, or what it affects",
-	options_indistinct: "its options do not say what each one does or how they differ",
-};
-
-/** The text the reader gets for one question: the whole authored sheet, or the native dialog's subset. */
-function shown(question: AskQuestion, surface: Surface): Record<string, unknown> {
+/** The dialog as the reader gets it: the whole authored sheet, or the native dialog's fields. */
+function dialog(question: AskQuestion, surface: Surface): JsonObject {
 	switch (surface) {
-		case "sheet": {
-			const { id: _id, ...visible } = question;
-			return visible;
-		}
-		case "native": {
-			const { id: _id, ...visible } = nativeQuestion(question);
-			return visible;
-		}
+		case "sheet":
+			return {
+				...field("title", question.header),
+				question: question.question,
+				situation: question.brief.where,
+				decision: question.brief.what,
+				consequences: question.brief.how,
+				options: question.options.map((option): JsonObject => ({ label: option.label, effect: option.tradeoff, ...field("note", option.description) })),
+			};
+		case "native":
+			return {
+				...field("title", question.header),
+				question: question.question,
+				options: question.options.map((option): JsonObject => ({ label: option.label, ...field("note", option.description), ...field("preview", option.preview) })),
+			};
 	}
 }
 
-/**
- * One judgment per question, over that question alone: the reader sees one question per page, and
- * a state holding the whole call let the judge mix up which question a rubric was about.
- */
-export function readabilityRequest(question: AskQuestion, surface: Surface): JudgmentRequest<Record<Defect, NoulQuestion>> {
-	return { state: JSON.stringify(shown(question, surface), null, 1), questions: RUBRICS };
+/** One judgment per question, over that question alone: the reader sees one question per page. */
+export function readabilityRequest(question: AskQuestion, surface: Surface): JudgmentRequest<{ need: ScoreQuestion }> {
+	return { state: { reader: READER, dialog: dialog(question, surface) }, questions: { need: NEED } };
 }
 
-/** Probability of every defect of every question, in input order. */
-export type DefectScores = readonly Readonly<Record<Defect, number>>[];
-
-export function readabilityVerdict(questions: readonly AskQuestion[], scores: DefectScores, threshold = DEFECT_THRESHOLD): ReadabilityVerdict {
-	const failures = questions.flatMap((question, index): QuestionFailure[] => {
-		const found = DEFECTS.filter(defect => (scores[index]?.[defect] ?? 0) >= threshold);
-		return found.length === 0 ? [] : [{ id: question.id, defects: found }];
-	});
-	return failures.length === 0 ? { kind: "readable" } : { kind: "unreadable", failures };
-}
-
-/** Ask the judge about every question of the call, each in its own request, concurrently. */
-export async function judgeReadability(judge: NoulJudge, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal): Promise<DefectScores> {
+/** How much each question needs beyond its dialog, as a fraction of the top level, in input order. */
+export async function judgeReadability(judge: ScoreJudge, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal): Promise<readonly number[]> {
 	return Promise.all(
 		questions.map(async question => {
 			const { answers } = await judge.judge(readabilityRequest(question, surface), { signal });
-			const score = (defect: Defect): number => {
-				const answer = answers[defect];
-				if (answer === undefined) throw new Error(`judgment returned no answer for ${defect}`);
-				return answer.noul;
-			};
-			return { undefined_terms: score("undefined_terms"), missing_context: score("missing_context"), options_indistinct: score("options_indistinct") };
+			return answers.need.score / (LEVELS.length - 1);
 		}),
 	);
 }
 
-/** The rejection the model reads: every failing question, every defect, and what this surface shows. */
-export function readabilityProblems(failures: readonly QuestionFailure[], surface: Surface): string[] {
-	const problems = failures.map(
-		failure => `question "${failure.id}" is hard to understand for a reader who sees only this dialog and has not read your session: ${failure.defects.map(defect => REWRITES[defect]).join("; ")}`,
+/** The ids of the questions whose need reaches the threshold. */
+export function unreadableQuestions(questions: readonly AskQuestion[], needs: readonly number[], threshold = NEED_THRESHOLD): string[] {
+	return questions.flatMap((question, index) => ((needs[index] ?? 0) >= threshold ? [question.id] : []));
+}
+
+/** The rejection the model reads: every failing question, and what this surface shows. Fixed text, never judge output. */
+export function readabilityProblems(ids: readonly string[], surface: Surface): string[] {
+	const problems = ids.map(
+		id => `question "${id}" is hard to understand for a reader who sees only this dialog and has not read your session: it relies on names, codes, references or earlier decisions it never explains; say in plain words what each one is, or describe it instead of naming it`,
 	);
 	switch (surface) {
 		case "sheet":
@@ -138,7 +112,7 @@ export type Gate = { readonly kind: "pass" } | { readonly kind: "reject"; readon
  * only the caller's own abort cancels it.
  */
 export async function readabilityGate(
-	judge: NoulJudge,
+	judge: ScoreJudge,
 	questions: readonly AskQuestion[],
 	surface: Surface,
 	signal: AbortSignal | undefined,
@@ -147,14 +121,9 @@ export async function readabilityGate(
 ): Promise<Gate> {
 	const deadline = AbortSignal.timeout(deadlineMs);
 	try {
-		const scores = await judgeReadability(judge, questions, surface, signal === undefined ? deadline : AbortSignal.any([signal, deadline]));
-		const verdict = readabilityVerdict(questions, scores);
-		switch (verdict.kind) {
-			case "readable":
-				return { kind: "pass" };
-			case "unreadable":
-				return { kind: "reject", problems: readabilityProblems(verdict.failures, surface) };
-		}
+		const needs = await judgeReadability(judge, questions, surface, signal === undefined ? deadline : AbortSignal.any([signal, deadline]));
+		const failing = unreadableQuestions(questions, needs);
+		return failing.length === 0 ? { kind: "pass" } : { kind: "reject", problems: readabilityProblems(failing, surface) };
 	} catch (error) {
 		if (signal?.aborted) return { kind: "cancelled" };
 		const detail = deadline.aborted ? tr(`no answer within ${deadlineMs / 1000}s`, `${deadlineMs / 1000} 秒内没有结果`) : error instanceof Error ? error.message : String(error);

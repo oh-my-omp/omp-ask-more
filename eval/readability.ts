@@ -9,7 +9,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "@oh-my-pi/pi-coding-agent/sdk";
-import { DEFECTS, type DefectScores, judgeReadability, readabilityVerdict } from "../src/readability.ts";
+import { judgeReadability, NEED_THRESHOLD, unreadableQuestions } from "../src/readability.ts";
 import { questionSchema } from "../src/schema.ts";
 
 const corpusSchema = z.object({
@@ -28,11 +28,11 @@ type RecordedCall = z.infer<typeof corpusSchema>["calls"][number];
 
 interface Scored {
 	readonly call: RecordedCall;
-	readonly scores: DefectScores;
+	readonly needs: readonly number[];
 }
 
 const CONCURRENCY = 8;
-const THRESHOLDS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+const THRESHOLDS = [...new Set([0.5, 0.6, NEED_THRESHOLD, 0.7, 0.8])].sort((a, b) => a - b);
 
 function report(scored: readonly Scored[], threshold: number): string {
 	let tp = 0;
@@ -43,9 +43,8 @@ function report(scored: readonly Scored[], threshold: number): string {
 	let callsFalseRejected = 0;
 	let flagged = 0;
 	let questions = 0;
-	for (const { call, scores } of scored) {
-		const verdict = readabilityVerdict(call.questions, scores, threshold);
-		const failing = new Set(verdict.kind === "unreadable" ? verdict.failures.map(failure => failure.id) : []);
+	for (const { call, needs } of scored) {
+		const failing = new Set(unreadableQuestions(call.questions, needs, threshold));
 		questions += call.questions.length;
 		flagged += failing.size;
 		const labels = call.labels;
@@ -95,7 +94,7 @@ async function main(): Promise<void> {
 				const call = calls[index];
 				if (call === undefined) break;
 				try {
-					scored.push({ call, scores: await judgeReadability(judge, call.questions, call.surface, AbortSignal.timeout(120_000)) });
+					scored.push({ call, needs: await judgeReadability(judge, call.questions, call.surface, AbortSignal.timeout(120_000)) });
 				} catch (error) {
 					failed.push(`${call.id}: ${error instanceof Error ? error.message : String(error)}`);
 				}
@@ -107,12 +106,12 @@ async function main(): Promise<void> {
 	}
 	const out = values.out;
 	if (out !== undefined) {
-		const rows = scored.flatMap(({ call, scores }) =>
-			call.questions.map((question, index) => ({ call: call.id, question: question.id, label: call.labels?.[question.id] ?? null, ...scores[index] })),
+		const rows = scored.flatMap(({ call, needs }) =>
+			call.questions.map((question, index) => ({ call: call.id, question: question.id, label: call.labels?.[question.id] ?? null, need: needs[index] })),
 		);
 		await Bun.write(out, JSON.stringify(rows, null, 1));
 	}
-	console.log(`judged ${scored.length}/${calls.length} calls; defects: ${DEFECTS.join(", ")}`);
+	console.log(`judged ${scored.length}/${calls.length} calls`);
 	for (const failure of failed) console.log(`failed ${failure}`);
 	console.log("\n| threshold | flagged questions | precision (hard) | recall (hard) | false-reject rate | calls falsely rejected |");
 	console.log("|---|---|---|---|---|---|");

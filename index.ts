@@ -18,7 +18,7 @@ import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
-import { type Gate, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
+import { type Gate, readabilityGate, type ScoreJudge, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
@@ -45,7 +45,7 @@ async function delegate(
  * The calling session's `judge` role chain, billed to it. The session model goes in as the host's
  * own fallback: the host adds it only when the chain holds no native judgment model.
  */
-function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
+function sessionJudge(ctx: ExtensionContext): ScoreJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
 		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
