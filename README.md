@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/4b4f696c-136b-440b-a4d5-798a0f47e519
 omp plugin install https://github.com/oh-my-omp/omp-ask-more
 ```
 
-For local development, `omp plugin link /path/to/omp-ask-more`. Nothing needs configuring: the [timeout settings](#timeout-and-notifications) have defaults. Keep the native `ask` enabled; sessions without the TUI hand the ask to it.
+For local development, `omp plugin link /path/to/omp-ask-more`. Nothing needs configuring: the [timeout settings](#timeout-and-notifications) and the [readability check](#readability-check) have defaults. Keep the native `ask` enabled; sessions without the TUI hand the ask to it.
 
 In Tern, also install the styles-only Tern plugin in `tern/`:
 
@@ -261,9 +261,27 @@ The result is the native one: `User answers:` and one line per question, in the 
 
 One ask is open at a time; a second call is rejected instead of opening a second sheet.
 
+## Readability check
+
+Before you see an ask, a model reads each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it, as someone who sees only that dialog and has not read the session. It checks for three defects:
+
+- the choice depends on a code, state, identifier or coined term that the text never explains;
+- the text does not say what is being decided, why now, or what it affects;
+- the options do not say what each one does or how they differ.
+
+A question with a defect rejects the whole call before anything opens. The rejection names each failing question and what to fix; on the native dialog it adds that the brief and tradeoffs are not shown there. The model rewrites and calls again; nothing caps the rounds.
+
+The model is the plugin's own role `@omp-ask-more` when you bind it (`/model` → "+ New role"), else OMP's `judge` role chain; the session model is never used, and with neither there is no check. Each question is one request, all sent at once and billed to the session as `ask-readability`. Bind an Opus-class chat model: on 15 real asks the native `judge` model rejected none of the ones that were hard to read, and a small chat model rejected most of the readable ones ([verification](docs/verification.md#readability-check)). Measure a model on the labelled asks with `bun run eval:readability -- --model <provider/id>`.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `readability.judge` | `true` | run the check whenever a judge model resolves; `false` never calls one |
+
+It is a native plugin setting like the [timeout settings](#timeout-and-notifications), read when each ask is called. A judge that fails or does not answer within 30 seconds lets the ask through with a warning, and so does an invalid setting; aborting the turn while the check runs cancels the ask.
+
 ## Sessions without the TUI
 
-When the session has no UI or is not in TUI mode, ask-more hands every question's native fields to the native `ask`, which renders them in its own dialog with its own `ask.timeout` and `ask.notify`. Without a native ask to hand to — print mode, for instance — the model gets a rejection instead of a hang. If the full-screen surface fails while opening, a warning shows and the native dialog takes the whole batch.
+When the session has no UI or is not in TUI mode, ask-more hands every question's native fields to the native `ask`, which renders them in its own dialog with its own `ask.timeout` and `ask.notify`; the [readability check](#readability-check) reads those native fields only. Without a native ask to hand to — print mode, for instance — the model gets a rejection instead of a hang. If the full-screen surface fails while opening, a warning shows and the native dialog takes the whole batch.
 
 ## Observers
 
@@ -278,6 +296,7 @@ They read the native result shape, so they work the same with the native `ask`.
 ## Known limitations
 
 - **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/kimi-k2.7-code` put its first round into `ask` in 15 of 15 runs with the rule appended to the invoked skill, against 11 of 15 with the same code without it, eleven different requests across the runs. With the tool description alone, before the rule was added, `opencode-go/deepseek-v4.1-flash` (9 of 9 runs), `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`, and `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`. Without this plugin deepseek and kimi asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
+- **The readability check is only as good as the bound model, and its labels are the agent's.** The 15 labelled asks in `eval/readability-labelled.json` were labelled by the agent that built the check: two requests for your labels timed out unanswered. Relabel them and rerun `bun run eval:readability` before trusting the numbers. A rejection names the defect, not the term to explain.
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

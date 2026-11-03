@@ -19,8 +19,12 @@ flowchart LR
   t --> v{validate}
   v -- invalid --> e[structured error back to model]
   v -- ok --> u{"hasUI and mode tui"}
-  u -- "no" --> n["ctx.invokeTool(native ask) or a rejection"]
-  u -- "yes" --> o["ui.custom fullscreen overlay"]
+  u -- "no" --> rn{"readability check (native fields)"}
+  u -- "yes" --> rs{"readability check (sheet)"}
+  rn -- "hard to read" --> e
+  rs -- "hard to read" --> e
+  rn -- "readable, off or no judge" --> n["ctx.invokeTool(native ask) or a rejection"]
+  rs -- "readable, off or no judge" --> o["ui.custom fullscreen overlay"]
   o -- "plain terminal" --> c["ANSI page on the alternate screen"]
   o -- "Tern" --> p["full-pane native sheet (nativeOverlay)"]
   p --> a[AskToolDetails]
@@ -30,7 +34,7 @@ flowchart LR
 
 The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. It registers the tool under the native name `ask` (`approval: "read"`, matching `packages/coding-agent/src/tools/ask.ts:544-551`), so the model reads this plugin's description (`src/description.ts`) instead of `prompts/tools/ask.md`, and the result renderer stays the native `askToolRenderer`, since renderers are keyed by tool name (`packages/tui/src/tools/index.ts:37`). It sets `strict: true`: the provider holds the arguments to the schema's grammar, and omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `enforceStrictSchema`; `packages/ai/src/utils/validation.ts`, `normalizeOptionalNullsForSchema`). OpenAI-family backends apply strict mode even when the flag is absent, so the schema is written for it either way (see Schema).
 
-One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`extension-ui-controller.ts:1283-1369`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself. One ask is in flight at a time: a second call is rejected instead of opening a second sheet and orphaning the first one's promise.
+One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`extension-ui-controller.ts:1283-1369`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself. One ask is in flight at a time, from the readability check until the sheet closes: a second call is rejected instead of opening a second sheet and orphaning the first one's promise.
 
 ## The rule in an invoked skill
 
@@ -83,6 +87,18 @@ Validation runs at the tool boundary, before any UI opens, checks every question
 | 2–12 frames, none blank; `interval_ms` from 300 to 5000 | names the count, the frame or the interval |
 | a file demo's `path` ends in `.gif`, `.png`, `.apng`, `.webp`, `.mp4`, `.mov`, `.webm`, `.mkv` or `.m4v` | names the path and the accepted extensions |
 
+## Readability check
+
+After validation and before either dialog, `index.ts#screen` reads `readability.judge` through `src/settings.ts` (the same host API as the timeout settings, read when the ask is called) and, when it is on and a judge resolves, runs `src/readability.ts#readabilityGate`.
+
+- **What is judged.** One request per question, all concurrent, each state the JSON of that question alone as its surface shows it: the authored question without its `id` on the sheet, `nativeQuestion` without its `id` on the native dialog. The first version put the whole call in one state and pointed each rubric at `questions[i]`; a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone, so the scores tracked the index, not the text.
+- **Questions.** Three yes/no (`noul`) questions per state, one per defect (`undefined_terms`, `missing_context`, `options_indistinct`), each naming the reader: technically competent, sees only the dialog, does not know the project's names, identifiers, states or earlier decisions. `undefined_terms` counts only terms the choice depends on; asked as "any unexplained project term", every real ask failed it. Separate yes/no questions rather than one choice, because the defects are not exclusive. A defect at probability 0.6 or more fails the question.
+- **Rejection.** `rejectedResult` with one line per failing question: its `id` and a fixed rewrite instruction per defect, never judge output; on the native surface a last line says the brief and tradeoffs are not shown there. The model calls again; nothing counts rounds.
+- **Judge.** `src/judge.ts#readabilityJudge`: the chat models explicitly bound to `@omp-ask-more` (`resolveRoleChain("omp-ask-more", …)`, explicit, online only), each tried in order as a `TextJudge` over `chatTextBackend`, usage journalled under role `omp-ask-more` and the session's cost gate admitted and charged; while the role is unbound, the host's `judge` chain from `resolveJudge`. No `sessionModel` is passed, so a session without a judge model gets no check. The deps come from the `AgentSession` whose `sessionManager` is the context's, found in `AgentRegistry.global()`; the extension context carries no settings. Purpose `ask-readability`.
+- **Failure.** The caller's abort cancels the ask (`ctx.abort()`, `cancelledResult`). A judge error, an incomplete answer or 30 s without one (`AbortSignal.any` of the caller's signal and a deadline) warns through `ui.notify` and lets the ask through; so does an invalid setting. No judge resolving is silent.
+
+`eval/readability.ts` runs the same judge (or `--model provider/id` as the role would) over `eval/readability-labelled.json` — 15 labelled questions in 14 recorded claude-opus-5-5 calls — and prints flagged counts, precision, recall and false rejections per question and per call for several thresholds.
+
 ## ANSI page
 
 `fullscreen` puts the page on the alternate screen. The title and, for a batch, a tab row (`✓` on answered questions, then `Review`) stay at the top; the key hints, and above them the countdown line when the ask has one, stay at the bottom; the body between them is a pi-tui `ScrollView` sized from the live terminal height, with a scrollbar, scrolled by `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` and the mouse wheel, and pulled to the focused option when `↑↓` moves it.
@@ -113,7 +129,7 @@ One timer, scheduled on the TUI's render clock, steps the playing demos of the o
 
 ## Delegation
 
-When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with the native subset of every question (`src/schema.ts#nativeQuestion`), so the native dialog renders the native fields; without a native resolver — print mode, for instance — it returns a structured rejection instead of hanging. A failure inside the full-screen surface becomes a `ui.notify` warning and the whole batch goes to the native dialog the same way.
+When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with the native subset of every question (`src/schema.ts#nativeQuestion`), so the native dialog renders the native fields, once the readability check has passed on that subset; without a native resolver — print mode, for instance — it returns a structured rejection before any check instead of hanging. A failure inside the full-screen surface becomes a `ui.notify` warning and the whole batch goes to the native dialog the same way, without a second check on the native subset.
 
 ## Timeout
 
@@ -134,7 +150,7 @@ sequenceDiagram
   I->>I: timedOutResult, no ctx.abort()
 ```
 
-- **Settings.** `package.json` declares `timeout`, `returnTimeout`, `onExpiry`, `notify.terminal` and `notify.command` in `omp.settings`; manifest defaults are the single source of truth. `src/settings.ts` awaits `getPluginSettings("omp-ask-more", ctx.cwd)` from `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader`, then validates whole seconds and setting types into one snapshot, after question validation and before evidence loads. The API merges global plugin settings and project `.omp/plugin-overrides.json`, but applies neither defaults nor environment variables. The plugin applies manifest defaults and reads `OMP_ASK_MORE_NOTIFY_COMMAND` itself; an explicitly set environment variable wins, including an empty value. There is no session registry lookup or process-global settings slot.
+- **Settings.** `package.json` declares `timeout`, `returnTimeout`, `onExpiry`, `notify.terminal` and `notify.command` in `omp.settings`, next to `readability.judge` (read on its own when the ask is called, see Readability check); manifest defaults are the single source of truth. `src/settings.ts` awaits `getPluginSettings("omp-ask-more", ctx.cwd)` from `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader`, then validates whole seconds and setting types into one snapshot, after question validation and before evidence loads. The API merges global plugin settings and project `.omp/plugin-overrides.json`, but applies neither defaults nor environment variables. The plugin applies manifest defaults and reads `OMP_ASK_MORE_NOTIFY_COMMAND` itself; an explicitly set environment variable wins, including an empty value. Reading settings needs no session registry lookup or process-global settings slot.
 - **Command trust.** The host exposes merged values but not provenance. The plugin reads the same API at the working directory and at `/`: root-level override files are machine-admin files and form part of the trusted global baseline. A command differing from that baseline is treated as project-sourced and refused. An identical command is already the user's global choice, so it remains trusted. A trusted environment command wins without a baseline read. This uses only the mapped host API; no plugin-side file selection or parsing is duplicated. Settings errors carry structured variants and are rendered in the resolved UI language at the notification boundary.
 - **Policy.** `src/timeout.ts` parses that snapshot into `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`. `timeout: 0` is `off`; no channel with `decide` is `decide`, with `wait` is `off`. A project-sourced command is left out and becomes a structured problem that `index.ts` renders as a localized warning, without discarding the allowed project timeout settings.
 - **Clock.** The countdown belongs to the component, on the render clock's `scheduleAfter`, so it starts once the sheet is built (loading evidence and demos does not count) and every timer is cancelled on a phase change, on submit and on dispose. `handleInput`, `handleNativeEvent` and the Other field's own `handleNativeEvent` (`OtherInput`, since Tern sends its edit/undo events to the field, not the sheet) restart the idle phase. The phases are `stopped | idle | notified{at, due, timer}`. A change made by a timer calls `requestComponentRender`, because no input follows to redraw the sheet. Expiry goes through the same single completion gate as submit and cancel, as `Submission { kind: "timeout", answers }`; `index.ts` returns `timedOutResult` and does not call `ctx.abort()`.
@@ -149,7 +165,8 @@ sequenceDiagram
 | Answer | native `AskToolDetails`: `results[{id, question, options, multi, selectedOptions, customInput}]`, one entry per question in input order; text `User answers:` then `id: label`, `id: "own text"`, `id: (cancelled)` or `id: (timed out: …)` per line, matching the native multi-question wording (`src/result.ts`) |
 | Unanswered questions | the Review page lists them; submitting still sends the rest, an unanswered question reads `id: (cancelled)` (as in the native dialog) |
 | Cancel (`esc`, `Cancel all`, abort signal) | `ctx.abort()`, then every question as `(cancelled)`; nothing already answered is submitted |
-| Concurrent asks | one in flight; a second call is rejected instead of opening a second sheet |
+| Concurrent asks | one in flight, readability check included; a second call is rejected instead of opening a second sheet |
+| Hard to read | `ask rejected:` with each failing question and its defects before anything opens; the model asks again |
 | Timeout | the answers given so far, the rest as `(timed out: …)` for the model to decide; no `ctx.abort()` |
 | Approval | `approval: "read"`, matching `ask.ts:544-551` |
 | Failure inside the surface | `ui.notify` warning, then delegation of the whole batch to the native dialog |
@@ -165,7 +182,7 @@ sequenceDiagram
 ## Files
 
 ```
-index.ts           plugin entry: registers ask, validates, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
+index.ts           plugin entry: registers ask, validates, runs the readability check, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
 src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question validation
 src/brief.ts       evidence: file windows read up to their last line against the working directory, quoted text as lines
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
@@ -174,6 +191,8 @@ src/component.ts   one component: the ANSI page (render) and the Tern content (d
 src/nodes.ts       the Tern content in the native ask roles, and the sheet's button acts (SheetAct)
 src/result.ts      Answer variants, AskToolDetails construction, cancelled, timed-out and rejected results
 src/settings.ts    native plugin settings and command provenance, validated and snapshotted once per ask
+src/readability.ts the readability check: per-question states per surface, defect rubrics, verdict, rejection text, deadline
+src/judge.ts       the check's judge: chat models of @omp-ask-more, else the host judge chain
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels: live OMOMP_LANG, cached agent omomp-lang, live LC_* / LANG; protocol fields stay English
@@ -181,7 +200,8 @@ src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way 
 src/description.ts model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
 src/topics/        shipped routing, rounds and results markdown bodies
 tern/              styles-only Tern plugin: the sheet's text face and Console gutter
+eval/              the readability judge over labelled recorded asks (bun run eval:readability)
 test/              validation, native projection, evidence windows and quoted text, the ANSI long-line cut, demo loading,
-                   half-block rows, the timeout policy and result, the skill rule, and the Tern sheet driven through
-                   pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
+                   half-block rows, the timeout policy and result, the skill rule, the readability check and its setting,
+                   and the Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
 ```

@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/101da4a7-ec8b-4c83-8286-2cd0d8a7d1fe
 omp plugin install https://github.com/oh-my-omp/omp-ask-more
 ```
 
-本地开发用 `omp plugin link /path/to/omp-ask-more`。不需要任何配置：[超时设置](#超时与通知)都有默认值。原生 `ask` 要保持开启，没有 TUI 的会话会把提问交给它。
+本地开发用 `omp plugin link /path/to/omp-ask-more`。不需要任何配置：[超时设置](#超时与通知)和[可读性检查](#可读性检查)都有默认值。原生 `ask` 要保持开启，没有 TUI 的会话会把提问交给它。
 
 在 Tern 中还要安装 `tern/` 里的纯样式 Tern 插件：
 
@@ -261,9 +261,27 @@ ask({
 
 同时只开一个 ask；第二次调用被拒绝，而不是再开一张面板。
 
+## 可读性检查
+
+ask 送到你面前之前，会先由一个模型逐题阅读：每题按它的页面（没有 TUI 时按原生对话框）实际显示的内容来读，读者设定为只看得到这个对话框、没读过会话的人。它检查三种缺陷：
+
+- 做选择要用到某个编号、状态、标识或自造词，而文字里从没解释它；
+- 文字没说清在决定什么、为什么现在要定、会影响什么；
+- 选项没说清各自会做什么、彼此有什么不同。
+
+只要有一题有缺陷，整次调用就在任何界面打开前被拒绝。拒绝里列出每道不合格的题和要改什么；在原生对话框里还会注明那里不显示 brief 和取舍。模型改写后再调用，轮数不设上限。
+
+判断用的模型：你绑定了插件自己的角色 `@omp-ask-more`（`/model` → “+ New role”）时用它，否则用 OMP 的 `judge` 角色链；从不使用会话模型，两者都没有时不做检查。每题一次请求，同时发出，费用记在会话上，用途标为 `ask-readability`。请绑定 Opus 级的聊天模型：在 15 条真实 ask 上，原生 `judge` 模型一条难懂的都没拦下，小聊天模型则把大多数可读的也拦了（[验证记录](docs/verification.zh-CN.md#可读性检查)）。用 `bun run eval:readability -- --model <provider/id>` 可以在已标注的 ask 上评测某个模型。
+
+| 设置 | 默认值 | 含义 |
+|---|---|---|
+| `readability.judge` | `true` | 只要能解析出判断模型就检查；`false` 时从不调用 |
+
+它和[超时设置](#超时与通知)一样是原生插件设置，每次调用 ask 时读取。判断模型出错或 30 秒内没给结果时，放行这次 ask 并显示警告；设置值无效时也一样。检查进行中中止本轮，ask 随之取消。
+
 ## 没有 TUI 的会话
 
-会话没有 UI 或不在 TUI 模式时，ask-more 把每一题的原生字段交给原生 `ask`，由它用自己的对话框显示，超时与通知也按它自己的 `ask.timeout` 和 `ask.notify`。连原生 ask 都没有时（例如 print 模式），模型收到拒绝，而不是一直挂着。全屏界面在打开时出错的话，会显示一条警告，整批交给原生对话框。
+会话没有 UI 或不在 TUI 模式时，ask-more 把每一题的原生字段交给原生 `ask`，由它用自己的对话框显示，超时与通知也按它自己的 `ask.timeout` 和 `ask.notify`；[可读性检查](#可读性检查)只读这些原生字段。连原生 ask 都没有时（例如 print 模式），模型收到拒绝，而不是一直挂着。全屏界面在打开时出错的话，会显示一条警告，整批交给原生对话框。
 
 ## 观察者
 
@@ -278,6 +296,7 @@ ask({
 ## 已知限制
 
 - **规定在 chat 里提问的 skill 在部分模型上仍可能占上风。** 以 `/skill:grilling` 调用 `grilling` skill 时，在所调用 skill 末尾加上规则后，`opencode-go/kimi-k2.7-code` 15 次里有 15 次把第一轮问题放进 `ask`；同一份代码不加规则时是 15 次里 11 次，各次共用了十一条不同的请求。只靠工具说明、尚未加这条规则时，`opencode-go/deepseek-v4.1-flash`（9 次里 9 次）、`qwen3.8-flash`、`glm-5.3-flash` 以及 `openai-codex` 的 `gpt-5.6-luna`、`gpt-6-luna`、`gpt-6.1-terra` 都把第一轮问题放进了 `ask`，`opencode-go/minimax-m3.1-flash` 先在回复里写了这一轮，再把同样的问题放进 `ask`。不加载本插件时 deepseek 和 kimi 都在 chat 里问，有原生 `ask` 也一样。运行记录、对话记录、早先的说明和试过的改动见[验证](docs/verification.zh-CN.md#要求在对话中提问的-skill)。
+- **可读性检查的效果取决于绑定的模型，评测标签是 agent 自己标的。** `eval/readability-labelled.json` 里 15 条已标注的 ask 由实现这项检查的 agent 标注：两次请你标注都超时没有回答。请先重新标注，再运行 `bun run eval:readability`，之后才能信这些数字。拒绝里写的是缺陷类别，不会点出具体要解释哪个词。
 - **`/tree` 重答**会在原生对话框里重新打开带扩展字段的 ask，只显示原生字段。
 - **协作 guest** 在 ask-more 面板打开期间无法作答。
 - **print 与没有原生 ask 的 RPC** 收到拒绝；原生工具会中止整个操作。

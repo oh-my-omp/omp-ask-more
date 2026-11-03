@@ -19,8 +19,12 @@ flowchart LR
   t --> v{校验}
   v -- 不通过 --> e[结构化错误回给模型]
   v -- 通过 --> u{"hasUI 且 mode 为 tui"}
-  u -- 否 --> n["ctx.invokeTool（原生 ask）或直接拒绝"]
-  u -- 是 --> o["ui.custom 全屏 overlay"]
+  u -- 否 --> rn{"可读性检查（原生字段）"}
+  u -- 是 --> rs{"可读性检查（面板）"}
+  rn -- 难懂 --> e
+  rs -- 难懂 --> e
+  rn -- "可读、关闭或无判断模型" --> n["ctx.invokeTool（原生 ask）或直接拒绝"]
+  rs -- "可读、关闭或无判断模型" --> o["ui.custom 全屏 overlay"]
   o -- "普通终端" --> c["alternate screen 上的 ANSI 页面"]
   o -- "Tern" --> p["铺满窗格的原生面板（nativeOverlay）"]
   p --> a[AskToolDetails]
@@ -30,7 +34,7 @@ flowchart LR
 
 插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。它设了 `strict: true`：provider 按 schema 的语法约束参数，omp 把每个可选字段改成可为 null，并在校验前去掉 null（`packages/ai/src/utils/schema/normalize.ts` 的 `enforceStrictSchema`；`packages/ai/src/utils/validation.ts` 的 `normalizeOptionalNullsForSchema`）。OpenAI 系后端在没有这个标志时也按严格模式处理，所以 schema 无论如何都按严格模式来写（见 Schema 一节）。
 
-一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
+一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask，从可读性检查开始直到面板关闭：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
 
 ## 调用 skill 时附加的规则
 
@@ -83,6 +87,18 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 | 2–12 帧且没有空帧；`interval_ms` 在 300 到 5000 之间 | 指明帧数、第几帧或间隔 |
 | 文件演示的 `path` 以 `.gif`、`.png`、`.apng`、`.webp`、`.mp4`、`.mov`、`.webm`、`.mkv` 或 `.m4v` 结尾 | 指明路径与可用扩展名 |
 
+## 可读性检查
+
+校验之后、任何对话框之前，`index.ts#screen` 经 `src/settings.ts` 读取 `readability.judge`（与超时设置同一个宿主 API，在调用 ask 时读取）；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`。
+
+- **判断什么。** 每题一次请求，全部并发；每次的 state 是这一题单独的 JSON，按它所在界面实际显示的内容：面板上是去掉 `id` 的原题，原生对话框上是去掉 `id` 的 `nativeQuestion`。第一版把整次调用放进一个 state，让每条评判标准指向 `questions[i]`；一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05，分数跟的是下标，不是文字。
+- **问题。** 每个 state 三个是非（`noul`）问题，每种缺陷一个（`undefined_terms`、`missing_context`、`options_indistinct`），每个都写明读者：懂技术、只看得到对话框、不认识项目里的名称、标识、状态和以前的决定。`undefined_terms` 只算做选择要依赖的词；问成“有没有未解释的项目名词”时，每条真实 ask 都不合格。三种缺陷并不互斥，所以用三个是非问题而不是一个单选。缺陷概率达到 0.6 即判该题不合格。
+- **拒绝。** `rejectedResult`，每道不合格的题一行：它的 `id` 和每种缺陷对应的固定改写说明，从不使用判断模型的输出；在原生界面上最后一行说明那里不显示 brief 和取舍。模型再次调用；不计轮数。
+- **判断模型。** `src/judge.ts#readabilityJudge`：显式绑定到 `@omp-ask-more` 的聊天模型（`resolveRoleChain("omp-ask-more", …)`，只取显式且为在线模型的候选），依次作为 `chatTextBackend` 上的 `TextJudge` 尝试，用量以角色 `omp-ask-more` 记入会话账本，并经会话的 cost gate 放行与计费；角色未绑定时用宿主 `resolveJudge` 的 `judge` 角色链。不传 `sessionModel`，所以会话没有判断模型时就不检查。依赖取自 `AgentRegistry.global()` 里 `sessionManager` 与上下文相同的 `AgentSession`；扩展上下文本身不带 settings。用途标为 `ask-readability`。
+- **失败。** 调用方中止时取消 ask（`ctx.abort()`、`cancelledResult`）。判断模型出错、答案不全或 30 秒内没有结果（调用方 signal 与截止时间经 `AbortSignal.any` 合并）时，经 `ui.notify` 警告并放行；设置值无效时也一样。解析不出判断模型时不提示。
+
+`eval/readability.ts` 用同一个判断模型（或用 `--model provider/id` 按角色的方式指定）跑 `eval/readability-labelled.json`——14 次真实 claude-opus-5-5 调用里的 15 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
+
 ## ANSI 页面
 
 `fullscreen` 把页面放到 alternate screen。标题和（多题时的）标签行（已答题带 `✓`，最后是 `汇总`）固定在顶部，键位提示（ask 有倒计时时，其上方还有倒计时那一行）固定在底部；中间的正文是按实时终端高度调整的 pi-tui `ScrollView`，带滚动条，可用 `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` 和鼠标滚轮滚动，`↑↓` 移动选项时自动滚到聚焦选项。
@@ -113,7 +129,7 @@ Other 输入框是 pi-tui `Input`，每题一个：它的值是文本的唯一�
 
 ## 委托
 
-`ctx.hasUI` 为假或模式不是 `tui` 时，工具把每一题的原生子集交给 `ctx.invokeTool`（`src/schema.ts#nativeQuestion`），由原生对话框渲染原生字段；没有原生解析器时（例如 print 模式）返回结构化拒绝，而不是挂住。全屏表面内部出错时，先显示一条 `ui.notify` 警告，再以同样方式把整批交给原生对话框。
+`ctx.hasUI` 为假或模式不是 `tui` 时，工具把每一题的原生子集交给 `ctx.invokeTool`（`src/schema.ts#nativeQuestion`），由原生对话框渲染原生字段，前提是可读性检查在这份子集上通过；没有原生解析器时（例如 print 模式），在任何检查之前返回结构化拒绝，而不是挂住。全屏表面内部出错时，先显示一条 `ui.notify` 警告，再以同样方式把整批交给原生对话框，不再对原生子集检查一次。
 
 ## 超时
 
@@ -134,7 +150,7 @@ sequenceDiagram
   I->>I: timedOutResult，不调用 ctx.abort()
 ```
 
-- **设置。** `package.json` 在 `omp.settings` 中声明 `timeout`、`returnTimeout`、`onExpiry`、`notify.terminal` 与 `notify.command`；清单中的默认值是唯一来源。`src/settings.ts` 等待 `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader` 的 `getPluginSettings("omp-ask-more", ctx.cwd)`，然后校验整数秒与各项类型，生成一份快照，时机在问题校验之后、加载证据之前。API 合并全局插件设置与项目 `.omp/plugin-overrides.json`，但不应用默认值或环境变量。插件自行应用清单默认值并读取 `OMP_ASK_MORE_NOTIFY_COMMAND`；明确设置的环境变量优先，包括空值。不再查找会话设置表，也没有进程全局设置槽。
+- **设置。** `package.json` 在 `omp.settings` 中声明 `timeout`、`returnTimeout`、`onExpiry`、`notify.terminal` 与 `notify.command`，旁边还有 `readability.judge`（在调用 ask 时单独读取，见“可读性检查”）；清单中的默认值是唯一来源。`src/settings.ts` 等待 `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader` 的 `getPluginSettings("omp-ask-more", ctx.cwd)`，然后校验整数秒与各项类型，生成一份快照，时机在问题校验之后、加载证据之前。API 合并全局插件设置与项目 `.omp/plugin-overrides.json`，但不应用默认值或环境变量。插件自行应用清单默认值并读取 `OMP_ASK_MORE_NOTIFY_COMMAND`；明确设置的环境变量优先，包括空值。读取设置不需要查找会话表，也没有进程全局设置槽。
 - **命令信任。** 宿主只公开合并后的值，不提供来源。插件分别在工作目录和 `/` 调用同一个 API；根目录覆盖文件属于机器管理员配置，视为可信全局基线的一部分。与基线不同的命令被视为项目来源并拒绝；相同命令已是用户自己的全局选择，因此仍可信。可信环境变量命令优先，此时无需读取基线。实现只使用已映射的宿主 API，不在插件中重复文件选择或解析。设置错误保留结构化变体，在通知边界按解析出的界面语言生成文字。
 - **策略。** `src/timeout.ts` 把这份快照解析成 `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`。`timeout: 0` 为 `off`；没有渠道时，`decide` 为 `decide`，`wait` 为 `off`。项目来源的命令不进入渠道，而成为结构化问题，由 `index.ts` 生成本地化警告，其余允许的项目超时设置不会被丢弃。
 - **时钟。** 倒计时属于组件，挂在渲染时钟的 `scheduleAfter` 上，所以面板建好才开始计时（加载证据和演示的时间不算），每次切换阶段、提交和销毁时都取消它持有的全部计时器。`handleInput`、`handleNativeEvent`，以及 Other 输入框自己的 `handleNativeEvent`（`OtherInput`：Tern 把 edit/undo 事件直接发给输入框，而不是发给面板）都会让空闲阶段重新开始。阶段为 `stopped | idle | notified{at, due, timer}`。由计时器引起的变化会调用 `requestComponentRender`，因为之后没有输入来触发重画。到期走与提交、取消同一个唯一的收尾入口，即 `Submission { kind: "timeout", answers }`；`index.ts` 返回 `timedOutResult`，不调用 `ctx.abort()`。
@@ -149,7 +165,8 @@ sequenceDiagram
 | 答案 | 原生 `AskToolDetails`：`results[{id, question, options, multi, selectedOptions, customInput}]`，每题一项、按输入顺序；文本为 `User answers:` 加每行 `id: 选项`、`id: "自填文字"`、`id: (cancelled)` 或 `id: (timed out: …)`，与原生多题措辞一致（`src/result.ts`） |
 | 未作答的题 | 汇总页列出；提交仍会发送其余答案，未作答的题为 `id: (cancelled)`（与原生对话框一致） |
 | 取消（`esc`、`全部取消`、abort signal） | `ctx.abort()`，然后所有题都为 `(cancelled)`；已作答的部分不提交 |
-| 并发 | 同时只允许一个；第二次调用被拒绝，而不是再开一张面板 |
+| 并发 | 同时只允许一个，可读性检查也算在内；第二次调用被拒绝，而不是再开一张面板 |
+| 难懂 | 任何界面打开前返回 `ask rejected:`，列出每道不合格的题及其缺陷；模型重新调用 |
 | 超时 | 返回已给出的答案，其余为 `(timed out: …)` 由模型决定；不调用 `ctx.abort()` |
 | 审批 | `approval: "read"`，与 `ask.ts:544-551` 一致 |
 | 表面内部失败 | `ui.notify` 警告，然后把整批委托给原生对话框 |
@@ -165,7 +182,7 @@ sequenceDiagram
 ## 文件
 
 ```
-index.ts           插件入口：注册 ask、校验、挂载全屏 overlay、委托；给调用的 skill 加上规则
+index.ts           插件入口：注册 ask、校验、运行可读性检查、挂载全屏 overlay、委托；给调用的 skill 加上规则
 src/schema.ts      原生字段 + brief/tradeoff、zod 参数、逐题校验
 src/brief.ts       证据：按工作目录读取文件行段、读到最后一行即停，文字证据切成行
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
@@ -174,6 +191,8 @@ src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（descr
 src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动作（SheetAct）
 src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒绝结果
 src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生成一次快照
+src/readability.ts 可读性检查：按界面构造的逐题 state、缺陷评判标准、结论、拒绝文字、截止时间
+src/judge.ts       检查用的判断模型：@omp-ask-more 的聊天模型，否则宿主 judge 链
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
 src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文
@@ -181,6 +200,7 @@ src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾�
 src/description.ts 面向模型的用途、topic 指针与正文加载；index.ts 注册带类型的 docTopics
 src/topics/        随包分发的 routing、rounds 与 results markdown 正文
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
+eval/              在已标注的真实 ask 上评测可读性判断模型（bun run eval:readability）
 test/              校验、原生投影、证据行段与文字证据、ANSI 长行截断、演示加载、半块画面、超时策略与结果、
-                   skill 规则，以及经 pi-tui reconciler 与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
+                   skill 规则、可读性检查及其设置，以及经 pi-tui reconciler 与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
 ```

@@ -168,3 +168,30 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 - **V1 措辞**：在 skill 那一句后面补充，指令为回复规定的格式 “describes the questions, not where they go”。kimi 2/2 次在对话里提问，记录下的推理没有提到 ask。
 - **V2 系统提示行**：同一条规则经 `before_agent_start` 追加到系统提示末尾。让 kimi 复述时，它从 “the Critical section near the end” 一字不差地背出了这一句（`probe-V2`），随后 2/2 次仍在对话里提问。
 - **V3 收尾检查**：一个 `session_stop` 处理器，本轮即将以带 `❓` 或 `Q<n>` 行、或以 `?` 结尾的回复结束时，请求续一轮，让模型把这些问题放进 ask。kimi 在对话回复之后 19 秒和 51 秒把这一轮移进了 ask。它只能在这一轮已经显示之后纠正，人会看到两遍，每次以提问结束的回复都要多一次模型调用；按标记判断还会漏掉别的提问写法、在反问句上误触发。ds-V3a 里它从未触发。
+
+## 可读性检查
+
+2026-11-03 用 omp 18.16.0 执行；`judge` 角色是原生判定模型 `futureppo-jev/decision-model-preview`。
+
+**语料。** 2026-10-20 以来修改过的本地 omp 会话（515 个）里，`claude-opus-5-5` 发出过 168 次不重复的 `ask` 调用，共 320 题；其中 70 次调用（136 题）符合现行 schema。从中挑了 15 题（分属 14 次调用，覆盖原生 judge 的分数区间），连同所在的整次调用存进 `eval/readability-labelled.json`：5 题难懂（`conflict_features`、`moat-app1-boundary`、`formal`、`trigger`、`semantics`），10 题可读。标签由实现这项检查的 agent 标注；两次把这些条目交给用户标注的 `ask` 都超时没有回答。
+
+**整批 state。** 第一版把整次调用放进一个 state 判断。`conflict_features` 的 brief 引用了决定编号 N19、N24、D1、N14、L2，却没说它们是什么；它在七题的调用里 `undefined_terms` 得 0.91，单独判断只得 0.05。原生 judge 整批跑时“标记”了 320 题中的 55 题，逐题跑复现不出来。现在每题单独一次请求。
+
+**判断模型**，使用现行评判标准，`bun run eval:readability [-- --model <id>]`；聊天模型在 0.3 到 0.8 的每个阈值上结果都相同：
+
+| 判断模型 | 43 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
+|---|---|---|---|---|---|
+| `judge` 角色（原生） | 0 | – | 0.00 | 0.00 | 14 次中 0 次 |
+| `anthropic/claude-opus-5-5` 作 `@omp-ask-more` | 两次运行分别 10、11 | 1.00 | 0.80 | 0.00 | 14 次中 0 次 |
+| `anthropic/claude-haiku-5-5` 作 `@omp-ask-more` | 27 | 0.40 | 0.80 | 0.60 | 14 次中 6 次 |
+
+早先的 `undefined_terms` 措辞（“a project-specific name … that the shown text never explains”）让 opus 对 15 题中的 14 题回答“是”；现行措辞只算做选择要依赖的词。opus 漏掉的是 `trigger`（通过 `met`、`not_met` 和 `max_returns` 来讲边沿唤醒与电平唤醒）。
+
+| 检查 | 命令 | 观察结果 |
+|---|---|---|
+| 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无错误；75 通过、0 失败，其中包括检查的结论（缺陷恰好等于阈值时拒绝，略低于阈值时放行）、每题一次请求且按面板或原生字段构造、判断模型出错、答案不全和超过截止时间时各放行并只警告一次、调用方中止时取消，以及 `readability.judge` 的默认值、`false` 与非布尔值 |
+| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，`@omp-ask-more` 未绑定，代码是改成逐题判断之前、`undefined_terms` 还是现行措辞之前的版本；让模型把文件里的 `conflict_features` 原样发出 | 会话文件里有一条 `model_usage`：用途 `ask-readability`、角色 `typesafe`、`futureppo-jev/decision-model-preview`、1,009 输入 token；对话框按原文打开 |
+| 绑定角色 | 同上，项目 `.omp/config.yml` 绑定 `omp-ask-more: anthropic/claude-opus-5-5`；要求被拒时改写 | 第一次调用返回 `ask rejected: - question "conflict_features" is hard to understand … it relies on project-specific names, identifiers or states it never explains; …`；模型把 N19/N24、D1、N14/L2 和 Komodo 写清楚后再次调用，这次打开的面板显示改写后的 brief，`enter` 返回 `conflict_features: 裁掉冲突部分，自动化留待单独设计`。会话文件里有两条 `model_usage`：用途 `ask-readability`、角色 `omp-ask-more`、`anthropic/claude-opus-5-5` |
+| 关闭设置 | 同样的绑定，再加 `.omp/plugin-overrides.json` 里的 `readability.judge: false` | 第一次调用就按原文打开了对话框；会话文件里没有 `ask-readability` 记录 |
+
+尚未在 runtime 验证：原生对话框上的检查（需要 `ctx.invokeTool` 存在而 `ui.custom` 不存在）、会话里判断模型出错或超时（只有单元测试覆盖）、由人给出的标签。
