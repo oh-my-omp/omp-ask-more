@@ -94,10 +94,10 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 - **每题一个 state。** 每题单独判断，按它所在界面实际显示的内容（面板上是原题，原生对话框上是 `nativeQuestion`），因为读者一页只看到一题。整次调用放进一个 state、让评判标准指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
 - **缺陷互不排斥。** 每种缺陷一个是非问题，而不是一个单选，因为同一题可能既缺背景又缺解释。名词缺陷只算做选择要依赖的词：问成“有没有未解释的项目名词”时，每条真实 ask 都不合格。
 - **固定的拒绝文字。** 模型读到的是不合格题的 `id` 和每种缺陷对应的固定说明，不是判断模型的输出，然后重新提问；不计轮数，因为每次调用都重新判断。
-- **用哪个判断模型。** 之所以有 `@omp-ask-more` 这个角色，是因为原生 `judge` 模型对人看不懂的 ask 给出的缺陷概率很低；绑定聊天模型才是真正会拦截的配置。未绑定时，宿主 `judge` 链让检查在有判断模型的地方照常进行。从不加入会话模型，所以没有判断模型的会话不付出任何代价。会话的 settings、registry、账本和 cost gate 取自 `AgentRegistry.global()` 里与上下文 `sessionManager` 对应的 `AgentSession`，因为扩展上下文本身不带 settings。
+- **用哪个判断模型。** 直接用 OMP 自己的 `resolveJudge`，并传入会话模型，与 OMP 自己做判定时走同一条链：插件不另做模型选择，所以由 `judge` 角色判断；只有 OMP 自己退到会话模型时（链里没有原生判定模型），会话模型才作答。会话的 settings、registry、账本和 cost gate 取自 `AgentRegistry.global()` 里与上下文 `sessionManager` 对应的 `AgentSession`，因为扩展上下文本身不带 settings。
 - **失败。** 判断模型出错或没有结果时放行并警告，因为检查不能挡在用户和决定之间；调用方自己中止时仍取消 ask。
 
-`eval/readability.ts` 用同一个判断模型（或用 `--model provider/id` 按角色的方式指定）跑 `eval/readability-labelled.json`——14 次真实 claude-opus-5-5 调用里的 15 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
+`eval/readability.ts` 用同一条链（`--session-model provider/id` 代替会话模型）跑 `eval/readability-labelled.json`——14 次真实 claude-opus-5-5 调用里的 15 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
 
 ## ANSI 页面
 
@@ -192,7 +192,6 @@ src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动
 src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒绝结果
 src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生成一次快照
 src/readability.ts 可读性检查：按界面构造的逐题 state、缺陷评判标准、结论、拒绝文字、截止时间
-src/judge.ts       检查用的判断模型：@omp-ask-more 的聊天模型，否则宿主 judge 链
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
 src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文

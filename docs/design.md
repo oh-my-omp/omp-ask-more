@@ -94,10 +94,10 @@ After validation and before either dialog, `index.ts#screen` reads `readability.
 - **One state per question.** Each question is judged alone, as its surface shows it (the authored question on the sheet, `nativeQuestion` on the native dialog), because the reader sees one question per page. One state for the whole call with rubrics pointing at `questions[i]` made the scores follow the index: a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone.
 - **Independent defects.** One yes/no question per defect rather than one choice, because a question can lack context and explanations at once. The term defect counts only terms the choice depends on: asked about any unexplained project term, every real ask failed.
 - **Fixed rejection text.** The model reads the failing question's `id` and a fixed instruction per defect, not judge output, and asks again; no round counter, since every call is judged afresh.
-- **Which judge.** The role `@omp-ask-more` exists because the native `judge` model gives these defects low probabilities on asks people cannot read; a bound chat model is the configuration that rejects. Unbound, the host `judge` chain keeps the check on wherever a judge exists. The session model is never added, so the check costs nothing in sessions without a judge. The session's settings, registry, ledger and cost gate come from the `AgentSession` registered in `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings.
+- **Which judge.** OMP's own `resolveJudge` with the session model, the same chain OMP's judgments use: the plugin adds no model choice of its own, so the `judge` role decides and the session model answers only when OMP itself falls back to it (no native judgment model in the chain). The session's settings, registry, ledger and cost gate come from the `AgentSession` registered in `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings.
 - **Failure.** A judge that fails or does not answer lets the ask through with a warning, since the check must never stand between the user and a decision; the caller's own abort still cancels the ask.
 
-`eval/readability.ts` runs the same judge (or `--model provider/id` as the role would) over `eval/readability-labelled.json` — 15 labelled questions in 14 recorded claude-opus-5-5 calls — and prints flagged counts, precision, recall and false rejections per question and per call for several thresholds.
+`eval/readability.ts` runs the same chain (`--session-model provider/id` standing in for the session model) over `eval/readability-labelled.json` — 15 labelled questions in 14 recorded claude-opus-5-5 calls — and prints flagged counts, precision, recall and false rejections per question and per call for several thresholds.
 
 ## ANSI page
 
@@ -192,7 +192,6 @@ src/nodes.ts       the Tern content in the native ask roles, and the sheet's but
 src/result.ts      Answer variants, AskToolDetails construction, cancelled, timed-out and rejected results
 src/settings.ts    native plugin settings and command provenance, validated and snapshotted once per ask
 src/readability.ts the readability check: per-question states per surface, defect rubrics, verdict, rejection text, deadline
-src/judge.ts       the check's judge: chat models of @omp-ask-more, else the host judge chain
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
 src/i18n.ts        UI labels: live OMOMP_LANG, cached agent omomp-lang, live LC_* / LANG; protocol fields stay English

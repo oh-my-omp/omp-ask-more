@@ -263,7 +263,7 @@ One ask is open at a time; a second call is rejected instead of opening a second
 
 ## Readability check
 
-Before you see an ask, a model reads each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it, as someone who sees only that dialog and has not read the session. It checks for three defects:
+Before you see an ask, OMP's `judge` role reads each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it, as someone who sees only that dialog and has not read the session. It checks for three defects:
 
 - the choice depends on a code, state, identifier or coined term that the text never explains;
 - the text does not say what is being decided, why now, or what it affects;
@@ -271,11 +271,11 @@ Before you see an ask, a model reads each question on its own, exactly as its pa
 
 A question with a defect rejects the whole call before anything opens. The rejection names each failing question and what to fix; on the native dialog it adds that the brief and tradeoffs are not shown there. The model rewrites and calls again; nothing caps the rounds.
 
-The model is the plugin's own role `@omp-ask-more` when you bind it (`/model` → "+ New role"), else OMP's `judge` role chain; the session model is never used, and with neither there is no check. Each question is one request, all sent at once and billed to the session as `ask-readability`. Bind an Opus-class chat model: on 15 real asks the native `judge` model rejected none of the ones that were hard to read, and a small chat model rejected most of the readable ones ([verification](docs/verification.md#readability-check)). Measure a model on the labelled asks with `bun run eval:readability -- --model <provider/id>`.
+The judge is OMP's `judge` role chain, resolved the way OMP resolves it for its own judgments: the models of `modelRoles.judge` and its fallbacks, then, only when that chain holds no native judgment model, the session model as OMP's fallback. Each question is one request, all sent at once and billed to the session as `ask-readability`. How much it catches depends on what the `judge` role is: on 15 real asks the native `futureppo-jev/decision-model-preview` rejected none of the five that were hard to read, while `anthropic/claude-opus-5-5` in the role rejected four of them and none of the ten readable ones ([verification](docs/verification.md#readability-check)). Measure a judge on the labelled asks with `bun run eval:readability` in a directory whose settings bind it.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `readability.judge` | `true` | run the check whenever a judge model resolves; `false` never calls one |
+| `readability.judge` | `true` | run the check whenever the judge chain resolves a model; `false` never calls one |
 
 It is a native plugin setting like the [timeout settings](#timeout-and-notifications), read when each ask is called. A judge that fails or does not answer within 30 seconds lets the ask through with a warning, and so does an invalid setting; aborting the turn while the check runs cancels the ask.
 
@@ -296,7 +296,7 @@ They read the native result shape, so they work the same with the native `ask`.
 ## Known limitations
 
 - **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/kimi-k2.7-code` put its first round into `ask` in 15 of 15 runs with the rule appended to the invoked skill, against 11 of 15 with the same code without it, eleven different requests across the runs. With the tool description alone, before the rule was added, `opencode-go/deepseek-v4.1-flash` (9 of 9 runs), `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`, and `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`. Without this plugin deepseek and kimi asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
-- **The readability check is only as good as the bound model, and its labels are the agent's.** The 15 labelled asks in `eval/readability-labelled.json` were labelled by the agent that built the check: two requests for your labels timed out unanswered. Relabel them and rerun `bun run eval:readability` before trusting the numbers. A rejection names the defect, not the term to explain.
+- **The readability check is only as good as the `judge` role, and its labels are the agent's.** A native judgment model rejects almost nothing on these asks. The 15 labelled asks in `eval/readability-labelled.json` were labelled by the agent that built the check: two requests for your labels timed out unanswered. Relabel them and rerun `bun run eval:readability` before trusting the numbers. A rejection names the defect, not the term to explain.
 - **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.

@@ -171,27 +171,28 @@ Each is a copy of this plugin with one change (`variants/*.diff`), launched by `
 
 ## Readability check
 
-Run on 2026-11-03 with omp 18.16.0; the `judge` role was `futureppo-jev/decision-model-preview`, a native judgment model.
+Run on 2026-11-03 with omp 18.16.0; the `judge` role was `futureppo-jev/decision-model-preview`, a native judgment model, except where a project `.omp/config.yml` sets `modelRoles.judge: anthropic/claude-opus-5-5`.
 
 **Corpus.** The local omp sessions modified since 2026-10-20 (515) held 168 distinct `ask` calls by `claude-opus-5-5` with 320 questions; 70 calls (136 questions) pass the current schema. From those, 15 questions in 14 calls spread across the native judge's score range were labelled and stored with their whole calls in `eval/readability-labelled.json`: 5 hard to read (`conflict_features`, `moat-app1-boundary`, `formal`, `trigger`, `semantics`), 10 readable. The agent that built the check assigned the labels; two `ask` calls putting the items to the user timed out unanswered.
 
 **Batched state.** The first version judged a whole call in one state. `conflict_features`, whose brief cites the decision codes N19, N24, D1, N14 and L2 without saying what they are, scored `undefined_terms` 0.91 inside its seven-question call and 0.05 alone; on the native judge the batched run "flagged" 55 of 320 questions, which the per-question run does not reproduce. Each question is now its own request.
 
-**Judges**, with the rubric as shipped, `bun run eval:readability [-- --model <id>]`; with a chat model every threshold from 0.3 to 0.8 gave the same row:
+**Judges**, with the rubric as shipped, `bun run eval:readability` in a directory with each `judge` role; with opus every threshold from 0.3 to 0.8 gave the same row:
 
-| Judge | flagged of 43 | precision | recall | false-reject rate | calls falsely rejected |
+| `judge` role | flagged of 43 | precision | recall | false-reject rate | calls falsely rejected |
 |---|---|---|---|---|---|
-| `judge` role (native) | 0 | – | 0.00 | 0.00 | 0 of 14 |
-| `anthropic/claude-opus-5-5` as `@omp-ask-more` | 10–11 over two runs | 1.00 | 0.80 | 0.00 | 0 of 14 |
-| `anthropic/claude-haiku-5-5` as `@omp-ask-more` | 27 | 0.40 | 0.80 | 0.60 | 6 of 14 |
+| `futureppo-jev/decision-model-preview` (native) | 0 | – | 0.00 | 0.00 | 0 of 14 |
+| `anthropic/claude-opus-5-5` | 8–9 over two runs | 1.00 | 0.60 | 0.00 | 0 of 14 |
 
-An earlier `undefined_terms` wording ("a project-specific name … that the shown text never explains") had opus answer yes on 14 of 15; the shipped one counts only terms the choice depends on. Opus missed `trigger` (edge vs. level wake-ups explained through `met`, `not_met` and `max_returns`).
+Opus caught `conflict_features`, `moat-app1-boundary` and `semantics`, and passed `trigger` (edge vs. level wake-ups explained through `met`, `not_met` and `max_returns`) and `formal` (coined terms such as 挡板 and 试探). An earlier `undefined_terms` wording ("a project-specific name … that the shown text never explains") had opus answer yes on 14 of 15; the shipped one counts only terms the choice depends on.
+
+**The native judge on other request shapes.** The question rendered as plain text instead of JSON, asked as one yes/no question about unexplained terms, one about whether the reader could choose without asking, a three-way choice and a four-level score: the ranking of hard above readable questions was at chance (AUC 0.42–0.57). Asked per term whether the text says what `N19`, `D1`, `#78` or `K6` is, it answered no for every extracted term in every question, including the rewritten `conflict_features` that defines them. No shape was adopted.
 
 | Check | Command | Observed |
 |---|---|---|
 | Types, unit | `bun run check`, `bun test` | `tsc --noEmit` clean; 75 pass, 0 fail, among them the gate's verdicts (a defect at exactly the threshold rejects, just below passes), one request per question with the sheet or the native fields, judge failure, an incomplete answer and a missed deadline passing with one warning, the caller's abort cancelling, and `readability.judge` default, `false` and a non-boolean |
-| Native judge in a session | `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash` in a 140×45 PTY, `@omp-ask-more` unbound; the model asked to send `conflict_features` from a file unchanged, first as stored, then with its header changed to `冲突的功能` | the dialog opened with the original text both times. The first run left no `ask-readability` entry: the eval had judged the same state, and the host's on-disk judgment cache answered it. The second left one: role `typesafe`, `futureppo-jev/decision-model-preview`, 1,022 input tokens |
-| Role bound | same, with a project `.omp/config.yml` binding `omp-ask-more: anthropic/claude-opus-5-5`; told to rewrite if rejected | the first call returned `ask rejected: - question "conflict_features" is hard to understand … it relies on project-specific names, identifiers or states it never explains; …`; the model spelled out N19/N24, D1, N14/L2 and Komodo and called again; that call opened the sheet with the rewritten brief, and `enter` returned `conflict_features: 裁掉冲突部分，自动化留待单独设计`. Two `model_usage` entries with purpose `ask-readability`, role `omp-ask-more`, `anthropic/claude-opus-5-5` |
-| Setting off | same binding plus `.omp/plugin-overrides.json` with `readability.judge: false` | the first call opened the dialog with the original text; no `ask-readability` entry in the session file |
+| Native judge in a session | `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash` in a 140×45 PTY; the model asked to send `conflict_features` from a file unchanged, its header changed so that no cached judgment answers it | the dialog opened with the original text; the session file holds one `model_usage` entry with purpose `ask-readability`, role `typesafe`, `futureppo-jev/decision-model-preview`, 1,024 input tokens. An earlier run with the stored header left none: the host's on-disk judgment cache answered it from an eval run |
+| `judge` role on a chat model | same, with `modelRoles.judge: anthropic/claude-opus-5-5`; told to rewrite if rejected | the first call returned `ask rejected: - question "conflict_features" is hard to understand … it relies on project-specific names, identifiers or states it never explains; …`; the model rewrote the brief without the codes (members managed by the identity directory, no quotas, one container platform per lab) and called again; that call opened the sheet and `enter` returned `conflict_features: 只裁掉冲突部分，自动化留待单独设计`. Two `model_usage` entries with purpose `ask-readability`, role `judge`, `anthropic/claude-opus-5-5` |
+| Setting off | a `.omp/plugin-overrides.json` with `readability.judge: false` (run before the judge became the host chain; the check returns before resolving any judge, so that change does not reach this path) | the first call opened the dialog with the original text; no `ask-readability` entry in the session file |
 
-Not yet exercised at runtime: the check on the native dialog (needs `ctx.invokeTool` without `ui.custom`), a judge failure or deadline inside a session (covered by unit tests only), and labels given by people.
+Not yet exercised at runtime: the check on the native dialog (needs `ctx.invokeTool` without `ui.custom`), the session model answering as OMP's fallback (needs a `judge` chain without any native model), a judge failure or deadline inside a session (covered by unit tests only), and labels given by people.
