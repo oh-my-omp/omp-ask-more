@@ -9,7 +9,7 @@
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
-import { journalJudgmentUsage, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
+import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
@@ -18,7 +18,6 @@ import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
-import { readabilityJudge } from "./src/judge.ts";
 import { type Gate, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
@@ -43,17 +42,18 @@ async function delegate(
 }
 
 /**
- * The readability judge of the calling session, billed to it: `@omp-ask-more` or the `judge` role
- * chain (src/judge.ts). The session model is not added: no judge means no readability check.
+ * The calling session's `judge` role chain, billed to it. The session model goes in as the host's
+ * own fallback: the host adds it only when the chain holds no native judgment model.
  */
 function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
 		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
 	if (session == null) return undefined;
-	return readabilityJudge({
+	const chain = resolveJudge({
 		settings: session.settings,
 		registry: session.modelRegistry,
+		sessionModel: session.model,
 		sessionId: session.sessionId,
 		metadataResolver: provider => session.agent.metadataForProvider(provider),
 		purpose: "ask-readability",
@@ -62,6 +62,7 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 		cache: sharedJudgmentCache(),
 		costGate: session.costGate,
 	});
+	return chain.primaryModel() === undefined ? undefined : chain;
 }
 
 /** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. */
