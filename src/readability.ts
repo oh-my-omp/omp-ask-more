@@ -16,7 +16,11 @@ export type Surface = "sheet" | "native";
 export const DEFECTS = ["undefined_terms", "missing_context", "options_indistinct"] as const;
 export type Defect = (typeof DEFECTS)[number];
 
-/** Probability of a defect at which a question is rejected; chosen with `bun eval/readability.ts`. */
+/**
+ * Probability of a defect at which a question is rejected. A chat judge answers each defect yes or
+ * no, so any threshold between 0 and 1 splits it the same way; a native judge's probabilities stay
+ * below it on the labelled asks (`bun eval/readability.ts`).
+ */
 export const DEFECT_THRESHOLD = 0.6;
 
 export type QuestionFailure = { readonly id: string; readonly defects: readonly Defect[] };
@@ -31,10 +35,10 @@ const AUDIENCE =
 const RUBRICS: Readonly<Record<Defect, NoulQuestion>> = {
 	undefined_terms: {
 		type: "noul",
-		instructions: `${AUDIENCE} Does understanding the decision require a project-specific name, identifier, internal state, abbreviation or coined term that the shown text never explains?`,
+		instructions: `${AUDIENCE} Project names that only label things (a repository, a service, a product) are fine when the text says enough about what they do for the choice. Is there a term the reader must understand to tell what the options mean or how they differ, whose meaning the shown text never gives, so that the reader cannot make the choice?`,
 		criteria: {
-			true: "At least one such term is needed to understand the decision and is not explained anywhere in the shown text.",
-			false: "Every term needed to understand the decision is common engineering vocabulary or is explained in the shown text.",
+			true: "Telling the options apart depends on an unexplained code, state, identifier or coined term, so the reader cannot make the choice.",
+			false: "The reader can tell what each option means; any unexplained names are labels the choice does not depend on.",
 		},
 	},
 	missing_context: {

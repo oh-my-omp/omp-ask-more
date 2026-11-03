@@ -8,9 +8,8 @@
  * questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import type { Judge } from "@oh-my-pi/pi-ai";
 import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
-import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
+import { journalJudgmentUsage, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
@@ -19,7 +18,8 @@ import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
-import { type Gate, readabilityGate, type Surface } from "./src/readability.ts";
+import { readabilityJudge } from "./src/judge.ts";
+import { type Gate, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
@@ -43,15 +43,15 @@ async function delegate(
 }
 
 /**
- * The session's judge role chain, billed to the session; undefined when the role resolves no
- * model. The session model is not added: an unavailable judge means no readability check.
+ * The readability judge of the calling session, billed to it: `@omp-ask-more` or the `judge` role
+ * chain (src/judge.ts). The session model is not added: no judge means no readability check.
  */
-function sessionJudge(ctx: ExtensionContext): Judge | undefined {
+function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
 		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
 	if (session == null) return undefined;
-	const chain = resolveJudge({
+	return readabilityJudge({
 		settings: session.settings,
 		registry: session.modelRegistry,
 		sessionId: session.sessionId,
@@ -62,7 +62,6 @@ function sessionJudge(ctx: ExtensionContext): Judge | undefined {
 		cache: sharedJudgmentCache(),
 		costGate: session.costGate,
 	});
-	return chain.primaryModel() === undefined ? undefined : chain;
 }
 
 /** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. */
