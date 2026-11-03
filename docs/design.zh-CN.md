@@ -89,13 +89,13 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 ## 可读性检查
 
-校验之后、任何对话框之前，`index.ts#screen` 经 `src/settings.ts` 读取 `readability.judge`（与超时设置同一个宿主 API，在调用 ask 时读取）；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`。
+校验之后、任何对话框之前，`index.ts#screen` 读取 `readability.judge`；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`；阈值、评判标准文字和截止时间都在那里。
 
-- **判断什么。** 每题一次请求，全部并发；每次的 state 是这一题单独的 JSON，按它所在界面实际显示的内容：面板上是去掉 `id` 的原题，原生对话框上是去掉 `id` 的 `nativeQuestion`。第一版把整次调用放进一个 state，让每条评判标准指向 `questions[i]`；一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05，分数跟的是下标，不是文字。
-- **问题。** 每个 state 三个是非（`noul`）问题，每种缺陷一个（`undefined_terms`、`missing_context`、`options_indistinct`），每个都写明读者：懂技术、只看得到对话框、不认识项目里的名称、标识、状态和以前的决定。`undefined_terms` 只算做选择要依赖的词；问成“有没有未解释的项目名词”时，每条真实 ask 都不合格。三种缺陷并不互斥，所以用三个是非问题而不是一个单选。缺陷概率达到 0.6 即判该题不合格。
-- **拒绝。** `rejectedResult`，每道不合格的题一行：它的 `id` 和每种缺陷对应的固定改写说明，从不使用判断模型的输出；在原生界面上最后一行说明那里不显示 brief 和取舍。模型再次调用；不计轮数。
-- **判断模型。** `src/judge.ts#readabilityJudge`：显式绑定到 `@omp-ask-more` 的聊天模型（`resolveRoleChain("omp-ask-more", …)`，只取显式且为在线模型的候选），依次作为 `chatTextBackend` 上的 `TextJudge` 尝试，用量以角色 `omp-ask-more` 记入会话账本，并经会话的 cost gate 放行与计费；角色未绑定时用宿主 `resolveJudge` 的 `judge` 角色链。不传 `sessionModel`，所以会话没有判断模型时就不检查。依赖取自 `AgentRegistry.global()` 里 `sessionManager` 与上下文相同的 `AgentSession`；扩展上下文本身不带 settings。用途标为 `ask-readability`。
-- **失败。** 调用方中止时取消 ask（`ctx.abort()`、`cancelledResult`）。判断模型出错、答案不全或 30 秒内没有结果（调用方 signal 与截止时间经 `AbortSignal.any` 合并）时，经 `ui.notify` 警告并放行；设置值无效时也一样。解析不出判断模型时不提示。
+- **每题一个 state。** 每题单独判断，按它所在界面实际显示的内容（面板上是原题，原生对话框上是 `nativeQuestion`），因为读者一页只看到一题。整次调用放进一个 state、让评判标准指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
+- **缺陷互不排斥。** 每种缺陷一个是非问题，而不是一个单选，因为同一题可能既缺背景又缺解释。名词缺陷只算做选择要依赖的词：问成“有没有未解释的项目名词”时，每条真实 ask 都不合格。
+- **固定的拒绝文字。** 模型读到的是不合格题的 `id` 和每种缺陷对应的固定说明，不是判断模型的输出，然后重新提问；不计轮数，因为每次调用都重新判断。
+- **用哪个判断模型。** 之所以有 `@omp-ask-more` 这个角色，是因为原生 `judge` 模型对人看不懂的 ask 给出的缺陷概率很低；绑定聊天模型才是真正会拦截的配置。未绑定时，宿主 `judge` 链让检查在有判断模型的地方照常进行。从不加入会话模型，所以没有判断模型的会话不付出任何代价。会话的 settings、registry、账本和 cost gate 取自 `AgentRegistry.global()` 里与上下文 `sessionManager` 对应的 `AgentSession`，因为扩展上下文本身不带 settings。
+- **失败。** 判断模型出错或没有结果时放行并警告，因为检查不能挡在用户和决定之间；调用方自己中止时仍取消 ask。
 
 `eval/readability.ts` 用同一个判断模型（或用 `--model provider/id` 按角色的方式指定）跑 `eval/readability-labelled.json`——14 次真实 claude-opus-5-5 调用里的 15 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
 

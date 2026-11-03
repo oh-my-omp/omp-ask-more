@@ -190,7 +190,7 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 | 检查 | 命令 | 观察结果 |
 |---|---|---|
 | 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无错误；75 通过、0 失败，其中包括检查的结论（缺陷恰好等于阈值时拒绝，略低于阈值时放行）、每题一次请求且按面板或原生字段构造、判断模型出错、答案不全和超过截止时间时各放行并只警告一次、调用方中止时取消，以及 `readability.judge` 的默认值、`false` 与非布尔值 |
-| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，`@omp-ask-more` 未绑定，代码是改成逐题判断之前、`undefined_terms` 还是现行措辞之前的版本；让模型把文件里的 `conflict_features` 原样发出 | 会话文件里有一条 `model_usage`：用途 `ask-readability`、角色 `typesafe`、`futureppo-jev/decision-model-preview`、1,009 输入 token；对话框按原文打开 |
+| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，`@omp-ask-more` 未绑定；让模型把文件里的 `conflict_features` 原样发出，先按存档原样，再把标题改成 `冲突的功能` | 两次对话框都按原文打开。第一次没有 `ask-readability` 记录：评测已判过同一个 state，由宿主落盘的判定缓存作答。第二次有一条：角色 `typesafe`、`futureppo-jev/decision-model-preview`、1,022 输入 token |
 | 绑定角色 | 同上，项目 `.omp/config.yml` 绑定 `omp-ask-more: anthropic/claude-opus-5-5`；要求被拒时改写 | 第一次调用返回 `ask rejected: - question "conflict_features" is hard to understand … it relies on project-specific names, identifiers or states it never explains; …`；模型把 N19/N24、D1、N14/L2 和 Komodo 写清楚后再次调用，这次打开的面板显示改写后的 brief，`enter` 返回 `conflict_features: 裁掉冲突部分，自动化留待单独设计`。会话文件里有两条 `model_usage`：用途 `ask-readability`、角色 `omp-ask-more`、`anthropic/claude-opus-5-5` |
 | 关闭设置 | 同样的绑定，再加 `.omp/plugin-overrides.json` 里的 `readability.judge: false` | 第一次调用就按原文打开了对话框；会话文件里没有 `ask-readability` 记录 |
 
