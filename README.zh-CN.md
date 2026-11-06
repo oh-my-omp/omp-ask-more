@@ -57,18 +57,10 @@ tern plugin install github.com/oh-my-omp/omp-ask-more/tern
 Ask-more 面向 OMP，不支持 Pi。界面标签与通知在生成文字时按以下顺序解析语言：
 
 1. `OMOMP_LANG`：去掉首尾空白、忽略大小写后为 `en` 或 `zh` 时采用。
-2. OMP 的 `getAgentDir()` 返回的 agent 目录（通常为 `~/.omp/agent`）中 omomp 文件的 `omomp-lang` 段。`omomp.yml`、`omomp.yaml`、`omomp.json`、`omomp.toml` 必须恰好存在一个；多个文件视为有歧义并忽略。段内只能有 `language`，值必须精确为 `en` 或 `zh`；文件解析失败或段内容无效时忽略。
-3. `LC_ALL`、`LC_MESSAGES`、`LANG` 中第一个去掉首尾空白后非空的值：以 `zh` 开头（不分大小写）为中文，其余为英文。
-4. 英文。
+2. `LC_ALL`、`LC_MESSAGES`、`LANG` 中第一个去掉首尾空白后非空的值：以 `zh` 开头（不分大小写）为中文，其余为英文。
+3. 英文。
 
-例如在 agent 目录的 `omomp.yml` 中：
-
-```yaml
-omomp-lang:
-  language: zh
-```
-
-环境变量每次解析时重新读取。只有 agent 配置按进程缓存；修改后重启 OMP 生效。项目 `.omp/` 文件不设置界面语言。发给模型的文字保持英文。Tern 配套插件只有样式，没有独立的语言设置。
+环境变量每次解析时重新读取。发给模型的文字保持英文。Tern 配套插件只有样式，没有独立的语言设置。
 
 
 ## 你会看到什么
