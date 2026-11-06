@@ -194,7 +194,7 @@ src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生�
 src/readability.ts 可读性检查：按界面构造的逐题 state、打分问题、阈值、拒绝文字、截止时间
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
 src/notify.ts      超时通知：终端通知与通知命令
-src/i18n.ts        界面标签：实时 OMOMP_LANG、缓存的 agent omomp-lang、实时 LC_* / LANG；协议字段保持英文
+src/i18n.ts        界面标签：实时 OMOMP_LANG、实时 LC_* / LANG；协议字段保持英文
 src/skill-prompt.ts 发往模型时追加到用户调用的 skill 消息末尾的规则
 src/description.ts 面向模型的用途、topic 指针与正文加载；index.ts 注册带类型的 docTopics
 src/topics/        随包分发的 routing、rounds 与 results markdown 正文
