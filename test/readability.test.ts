@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { NEED_THRESHOLD, readabilityGate, type ScoreJudge } from "../src/readability.ts";
+import { candidateTerms, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
 import { type AskQuestion, parametersSchema } from "../src/schema.ts";
 
 const questions: readonly AskQuestion[] = parametersSchema.parse({
@@ -25,23 +25,40 @@ const questions: readonly AskQuestion[] = parametersSchema.parse({
 	],
 }).questions;
 
-/** The top level of the score question; a need of `n` is a score of `n * TOP`. */
-const TOP = 3;
+/** What a scripted judge says about a sentence or a term; the defaults are a readable one. */
+interface Verdict {
+	readonly actor?: number;
+	readonly unshown?: number;
+	readonly jargon?: number;
+	readonly known?: number;
+	readonly said?: number;
+}
 
-/** A judge that scores each question from `need` (a fraction of the top level) and records the states it was shown. */
-function scripted(need: (question: string) => number, seen: string[] = []): ScoreJudge {
+/**
+ * A judge that answers each sentence and each term from `verdict` and records the state and the
+ * question names it was asked. A request about a sentence carries `sentence` in its state; one about
+ * a term names the term in its instructions.
+ */
+function scripted(verdict: (subject: string) => Verdict, seen: { state: string; asked: string[] }[] = []): NoulJudge {
 	return {
-		async judge(request) {
-			const state = JSON.stringify(request.state);
-			seen.push(state);
-			const question = questions.find(candidate => state.includes(candidate.question))?.question ?? "";
-			return { answers: { need: { score: need(question) * TOP } } };
+		async judge(request): Promise<{ answers: Record<string, { noul: number }> }> {
+			const text = JSON.stringify(request.state);
+			const asked = Object.keys(request.questions);
+			seen.push({ state: text, asked });
+			const state: unknown = JSON.parse(text);
+			if (typeof state === "object" && state !== null && "sentence" in state && typeof state.sentence === "string") {
+				const said = verdict(state.sentence);
+				return { answers: { actor: { noul: said.actor ?? 1 }, unshown: { noul: said.unshown ?? 0 }, jargon: { noul: said.jargon ?? 0 } } };
+			}
+			const term = /`([^`]+)`/.exec(request.questions.known?.instructions ?? "")?.[1] ?? "";
+			const said = verdict(term);
+			return { answers: { known: { noul: said.known ?? 1 }, said: { noul: said.said ?? 1 } } };
 		},
 	};
 }
 
 /** A judge that never answers and gives up only when its signal aborts. */
-const hanging: ScoreJudge = {
+const hanging: NoulJudge = {
 	judge: (_request, { signal }) => {
 		const { promise, reject } = Promise.withResolvers<never>();
 		signal.addEventListener("abort", () => reject(signal.reason));
@@ -54,45 +71,65 @@ const noWarn = (message: string) => {
 };
 
 describe("readability gate", () => {
-	it("rejects only the questions whose need reaches the threshold", async () => {
-		const gate = await readabilityGate(
-			scripted(question => (question.startsWith("met") ? NEED_THRESHOLD + 0.01 : NEED_THRESHOLD - 0.01)),
-			questions,
-			"sheet",
-			undefined,
-			noWarn,
-		);
+	it("passes a call whose every sentence and term reads", async () => {
+		expect(await readabilityGate(scripted(() => ({})), questions, "sheet", undefined, noWarn)).toEqual({ kind: "pass" });
+	});
+
+	it("rejects the question holding one sentence that names no actor, and quotes that sentence", async () => {
+		const gate = await readabilityGate(scripted(subject => (subject.includes("每次失败都立即重发") ? { actor: 0.1 } : {})), questions, "sheet", undefined, noWarn);
 		expect(gate.kind).toBe("reject");
 		if (gate.kind !== "reject") return;
 		expect(gate.problems).toHaveLength(1);
-		expect(gate.problems[0]).toStartWith('question "met" is hard to understand');
-		expect(gate.problems[0]).toContain("never explains");
+		expect(gate.problems[0]).toStartWith('question "retry" is hard to understand');
+		expect(gate.problems[0]).toContain("每次失败都立即重发");
+		expect(gate.problems[0]).toContain("it does not say who or what acts");
+		expect(gate.problems[0]).not.toContain("met 语义");
 	});
 
-	it("passes a call whose every question stays below the threshold", async () => {
-		expect(await readabilityGate(scripted(() => NEED_THRESHOLD - 0.01), questions, "sheet", undefined, noWarn)).toEqual({ kind: "pass" });
+	it("names every reason one sentence fails", async () => {
+		const gate = await readabilityGate(scripted(subject => (subject.includes("met 语义") ? { unshown: 0.9, jargon: 0.8 } : {})), questions, "sheet", undefined, noWarn);
+		expect(gate.kind === "reject" && gate.problems[0]).toContain("mentions something the dialog never shows");
+		expect(gate.kind === "reject" && gate.problems[0]).toContain("uses a word, abbreviation, name or number the dialog never explains");
+	});
+
+	it("rejects a code that is neither common knowledge nor explained, and passes one that is either", async () => {
+		const coded = parametersSchema.parse({
+			questions: [
+				{
+					id: "coded",
+					question: "按 K6 退役还是保留 SSH 入口？",
+					brief: { where: "K6 在 #592 里定义", what: "选退役或保留", how: "选一个" },
+					options: [
+						{ label: "退役", tradeoff: "释放资源" },
+						{ label: "保留", tradeoff: "不改" },
+					],
+				},
+			],
+		}).questions;
+		const gate = await readabilityGate(scripted(subject => (subject === "K6" ? { known: 0.1, said: 0.2 } : subject === "#592" ? { known: 0.1, said: 0.9 } : {})), coded, "sheet", undefined, noWarn);
+		expect(gate.kind).toBe("reject");
+		if (gate.kind !== "reject") return;
+		expect(gate.problems[0]).toContain("`K6`: neither common knowledge nor explained");
+		expect(gate.problems[0]).not.toContain("`#592`");
+		expect(gate.problems[0]).not.toContain("`SSH`");
 	});
 
 	it("judges each question alone: the full sheet, or only the native fields when the native dialog shows the ask", async () => {
-		const seen: string[] = [];
-		await readabilityGate(scripted(() => 0, seen), questions, "sheet", undefined, noWarn);
-		const native = await readabilityGate(scripted(() => 1, seen), questions, "native", undefined, noWarn);
-		expect(seen).toHaveLength(4);
-		const [retrySheet, metSheet, retryNative] = seen;
-		expect(retrySheet).toContain("每次失败都立即重发");
-		expect(retrySheet).toContain("不迁移，但重复写继续");
-		expect(retrySheet).not.toContain("met 后要电平还是边沿");
-		expect(metSheet).not.toContain("重试应该怎么做");
-		expect(retryNative).toContain("重试应该怎么做");
-		expect(retryNative).not.toContain("每次失败都立即重发");
-		expect(retryNative).not.toContain("不迁移，但重复写继续");
-		expect(retryNative).not.toContain('"retry"');
-		expect(native.kind === "reject" && native.problems.at(-1)).toContain("the brief and tradeoffs are not shown");
+		const sheet: { state: string; asked: string[] }[] = [];
+		await readabilityGate(scripted(() => ({}), sheet), questions, "sheet", undefined, noWarn);
+		expect(sheet.some(call => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
+		expect(sheet.some(call => call.state.includes("met 后要电平还是边沿") && call.state.includes("每次失败都立即重发"))).toBe(false);
+		const native: { state: string; asked: string[] }[] = [];
+		const gate = await readabilityGate(scripted(() => ({ actor: 0 }), native), questions, "native", undefined, noWarn);
+		const retry = native.filter(call => call.state.includes("重试应该怎么做"));
+		expect(retry.length).toBeGreaterThan(0);
+		expect(retry.every(call => !call.state.includes("每次失败都立即重发") && !call.state.includes("不迁移，但重复写继续"))).toBe(true);
+		expect(gate.kind === "reject" && gate.problems.at(-1)).toContain("the brief and tradeoffs are not shown");
 	});
 
 	it("asks without the check, with a warning, when the judge fails", async () => {
 		const warnings: string[] = [];
-		const failing: ScoreJudge = { judge: async () => Promise.reject(new Error("every judge candidate failed")) };
+		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("every judge candidate failed")) };
 		expect(await readabilityGate(failing, questions, "sheet", undefined, message => warnings.push(message))).toEqual({ kind: "pass" });
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("every judge candidate failed");
@@ -109,5 +146,15 @@ describe("readability gate", () => {
 		const gate = readabilityGate(hanging, questions, "sheet", caller.signal, noWarn, 60_000);
 		caller.abort();
 		expect(await gate).toEqual({ kind: "cancelled" });
+	});
+});
+
+describe("what the gate hands the judge", () => {
+	it("finds codes, hashes and abbreviations but not links or plain words", () => {
+		expect(candidateTerms(["按 #243 和 §3 做，见 https://example.com/pull/265，提交 d685d0d，F106 另开，SSH 入口，VM110 上跑"])).toEqual(["#243", "§3", "d685d0d", "F106", "SSH", "VM110"]);
+	});
+
+	it("splits prose at sentence ends and drops fragments too short to be one", () => {
+		expect(sentencesOf(["选 B: 删掉序列化器。然后再复审一遍；合并", "好", "见 https://example.com/x 里的说明"])).toEqual(["选 B: 删掉序列化器", "然后再复审一遍", "见 <link> 里的说明"]);
 	});
 });

@@ -1,5 +1,5 @@
-// Runs the readability gate's judge over recorded asks and reports, per threshold, how its verdicts
-// compare with labels: `bun eval/readability.ts [corpus.json] [--session-model provider/id] [--out scores.json]`.
+// Runs the readability gate's judge over recorded asks and reports which questions it rejects and why:
+// `bun eval/readability.ts [corpus.json] [--session-model provider/id] [--out findings.json]`.
 // The corpus defaults to eval/readability-labelled.json. The judge is the `judge` role chain of this
 // directory's omp settings, as a session resolves it; --session-model is the session model the host
 // falls back to when that chain holds no native judgment model.
@@ -9,7 +9,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "@oh-my-pi/pi-coding-agent/sdk";
-import { judgeReadability, NEED_THRESHOLD, unreadableQuestions } from "../src/readability.ts";
+import { type Finding, judgeReadability, unreadableQuestions } from "../src/readability.ts";
 import { questionSchema } from "../src/schema.ts";
 
 const corpusSchema = z.object({
@@ -28,46 +28,35 @@ type RecordedCall = z.infer<typeof corpusSchema>["calls"][number];
 
 interface Scored {
 	readonly call: RecordedCall;
-	readonly needs: readonly number[];
+	readonly findings: readonly Finding[];
 }
 
-const CONCURRENCY = 8;
-const THRESHOLDS = [...new Set([0.5, 0.6, NEED_THRESHOLD, 0.7, 0.8])].sort((a, b) => a - b);
+const CONCURRENCY = 4;
 
-function report(scored: readonly Scored[], threshold: number): string {
-	let tp = 0;
-	let fp = 0;
-	let fn = 0;
-	let tn = 0;
-	let callsLabelled = 0;
-	let callsFalseRejected = 0;
+/** Rejected questions against the labels: the gate must miss no `hard` question; a rejected `readable` one costs a rewrite. */
+function report(scored: readonly Scored[]): string {
 	let flagged = 0;
 	let questions = 0;
-	for (const { call, needs } of scored) {
-		const failing = new Set(unreadableQuestions(call.questions, needs, threshold));
+	let hard = 0;
+	let hardMissed = 0;
+	let readable = 0;
+	let readableRejected = 0;
+	for (const { call, findings } of scored) {
+		const failing = new Set(unreadableQuestions(call.questions, findings).map(item => item.id));
 		questions += call.questions.length;
 		flagged += failing.size;
-		const labels = call.labels;
-		if (labels === undefined) continue;
-		let anyLabel = false;
-		let falseReject = false;
 		for (const question of call.questions) {
-			const label = labels[question.id];
-			if (label === undefined) continue;
-			anyLabel = true;
-			const hit = failing.has(question.id);
-			if (label === "hard" && hit) tp++;
-			else if (label === "hard") fn++;
-			else if (hit) {
-				fp++;
-				falseReject = true;
-			} else tn++;
+			const label = call.labels?.[question.id];
+			if (label === "hard") {
+				hard++;
+				if (!failing.has(question.id)) hardMissed++;
+			} else if (label === "readable") {
+				readable++;
+				if (failing.has(question.id)) readableRejected++;
+			}
 		}
-		if (anyLabel) callsLabelled++;
-		if (falseReject) callsFalseRejected++;
 	}
-	const ratio = (a: number, b: number) => (b === 0 ? "-" : (a / b).toFixed(2));
-	return `| ${threshold} | ${flagged}/${questions} | ${ratio(tp, tp + fp)} | ${ratio(tp, tp + fn)} | ${ratio(fp, fp + tn)} | ${callsFalseRejected}/${callsLabelled} |`;
+	return `| ${flagged}/${questions} | ${hardMissed}/${hard} | ${readableRejected}/${readable} |`;
 }
 
 async function main(): Promise<void> {
@@ -94,7 +83,7 @@ async function main(): Promise<void> {
 				const call = calls[index];
 				if (call === undefined) break;
 				try {
-					scored.push({ call, needs: await judgeReadability(judge, call.questions, call.surface, AbortSignal.timeout(120_000)) });
+					scored.push({ call, findings: await judgeReadability(judge, call.questions, call.surface, AbortSignal.timeout(120_000)) });
 				} catch (error) {
 					failed.push(`${call.id}: ${error instanceof Error ? error.message : String(error)}`);
 				}
@@ -106,16 +95,16 @@ async function main(): Promise<void> {
 	}
 	const out = values.out;
 	if (out !== undefined) {
-		const rows = scored.flatMap(({ call, needs }) =>
-			call.questions.map((question, index) => ({ call: call.id, question: question.id, label: call.labels?.[question.id] ?? null, need: needs[index] })),
+		const rows = scored.flatMap(({ call, findings }) =>
+			unreadableQuestions(call.questions, findings).map(item => ({ call: call.id, label: call.labels?.[item.id] ?? null, ...item })),
 		);
 		await Bun.write(out, JSON.stringify(rows, null, 1));
 	}
 	console.log(`judged ${scored.length}/${calls.length} calls`);
 	for (const failure of failed) console.log(`failed ${failure}`);
-	console.log("\n| threshold | flagged questions | precision (hard) | recall (hard) | false-reject rate | calls falsely rejected |");
-	console.log("|---|---|---|---|---|---|");
-	for (const threshold of THRESHOLDS) console.log(report(scored, threshold));
+	console.log("\n| rejected questions | `hard` questions not rejected | `readable` questions rejected |");
+	console.log("|---|---|---|");
+	console.log(report(scored));
 }
 
 await main();
