@@ -171,9 +171,9 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 
 ## 可读性检查
 
-2026-11-03 用 omp 18.16.0 执行；`judge` 角色是原生判定模型 `futureppo-jev/decision-model-preview`，除非项目 `.omp/config.yml` 设了 `modelRoles.judge: anthropic/claude-opus-5-5`。
+2026-11-03 用 omp 18.16.0 执行；`judge` 角色是原生判定模型 `futureppo-jev/decision-model-preview`。下面的数字都来自不带 `--session-model` 的 `bun run eval:readability`。
 
-**语料。** 2026-10-20 以来修改过的本地 omp 会话（515 个）里，`claude-opus-5-5` 发出过 168 次不重复的 `ask` 调用，共 320 题；其中 70 次调用（136 题）符合现行 schema。从中挑了 15 题（分属 14 次调用，覆盖原生 judge 的分数区间），连同所在的整次调用存进 `eval/readability-labelled.json`：5 题难懂（`conflict_features`、`moat-app1-boundary`、`formal`、`trigger`、`semantics`），10 题可读。标签由实现这项检查的 agent 标注；两次把这些条目交给用户标注的 `ask` 都超时没有回答。
+**语料。** 2026-10-20 以来修改过的本地 omp 会话（515 个）里，`claude-opus-5-5` 发出过 168 次不重复的 `ask` 调用，共 320 题；其中 70 次调用（136 题）符合现行 schema。从中挑了 15 题（分属 14 次调用，覆盖原生 judge 的分数区间），连同所在的整次调用存进 `eval/readability-labelled.json`：5 题难懂（`conflict_features`、`moat-app1-boundary`、`formal`、`trigger`、`semantics`），10 题可读。标签由实现这项检查的 agent 标注；两次把这些条目交给用户标注的 `ask` 都超时没有回答。第 16 题 `narrow_scope` 来自用户反馈读不懂的 PR #265 那条 ask（一连串工单编号、缩写和没有主语的句子），按难懂加入 `eval/readability-labelled.json`。
 
 **整批 state。** 第一版把整次调用放进一个 state 判断。`conflict_features` 的 brief 引用了决定编号 N19、N24、D1、N14、L2，却没说它们是什么；它在七题的调用里 `undefined_terms` 得 0.91，单独判断只得 0.05。原生 judge 整批跑时“标记”了 320 题中的 55 题，逐题跑复现不出来。现在每题单独一次请求。
 
@@ -181,13 +181,14 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 
 **现行请求**按 TypeSafe 给 System One 判定模型的用法来写：state 是 `reader` 和 `dialog` 两个命名字段；一句点名这两个字段的简短指令；一个四档、每档描述一种情形的 Score。同样条件下，按这种写法试的六种形式里它排序最好（AUC 0.85，两次运行结果相同）；是非题“Can the `reader` understand, from `dialog` alone, what decision they are asked to make?”为 0.75，分档换两种措辞分别为 0.56 和 0.71。用 `bun run eval:readability` 测得：
 
-| `judge` 角色 | 阈值 | 43 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
+| `judge` 角色 | 阈值 | 44 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
 |---|---|---|---|---|---|---|
-| `futureppo-jev/decision-model-preview`（原生） | 0.685 | 8 | 1.00 | 0.80 | 0.00 | 14 次中 0 次 |
-| `futureppo-jev/decision-model-preview`（原生） | 0.7 | 6 | 1.00 | 0.60 | 0.00 | 14 次中 0 次 |
-| `anthropic/claude-opus-5-5` | 0.685 | 6 | 1.00 | 0.40 | 0.00 | 14 次中 0 次 |
+| `futureppo-jev/decision-model-preview`（原生） | 0.685 | 8 | 1.00 | 0.83 | 0.00 | 15 次中 0 次 |
+| `futureppo-jev/decision-model-preview`（原生） | 0.7 | 7 | 1.00 | 0.67 | 0.00 | 15 次中 0 次 |
 
-原生分数：难懂的 `conflict_features` 0.78、`formal` 0.77、`moat-app1-boundary` 0.70、`trigger` 0.70、`semantics` 0.43；可读的 0.14–0.67，改写版 `conflict_features` 0.67。阈值 0.685 落在这个只有 0.03 宽的间隔里。在更大的 136 题语料上，原生 judge 在 0.685 处拦下 17 题。
+**读者描述。** 最初的读者只说工程师没看过 agent 之前的工作、文件和笔记。PR #265 那条 ask 引用了多个 issue、决议、评论、提交和缺陷编号却没说它们是什么，得分 0.647，被放行。现在读者写明工程师从没见过这个项目：既没见过工单、设计文档、代码，也没见过 agent 的会话；拒绝文字也点明缩写、工单编号和没有主语的句子。同一个 eval 随后给它 0.707。
+
+原生分数：难懂的 `conflict_features` 0.88、`moat-app1-boundary` 0.75、`formal` 0.72、`narrow_scope` 0.71、`trigger` 0.69、`semantics` 0.38；可读的 0.13–0.67，最高是 `judge_scope` 0.67。阈值 0.685 落在这个只有 0.01 宽的间隔里。`semantics` 仍然漏掉。
 
 | 检查 | 命令 | 观察结果 |
 |---|---|---|

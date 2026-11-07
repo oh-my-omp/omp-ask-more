@@ -97,7 +97,7 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 - **用哪个判断模型。** 直接用 OMP 自己的 `resolveJudge`，并传入会话模型，与 OMP 自己做判定时走同一条链：插件不另做模型选择，所以由 `judge` 角色判断；只有 OMP 自己退到会话模型时（链里没有原生判定模型），会话模型才作答。会话的 settings、registry、账本和 cost gate 取自 `AgentRegistry.global()` 里与上下文 `sessionManager` 对应的 `AgentSession`，因为扩展上下文本身不带 settings。
 - **失败。** 判断模型出错或没有结果时放行并警告，因为检查不能挡在用户和决定之间；调用方自己中止时仍取消 ask。
 
-`eval/readability.ts` 用同一条链（`--session-model provider/id` 代替会话模型）跑 `eval/readability-labelled.json`——14 次真实 claude-opus-5-5 调用里的 15 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
+`eval/readability.ts` 用同一条链（`--session-model provider/id` 代替会话模型）跑 `eval/readability-labelled.json`——15 次真实调用里的 16 道已标注题——按若干阈值输出逐题和逐次调用的标记数、精确率、召回率与误拦。
 
 ## ANSI 页面
 

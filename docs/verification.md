@@ -171,9 +171,9 @@ Each is a copy of this plugin with one change (`variants/*.diff`), launched by `
 
 ## Readability check
 
-Run on 2026-11-03 with omp 18.16.0; the `judge` role was `futureppo-jev/decision-model-preview`, a native judgment model, except where a project `.omp/config.yml` sets `modelRoles.judge: anthropic/claude-opus-5-5`.
+Run on 2026-11-03 with omp 18.16.0; the `judge` role was `futureppo-jev/decision-model-preview`, a native judgment model. Every number below comes from `bun run eval:readability` with no `--session-model`.
 
-**Corpus.** The local omp sessions modified since 2026-10-20 (515) held 168 distinct `ask` calls by `claude-opus-5-5` with 320 questions; 70 calls (136 questions) pass the current schema. From those, 15 questions in 14 calls spread across the native judge's score range were labelled and stored with their whole calls in `eval/readability-labelled.json`: 5 hard to read (`conflict_features`, `moat-app1-boundary`, `formal`, `trigger`, `semantics`), 10 readable. The agent that built the check assigned the labels; two `ask` calls putting the items to the user timed out unanswered.
+**Corpus.** The local omp sessions modified since 2026-10-20 (515) held 168 distinct `ask` calls by `claude-opus-5-5` with 320 questions; 70 calls (136 questions) pass the current schema. From those, 15 questions in 14 calls spread across the native judge's score range were labelled and stored with their whole calls in `eval/readability-labelled.json`: 5 hard to read (`conflict_features`, `moat-app1-boundary`, `formal`, `trigger`, `semantics`), 10 readable. The agent that built the check assigned those labels; two `ask` calls putting the items to the user timed out unanswered. A sixteenth question, `narrow_scope` from the PR #265 ask the user reported as unreadable (stacked ticket numbers, abbreviations and sentences without a subject), was added as hard in `eval/readability-labelled.json`.
 
 **Batched state.** The first version judged a whole call in one state. `conflict_features`, whose brief cites the decision codes N19, N24, D1, N14 and L2 without saying what they are, scored `undefined_terms` 0.91 inside its seven-question call and 0.05 alone; on the native judge the batched run "flagged" 55 of 320 questions, which the per-question run does not reproduce. Each question is now its own request.
 
@@ -181,13 +181,14 @@ Run on 2026-11-03 with omp 18.16.0; the `judge` role was `futureppo-jev/decision
 
 **The shipped request** follows TypeSafe's guidance for System One judges: a state of two named fields, `reader` and `dialog`; one short instruction naming them; a Score with four situation levels. Under the same conditions, of six shapes tried this way it ranked best (AUC 0.85, the same in two runs); a yes/no question "Can the `reader` understand, from `dialog` alone, what decision they are asked to make?" reached 0.75, and two other wordings of the levels 0.56 and 0.71. With `bun run eval:readability`:
 
-| `judge` role | threshold | flagged of 43 | precision | recall | false-reject rate | calls falsely rejected |
+| `judge` role | threshold | flagged of 44 | precision | recall | false-reject rate | calls falsely rejected |
 |---|---|---|---|---|---|---|
-| `futureppo-jev/decision-model-preview` (native) | 0.685 | 8 | 1.00 | 0.80 | 0.00 | 0 of 14 |
-| `futureppo-jev/decision-model-preview` (native) | 0.7 | 6 | 1.00 | 0.60 | 0.00 | 0 of 14 |
-| `anthropic/claude-opus-5-5` | 0.685 | 6 | 1.00 | 0.40 | 0.00 | 0 of 14 |
+| `futureppo-jev/decision-model-preview` (native) | 0.685 | 8 | 1.00 | 0.83 | 0.00 | 0 of 15 |
+| `futureppo-jev/decision-model-preview` (native) | 0.7 | 7 | 1.00 | 0.67 | 0.00 | 0 of 15 |
 
-The native scores: hard `conflict_features` 0.78, `formal` 0.77, `moat-app1-boundary` 0.70, `trigger` 0.70, `semantics` 0.43; readable 0.14–0.67, the rewritten `conflict_features` 0.67. The threshold 0.685 sits in that gap, which is 0.03 wide. On the 136 questions of the wider corpus the native judge rejects 17 at 0.685.
+**The reader.** The first reader said only that the engineer had not seen the agent's earlier work, its files or its notes. The PR #265 ask, which cites issues, a decision, a comment, a commit and finding codes without saying what any is, scored 0.647 and passed. The reader now says the engineer has never seen the project: not its issue tracker, design documents, code or the agent's session, and the rejection text names abbreviations, ticket numbers and sentences without a subject. The same eval then scored it 0.707.
+
+The native scores: hard `conflict_features` 0.88, `moat-app1-boundary` 0.75, `formal` 0.72, `narrow_scope` 0.71, `trigger` 0.69, `semantics` 0.38; readable 0.13–0.67, the highest being `judge_scope` 0.67. The threshold 0.685 sits in that gap, which is 0.01 wide. `semantics` is still missed.
 
 | Check | Command | Observed |
 |---|---|---|

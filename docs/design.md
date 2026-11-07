@@ -97,7 +97,7 @@ After validation and before either dialog, `index.ts#screen` reads `readability.
 - **Which judge.** OMP's own `resolveJudge` with the session model, the same chain OMP's judgments use: the plugin adds no model choice of its own, so the `judge` role decides and the session model answers only when OMP itself falls back to it (no native judgment model in the chain). The session's settings, registry, ledger and cost gate come from the `AgentSession` registered in `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings.
 - **Failure.** A judge that fails or does not answer lets the ask through with a warning, since the check must never stand between the user and a decision; the caller's own abort still cancels the ask.
 
-`eval/readability.ts` runs the same chain (`--session-model provider/id` standing in for the session model) over `eval/readability-labelled.json` — 15 labelled questions in 14 recorded claude-opus-5-5 calls — and prints flagged counts, precision, recall and false rejections per question and per call for several thresholds.
+`eval/readability.ts` runs the same chain (`--session-model provider/id` standing in for the session model) over `eval/readability-labelled.json` — 16 labelled questions in 15 recorded calls — and prints flagged counts, precision, recall and false rejections per question and per call for several thresholds.
 
 ## ANSI page
 

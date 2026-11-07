@@ -17,7 +17,7 @@ export interface ScoreJudge {
 /** Where the questions will be shown, which decides what text the reader actually gets. */
 export type Surface = "sheet" | "native";
 
-const READER = "A software engineer who sees only this dialog. They have not seen the AI agent's earlier work, its files or its notes.";
+const READER = "A software engineer who sees only this dialog. They have never seen this project: not its issue tracker, its design documents, its code, or the AI agent's session.";
 
 /** Lowest to highest; the answer's `score` is the probability-weighted level index. */
 const LEVELS: ScoreQuestion["criteria"] = [
@@ -35,7 +35,7 @@ const NEED: ScoreQuestion = {
 
 /**
  * Score, as a fraction of the top level, at which a question is rejected: between the highest
- * readable (0.67) and the hard questions above it (0.70–0.78) on the labelled asks with the native
+ * readable (0.67) and the hard questions above it (0.69–0.88) on the labelled asks with the native
  * judge; `bun run eval:readability`, docs/verification.md#readability-check.
  */
 export const NEED_THRESHOLD = 0.685;
@@ -91,7 +91,7 @@ export function unreadableQuestions(questions: readonly AskQuestion[], needs: re
 /** The rejection the model reads: every failing question, and what this surface shows. Fixed text, never judge output. */
 export function readabilityProblems(ids: readonly string[], surface: Surface): string[] {
 	const problems = ids.map(
-		id => `question "${id}" is hard to understand for a reader who sees only this dialog and has not read your session: it relies on names, codes, references or earlier decisions it never explains; say in plain words what each one is, or describe it instead of naming it`,
+		id => `question "${id}" is hard to understand for a reader who sees only this dialog and has never seen your session or this project: it relies on abbreviations, ticket or issue numbers, names, references or earlier decisions it never explains, or has sentences that do not say who does what; spell out each abbreviation, say in plain words what each name, number or decision is, and write full sentences with a subject`,
 	);
 	switch (surface) {
 		case "sheet":

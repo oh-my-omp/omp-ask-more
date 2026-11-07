@@ -1378,6 +1378,43 @@
 			"labels": {
 				"semantics": "hard"
 			}
+		},
+		{
+			"id": "pr265-narrow-scope",
+			"surface": "sheet",
+			"questions": [
+				{
+					"id": "narrow_scope",
+					"header": "PR #265 范围",
+					"question": "PR #265 第 6 轮仍 FAIL (leaf-dense 参数比 main 慢 5-10 倍)。是否缩小范围: 删掉手写序列化器，参数/提交回到原生 JSON.stringify+截断，F106/F107 另开 issue?",
+					"options": [
+						{
+							"label": "B: 缩小范围",
+							"tradeoff": "去掉所有返工根源，逐字节一致天然成立；代价是 #243 的 F106/F107 不在本 PR 完成",
+							"description": "保留尾部遍历 (40×1 MB 时 40,989→34 KiB) 、§ Context 按 piece 扫描、提交只截断一次; F106/F107 新开 issue 并先由你裁决与 §3 的冲突",
+							"holds_when": "你认可 F106/F107 与 #234 §3 有冲突，需单独裁决"
+						},
+						{
+							"label": "A: 继续修序列化器",
+							"tradeoff": "要求 leaf-dense 不慢于 main，需第 7 轮修复",
+							"description": "要求 leaf-dense 不慢于 main: 对象/数组整体落在窗口内时退回原生 stringify，只对超限值走流式"
+						},
+						{
+							"label": "C: 放弃 #243",
+							"tradeoff": "issue 保持 open，移出本轮简单 issue 范围",
+							"description": "issue 保持 open，移出本轮简单 issue 范围"
+						}
+					],
+					"brief": {
+						"where": "PR https://github.com/oh-my-omp/omp-config/pull/265 HEAD d685d0d; 最新审查 FAIL https://github.com/oh-my-omp/omp-config/pull/265#issuecomment-6712923899; issue https://github.com/oh-my-omp/omp-config/issues/243; 父决议 #234 decision 6705848919。",
+						"what": "#243 要求 F106/F107「先截断再序列化」，#234 §3 要求行为不变 (judge prompt 逐字节一致)。为同时满足，owner 手写了流式 JSON 序列化器; 5 轮 FAIL 里的缺陷几乎都出在它和原生 JSON.stringify 的差异或性能上。缩小 #243 的范围需要你明确同意。",
+						"how": "选 B: 派 owner 删掉序列化器、保留尾部遍历等改动，新开 F106/F107 issue，然后复审、证据、验收、合并。选 A: 派第 7 轮修复，要求 leaf-dense 不慢于 main。选 C: 关闭 PR #265，issue 保持 open。"
+					}
+				}
+			],
+			"labels": {
+				"narrow_scope": "hard"
+			}
 		}
 	]
 }
