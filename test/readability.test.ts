@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { candidateTerms, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
+import { candidateTerms, gateOnce, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
 import { type AskQuestion, parametersSchema } from "../src/schema.ts";
 
 const questions: readonly AskQuestion[] = parametersSchema.parse({
@@ -156,5 +156,27 @@ describe("what the gate hands the judge", () => {
 
 	it("splits prose at sentence ends and drops fragments too short to be one", () => {
 		expect(sentencesOf(["选 B: 删掉序列化器。然后再复审一遍；合并", "好", "见 https://example.com/x 里的说明"])).toEqual(["选 B: 删掉序列化器", "然后再复审一遍", "见 <link> 里的说明"]);
+	});
+});
+
+describe("the ask after a rejection", () => {
+	const unreadable = scripted(() => ({ actor: 0 }));
+	const run = (rejected: WeakSet<object>, key: object, judge: NoulJudge) => gateOnce(rejected, key, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
+
+	it("goes through without asking the judge, and the one after is judged again", async () => {
+		const rejected = new WeakSet<object>();
+		const key = {};
+		expect((await run(rejected, key, unreadable)).kind).toBe("reject");
+		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
+		expect(await run(rejected, key, failing)).toEqual({ kind: "pass" });
+		expect((await run(rejected, key, unreadable)).kind).toBe("reject");
+	});
+
+	it("is kept per session", async () => {
+		const rejected = new WeakSet<object>();
+		const first = {};
+		await run(rejected, first, unreadable);
+		expect((await run(rejected, {}, unreadable)).kind).toBe("reject");
+		expect(await run(rejected, first, unreadable)).toEqual({ kind: "pass" });
 	});
 });

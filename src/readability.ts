@@ -294,3 +294,15 @@ export async function readabilityGate(
 		return { kind: "pass" };
 	}
 }
+
+/**
+ * The call after a rejection goes through unjudged: the model has been told what to fix, and a
+ * judge that rejects again must not keep the ask from the reader. `rejected` holds the keys (one
+ * per session) whose last ask was rejected; the next call with that key clears it and passes.
+ */
+export async function gateOnce(rejected: WeakSet<object>, key: object, judge: () => Promise<Gate>): Promise<Gate> {
+	if (rejected.delete(key)) return { kind: "pass" };
+	const gate = await judge();
+	if (gate.kind === "reject") rejected.add(key);
+	return gate;
+}

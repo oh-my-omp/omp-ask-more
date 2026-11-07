@@ -18,7 +18,7 @@ import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
-import { type Gate, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
+import { type Gate, gateOnce, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
@@ -65,19 +65,24 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	return chain.primaryModel() === undefined ? undefined : chain;
 }
 
-/** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. */
-async function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal | undefined): Promise<Gate> {
-	const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
-	let enabled: boolean;
-	try {
-		enabled = await readReadabilityJudge(ctx);
-	} catch (error) {
-		warn(error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error));
-		return { kind: "pass" };
-	}
-	if (!enabled) return { kind: "pass" };
-	const judge = sessionJudge(ctx);
-	return judge === undefined ? { kind: "pass" } : readabilityGate(judge, questions, surface, signal, warn);
+/** Sessions whose last ask the readability gate rejected: their next ask is not judged. */
+const rejected = new WeakSet<object>();
+
+/** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. The ask after a rejection goes through unjudged. */
+function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal | undefined): Promise<Gate> {
+	return gateOnce(rejected, ctx.sessionManager, async () => {
+		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
+		let enabled: boolean;
+		try {
+			enabled = await readReadabilityJudge(ctx);
+		} catch (error) {
+			warn(error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error));
+			return { kind: "pass" };
+		}
+		if (!enabled) return { kind: "pass" };
+		const judge = sessionJudge(ctx);
+		return judge === undefined ? { kind: "pass" } : readabilityGate(judge, questions, surface, signal, warn);
+	});
 }
 
 /** The result that ends the call at the gate; undefined when the ask goes on. */
