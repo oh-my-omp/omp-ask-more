@@ -38,4 +38,30 @@ describe("ANSI evidence lines", () => {
 		expect(long.startsWith(kept)).toBe(true);
 		expect(kept.length + left).toBe(long.length);
 	});
+
+	it("draws the question in the language current at each render", () => {
+		const saved = process.env.OMOMP_LANG;
+		try {
+			const question = questionSchema.parse({
+				id: "q",
+				question: "Pick one",
+				brief: { where: "w", what: "x", how: "h", risks: ["r"] },
+				options: [
+					{ label: "A", tradeoff: "a" },
+					{ label: "B", tradeoff: "b" },
+				],
+			});
+			const component = new AskMoreComponent({ tui: HOST, questions: [question], evidence: [[]], demos: [{ question: undefined, options: [] }], finish() {}, timeout: { kind: "off" }, notify() {} });
+			process.env.OMOMP_LANG = "en";
+			expect(component.render(100).map(plain).join("\n")).toContain("Risks");
+			process.env.OMOMP_LANG = "zh";
+			component.handleInput("\x1b[B");
+			const zh = component.render(100).map(plain).join("\n");
+			expect(zh).toContain("风险");
+			expect(zh).not.toContain("Risks");
+		} finally {
+			if (saved === undefined) delete process.env.OMOMP_LANG;
+			else process.env.OMOMP_LANG = saved;
+		}
+	});
 });

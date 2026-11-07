@@ -16,6 +16,7 @@ import {
 	getMarkdownTheme,
 	matchesKey,
 	theme,
+	type Theme,
 	truncateToWidth,
 	visibleWidth,
 	Ellipsis,
@@ -25,17 +26,18 @@ import { leafKey } from "@oh-my-pi/pi-tui/native/node";
 import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import type { ResolvedEvidence } from "./brief.ts";
 import { frameCount, frameInterval, halfBlockRows, type LoadedDemo, type QuestionDemos } from "./demo.ts";
-import { tr } from "./i18n.ts";
+import { type Lang, language, tr } from "./i18n.ts";
 import {
 	answerLabel,
 	type DemoMove,
-	describeSheet,
 	OTHER_ITEM,
 	optionIndex,
 	parseAct,
 	questionListKey,
 	REVIEW_TAB,
 	type SheetAct,
+	type SheetLayout,
+	sheetLayout,
 	sheetTitle,
 	TABS_KEY,
 	tabLabel,
@@ -99,6 +101,25 @@ const DOCUMENT_SCROLL = 10;
 const WHEEL_ROWS = 3;
 const FAST_ROWS = 5;
 
+/** A section label, as both surfaces draw it. */
+function accentHeading(label: string): string {
+	return theme.bold(theme.fg("accent", label));
+}
+
+/**
+ * One page's static text: the question and brief (the prefix), and the evidence, diagram and risks
+ * (the suffix). The options, the tradeoff and the demo slots sit between them and depend on the cursor.
+ */
+interface StaticText {
+	readonly index: number;
+	readonly width: number;
+	readonly expanded: boolean;
+	readonly theme: Theme;
+	readonly lang: Lang;
+	readonly prefix: readonly string[];
+	readonly suffix: readonly string[];
+}
+
 /**
  * An evidence line cut to `width` columns, ending in how many characters were left out; the ScrollView
  * would otherwise cut it at the box edge without a trace.
@@ -134,7 +155,8 @@ export class AskMoreComponent implements Component {
 	#body:
 		| {
 				key: string;
-				lines: readonly string[];
+				/** The page rows; a frame step rewrites the demo slots in place, so this one array is reused. */
+				lines: string[];
 				focus: { start: number; end: number } | undefined;
 				/** Rows reserved for each demo the page plays; filled per frame. */
 				slots: readonly { slot: DemoSlot; start: number; height: number }[];
@@ -142,7 +164,16 @@ export class AskMoreComponent implements Component {
 		| undefined;
 	/** The `#frames` value the ANSI viewport last drew. */
 	#drawnFrames = -1;
-	#native: { version: number; frames: number; scroll: NativeScrollRequest | undefined; node: NativeNode } | undefined;
+	/**
+	 * The page's static text as last rendered: the question and brief, and the evidence, diagram and
+	 * risks. One value for the current page, width, evidence fold, theme and UI language — the events that
+	 * can change it — so a key press that only moves the cursor re-renders none of it. Cleared on dispose.
+	 */
+	#static: StaticText | undefined;
+	/** The page built for the current version and scroll; a frame step re-draws only its demos. */
+	#layout: { version: number; scroll: NativeScrollRequest | undefined; sheet: SheetLayout } | undefined;
+	/** The node the layout drew for `#frames`, while that is still the current frame. */
+	#native: { frames: number; node: NativeNode } | undefined;
 	/** Bumped when a demo frame changes; a frame alone redraws only the demo. */
 	#frames = 0;
 	#timer: RenderTimer | undefined;
@@ -194,6 +225,7 @@ export class AskMoreComponent implements Component {
 		this.#timer?.cancel();
 		this.#timer = undefined;
 		this.#stopCountdown();
+		this.#static = undefined;
 		for (const state of this.#states) state.view.dispose?.();
 		this.#review.view.dispose?.();
 	}
@@ -217,7 +249,8 @@ export class AskMoreComponent implements Component {
 			this.#drawnFrames = -1;
 		}
 		if (this.#drawnFrames !== this.#frames) {
-			view.setLines(this.#withDemoFrames(this.#body.lines, this.#body.slots, bodyWidth));
+			this.#fillDemoFrames(this.#body.lines, this.#body.slots, bodyWidth);
+			view.setLines(this.#body.lines);
 			this.#drawnFrames = this.#frames;
 		}
 		view.setHeight(bodyHeight);
@@ -268,37 +301,22 @@ export class AskMoreComponent implements Component {
 	#questionLines(
 		index: number,
 		width: number,
-	): { lines: readonly string[]; focus: { start: number; end: number } | undefined; slots: readonly { slot: DemoSlot; start: number; height: number }[] } {
+	): { lines: string[]; focus: { start: number; end: number } | undefined; slots: readonly { slot: DemoSlot; start: number; height: number }[] } {
 		const state = this.#states[index];
 		if (state === undefined) return { lines: [], focus: undefined, slots: [] };
 		const { question } = state;
-		const { brief } = question;
+		const text = this.#staticText(index, width, state);
 		const rows: string[] = [];
-		const paragraph = (source: string) => {
-			for (const line of new Markdown(source, 0, 0, getMarkdownTheme()).render(width)) rows.push(line);
-		};
-		const heading = (label: string) => rows.push(theme.bold(theme.fg("accent", label)));
+		for (const line of text.prefix) rows.push(line);
 		const demos = pageDemos(state);
 		const slots: { slot: DemoSlot; start: number; height: number }[] = [];
 		/** Blank rows the demo's frames are drawn into, as tall as its tallest frame. */
 		const reserve = (page: PageDemo | undefined) => {
 			if (page === undefined) return;
-			const height = this.#demoLines(page, width).length;
+			const height = this.#demoHeight(page, width);
 			slots.push({ slot: page.slot, start: rows.length, height });
 			for (let row = 0; row < height; row++) rows.push("");
 		};
-
-		paragraph(question.question);
-		rows.push("");
-		for (const [label, body] of [
-			[tr("Where", "现状"), brief.where],
-			[tr("What", "决定"), brief.what],
-			[tr("How", "后果"), brief.how],
-		] as const) {
-			heading(label);
-			paragraph(body);
-			rows.push("");
-		}
 
 		let focus: { start: number; end: number } | undefined;
 		question.options.forEach((option, optionIndexValue) => {
@@ -343,80 +361,142 @@ export class AskMoreComponent implements Component {
 
 		const questionDemo = demos.find(page => page.slot === "question");
 		if (questionDemo !== undefined) {
-			heading(tr("Demo", "演示"));
+			rows.push(accentHeading(tr("Demo", "演示")));
 			reserve(questionDemo);
 			rows.push("");
 		}
 
+		for (const line of text.suffix) rows.push(line);
+		return { lines: rows, focus, slots };
+	}
+
+	/**
+	 * The page's static text for `index`, `width`, the evidence fold, the current theme and the UI language — the
+	 * events that can change it. One value is kept: a page, width, fold, theme or language change replaces it, and
+	 * `dispose` drops it. A key press that only moves the cursor reuses it.
+	 */
+	#staticText(index: number, width: number, state: QuestionState): StaticText {
+		const lang = language();
+		const cached = this.#static;
+		if (cached !== undefined && cached.index === index && cached.width === width && cached.expanded === state.expanded && cached.theme === theme && cached.lang === lang) {
+			return cached;
+		}
+		const { question } = state;
+		const { brief } = question;
+		const prefix: string[] = [];
+		const suffix: string[] = [];
+		const paragraph = (target: string[], source: string) => {
+			for (const line of new Markdown(source, 0, 0, getMarkdownTheme()).render(width)) target.push(line);
+		};
+
+		paragraph(prefix, question.question);
+		prefix.push("");
+		for (const [label, body] of [
+			[tr("Where", "现状"), brief.where],
+			[tr("What", "决定"), brief.what],
+			[tr("How", "后果"), brief.how],
+		] as const) {
+			prefix.push(accentHeading(label));
+			paragraph(prefix, body);
+			prefix.push("");
+		}
+
 		if (state.evidence.length > 0) {
-			heading(tr("Evidence", "证据"));
+			suffix.push(accentHeading(tr("Evidence", "证据")));
 			for (const entry of state.evidence) {
 				switch (entry.kind) {
 					case "unreadable":
-						rows.push(theme.fg("error", `${entry.path}: ${entry.error}`));
-						if (entry.note) rows.push(theme.fg("muted", entry.note));
+						suffix.push(theme.fg("error", `${entry.path}: ${entry.error}`));
+						if (entry.note) suffix.push(theme.fg("muted", entry.note));
 						continue;
 					case "directory":
-						rows.push(theme.fg("muted", `${entry.path} ${tr("(directory)", "（目录）")}`));
-						if (entry.note) rows.push(theme.fg("muted", entry.note));
+						suffix.push(theme.fg("muted", `${entry.path} ${tr("(directory)", "（目录）")}`));
+						if (entry.note) suffix.push(theme.fg("muted", entry.note));
 						continue;
 					case "file":
-						rows.push(theme.fg("muted", `${entry.path}:${entry.start}-${entry.end}`));
+						suffix.push(theme.fg("muted", `${entry.path}:${entry.start}-${entry.end}`));
 						break;
 					case "text":
-						rows.push(`${theme.fg("muted", entry.source)}${theme.fg("warning", tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"))}`);
+						suffix.push(`${theme.fg("muted", entry.source)}${theme.fg("warning", tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"))}`);
 						break;
 				}
-				if (entry.note) rows.push(theme.fg("muted", entry.note));
+				if (entry.note) suffix.push(theme.fg("muted", entry.note));
 				const visible = state.expanded ? entry.lines : entry.lines.slice(0, DOCUMENT_SCROLL);
 				visible.forEach((line, offset) => {
 					const gutter = entry.kind === "file" ? `${theme.fg("dim", String(entry.start + offset).padStart(4))}  ` : "  ";
-					rows.push(gutter + cutLine(line, width - visibleWidth(gutter)));
+					suffix.push(gutter + cutLine(line, width - visibleWidth(gutter)));
 				});
 				if (visible.length < entry.lines.length) {
-					rows.push(theme.fg("muted", tr(`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
+					suffix.push(theme.fg("muted", tr(`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
 				}
 			}
-			rows.push("");
+			suffix.push("");
 		}
 
 		if (brief.diagram?.trim()) {
-			heading(tr("Diagram", "图"));
-			paragraph(`\`\`\`mermaid\n${brief.diagram.trim()}\n\`\`\``);
-			rows.push("");
+			suffix.push(accentHeading(tr("Diagram", "图")));
+			paragraph(suffix, `\`\`\`mermaid\n${brief.diagram.trim()}\n\`\`\``);
+			suffix.push("");
 		}
 
 		const risks = brief.risks?.map(risk => risk.trim()).filter(risk => risk.length > 0) ?? [];
 		if (risks.length > 0) {
-			heading(tr("Risks", "风险"));
-			paragraph(risks.map(risk => `- ${risk}`).join("\n"));
+			suffix.push(accentHeading(tr("Risks", "风险")));
+			paragraph(suffix, risks.map(risk => `- ${risk}`).join("\n"));
 		}
-		return { lines: rows, focus, slots };
+
+		const text: StaticText = { index, width, expanded: state.expanded, theme, lang, prefix, suffix };
+		this.#static = text;
+		return text;
 	}
 
-	/** `lines` with each demo slot filled by the frame its playback is on. */
-	#withDemoFrames(lines: readonly string[], slots: readonly { slot: DemoSlot; start: number; height: number }[], width: number): readonly string[] {
-		if (slots.length === 0 || this.#active.kind !== "question") return lines;
+	/** Rewrite each demo slot of `rows` to the frame its playback is on; every other row stays. */
+	#fillDemoFrames(rows: string[], slots: readonly { slot: DemoSlot; start: number; height: number }[], width: number): void {
+		if (slots.length === 0 || this.#active.kind !== "question") return;
 		const state = this.#states[this.#active.index];
-		if (state === undefined) return lines;
+		if (state === undefined) return;
 		const pages = pageDemos(state);
-		const filled = lines.slice();
 		for (const { slot, start, height } of slots) {
 			const page = pages.find(candidate => candidate.slot === slot);
 			if (page === undefined) continue;
-			this.#demoLines(page, width)
-				.slice(0, height)
-				.forEach((line, row) => {
-					filled[start + row] = line;
-				});
+			const lines = this.#demoLines(page, width);
+			for (let row = 0; row < height; row++) {
+				const line = lines[row];
+				if (line !== undefined) rows[start + row] = line;
+			}
 		}
-		return filled;
+	}
+
+	/** The caption rows of a demo; `#demoLines` and `#demoHeight` share them, so the two cannot disagree. */
+	#demoCaption(demo: LoadedDemo, width: number): string[] {
+		return demo.caption ? wrapLabelled("", theme.fg("muted", demo.caption), width) : [];
+	}
+
+	/**
+	 * Rows a demo takes at `width`, computed without drawing it: reserving its slot must not encode a
+	 * whole raster. Every branch mirrors `#demoLines`, which draws exactly these rows.
+	 */
+	#demoHeight(page: PageDemo, width: number): number {
+		const { demo, play } = page;
+		const caption = this.#demoCaption(demo, width).length;
+		switch (demo.kind) {
+			case "frames": {
+				const frames = this.#renderedFrames(demo, width);
+				// Every frame is padded to the tallest, so any of them gives the slot's height.
+				return (frames[play.frame] ?? frames[0] ?? []).length + caption + 1;
+			}
+			case "raster":
+				return (demo.frames.length === 0 ? 0 : demo.rows) + caption + (demo.frames.length > 1 ? 1 : 0);
+			case "image":
+			case "error":
+				return 1 + caption;
+		}
 	}
 
 	/** The ANSI rows of a demo on its current frame; every frame of one demo has the same height. */
 	#demoLines(page: PageDemo, width: number): string[] {
 		const { demo, play } = page;
-		const caption = demo.caption ? wrapLabelled("", theme.fg("muted", demo.caption), width) : [];
+		const caption = this.#demoCaption(demo, width);
 		const controls = (count: number) =>
 			theme.fg(
 				"muted",
@@ -454,7 +534,7 @@ export class AskMoreComponent implements Component {
 		return frames;
 	}
 
-	#reviewLines(width: number): readonly string[] {
+	#reviewLines(width: number): string[] {
 		const rows = [theme.bold(theme.fg("accent", tr("Review your answers", "核对你的答案"))), ""];
 		const unanswered = this.#states.filter(state => state.answer.kind === "unanswered").length;
 		for (const state of this.#states) {
@@ -471,10 +551,18 @@ export class AskMoreComponent implements Component {
 
 	describe(_cx: DescribeContext): NativeNode {
 		const scroll = this.#activeNativeScroll();
+		// The layout changes only with the version (any state edit) and the terminal's scroll request;
+		// a frame step keeps it and asks it to re-draw the demos, whose nodes are all that changed.
+		let layout = this.#layout;
+		if (layout === undefined || layout.version !== this.#version || layout.scroll !== scroll) {
+			layout = { version: this.#version, scroll, sheet: sheetLayout(this.#states, this.#active, scroll, this.#status()) };
+			this.#layout = layout;
+			this.#native = undefined;
+		}
 		const memo = this.#native;
-		if (memo !== undefined && memo.version === this.#version && memo.frames === this.#frames && memo.scroll === scroll) return memo.node;
-		const node = describeSheet(this.#states, this.#active, scroll, this.#status());
-		this.#native = { version: this.#version, frames: this.#frames, scroll, node };
+		if (memo !== undefined && memo.frames === this.#frames) return memo.node;
+		const node = layout.sheet.withDemos();
+		this.#native = { frames: this.#frames, node };
 		return node;
 	}
 

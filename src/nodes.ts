@@ -9,7 +9,7 @@ import { frameCount } from "./demo.ts";
 import { tr } from "./i18n.ts";
 import type { Answer } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
-import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
+import { type ActiveTab, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
 
 /** Keys and ids the component routes (keys compared with `leafKey(event.key)`). */
 export const TABS_KEY = "tabs";
@@ -271,8 +271,8 @@ function options(state: QuestionState, index: number): NativeNode {
 	return selectList(questionListKey(index), rows, { role: "omp.ask.options", selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor) });
 }
 
-/** The focused option's tradeoff rows, under the options, and the demo of picking it, on question `page`. */
-function tradeoff(state: QuestionState, demo: PageDemo | undefined, page: number): NativeNode | undefined {
+/** The focused option's tradeoff rows, under the options; the layout appends the demo of picking it. */
+function tradeoff(state: QuestionState): NativeNode | undefined {
 	const option = state.question.options[state.cursor];
 	if (option === undefined || state.editing) return undefined;
 	// Label then value per row, the value wrapping under its own label.
@@ -285,7 +285,6 @@ function tradeoff(state: QuestionState, demo: PageDemo | undefined, page: number
 	)
 		.filter((pair): pair is readonly [string, string] => pair[1] !== undefined && pair[1].trim().length > 0)
 		.map(([label, value], index) => node("text", { spans: [span(label, "muted"), span("  "), span(value.trim())], wrap: "word" }, undefined, `t${index}`));
-	if (demo !== undefined) rows.push(demoNode(demo, page));
 	return { ...card({ role: "omp.ask.tradeoff", tone: "accent", head: [span(option.label)] }, rows), key: "tradeoff" };
 }
 
@@ -329,24 +328,6 @@ function primaryAct(states: readonly QuestionState[], state: QuestionState, page
 	return { label, act: onOther(state) ? { kind: "openOther", page } : { kind: "answer", page, option: state.cursor } };
 }
 
-function questionPage(states: readonly QuestionState[], index: number, status: string | undefined): NativeChild[] {
-	const state = states[index];
-	if (state === undefined) return [];
-	const demos = pageDemos(state);
-	const decision: NativeChild[] = [options(state, index)];
-	const focused = tradeoff(state, demos.find(demo => demo.slot === "option"), index);
-	if (focused !== undefined) decision.push(focused);
-	// The field is its own component, so the terminal's edits and undo reach it directly.
-	if (state.editing) decision.push(node("row", { role: "omp.ask.otherField" }, [state.input], "otherField"));
-	// Tern scrolls a list's selection into view against the body's bottom edge, where a sticky last
-	// `omp.actions` row would cover it; so the bar sits in the decision column (not last) and reveals
-	// itself when a page opens, which pulls the whole decision into view after a long brief.
-	decision.push({ ...actions(primaryAct(states, state, index), status), reveal: "nearest" });
-	const questionDemo = demos.find(demo => demo.slot === "question");
-	const demo = questionDemo === undefined ? [] : [block("demo", tr("Demo", "演示"), [demoNode(questionDemo, index)])];
-	return [...lead(state.question), node("col", { gap: "md" }, decision, `decision${index}`), ...demo, ...appendix(state)];
-}
-
 /** The review: the native ask's notice of unanswered questions, then each question's answer. */
 function reviewPage(states: readonly QuestionState[], status: string | undefined): NativeChild[] {
 	const unanswered = states.filter(state => state.answer.kind === "unanswered").length;
@@ -372,10 +353,92 @@ function reviewPage(states: readonly QuestionState[], status: string | undefined
 	];
 }
 
-/** The sheet content for the active page; `status` is the countdown line, if the ask has one. */
-export function describeSheet(states: readonly QuestionState[], active: ActiveTab, scroll: NativeScrollRequest | undefined, status: string | undefined): NativeNode {
-	const head = tabs(states, active);
-	const page = active.kind === "review" ? reviewPage(states, status) : questionPage(states, active.index, status);
-	const root = col([...(head === undefined ? [] : [head]), ...page], { gap: "md" });
+/**
+ * A page built once: its static nodes (the head, the lead, the options, the tradeoff rows, the field,
+ * the bar, the appendix) are shared, and `withDemos()` rebuilds only the demo nodes on the frame their
+ * playback is on, plus the containers on the path to them — the tradeoff card, the decision column,
+ * the demo block and the root column. A frame step is not a page rebuild: the reconciler skips the
+ * shared nodes by identity.
+ */
+export interface SheetLayout {
+	/** The sheet content with every demo on its current frame. */
+	withDemos(): NativeNode;
+}
+
+/** A page no frame can change: its one node is the answer. */
+function staticLayout(page: NativeNode): SheetLayout {
+	return { withDemos: () => page };
+}
+
+/** The page node under the scroll the terminal was asked for. */
+function scrolled(root: NativeNode, scroll: NativeScrollRequest | undefined): NativeNode {
 	return scroll === undefined ? root : { ...root, scroll };
+}
+
+/**
+ * The active question's page: the static nodes are built here, once per version; only the demo nodes
+ * and their containers are rebuilt per frame. The demo slots a page shows come from `pageDemos`, so a
+ * layout change (cursor, answer, fold) arrives as a new version and a new layout.
+ */
+function questionLayout(
+	states: readonly QuestionState[],
+	index: number,
+	root: (page: readonly NativeChild[]) => NativeNode,
+	scroll: NativeScrollRequest | undefined,
+	status: string | undefined,
+): SheetLayout {
+	const state = states[index];
+	if (state === undefined) return staticLayout(scrolled(root([]), scroll));
+	const demos = pageDemos(state);
+	const optionDemo = demos.find(demo => demo.slot === "option");
+	const questionDemo = demos.find(demo => demo.slot === "question");
+
+	const leadNodes = lead(state.question);
+	const optionList = options(state, index);
+	// The tradeoff rows without the demo, so a frame only appends the demo node to them.
+	const tradeoffCard = tradeoff(state);
+	// The field is its own component, so the terminal's edits and undo reach it directly.
+	const otherField = state.editing ? node("row", { role: "omp.ask.otherField" }, [state.input], "otherField") : undefined;
+	// Tern scrolls a list's selection into view against the body's bottom edge, where a sticky last
+	// `omp.actions` row would cover it; so the bar sits in the decision column (not last) and reveals
+	// itself when a page opens, which pulls the whole decision into view after a long brief.
+	const bar: NativeChild = { ...actions(primaryAct(states, state, index), status), reveal: "nearest" };
+	// The demo block's head text is built once; a frame appends only the demo node under it.
+	const demoBlock: NativeNode | undefined = questionDemo === undefined ? undefined : block("demo", tr("Demo", "演示"), []);
+	const appendixNodes = appendix(state);
+
+	const page = (optionNode: NativeChild | undefined, questionNode: NativeChild | undefined): NativeChild[] => {
+		const decision: NativeChild[] = [optionList];
+		if (tradeoffCard !== undefined) decision.push(optionNode === undefined ? tradeoffCard : { ...tradeoffCard, c: [...(tradeoffCard.c ?? []), optionNode] });
+		if (otherField !== undefined) decision.push(otherField);
+		decision.push(bar);
+		const demo = demoBlock === undefined || questionNode === undefined ? [] : [{ ...demoBlock, c: [...(demoBlock.c ?? []), questionNode] }];
+		return [...leadNodes, node("col", { gap: "md" }, decision, `decision${index}`), ...demo, ...appendixNodes];
+	};
+
+	if (optionDemo === undefined && questionDemo === undefined) return staticLayout(scrolled(root(page(undefined, undefined)), scroll));
+	return {
+		withDemos: () => {
+			const current = pageDemos(state);
+			const option = current.find(demo => demo.slot === "option");
+			const own = current.find(demo => demo.slot === "question");
+			return scrolled(
+				root(
+					page(
+						option === undefined ? undefined : demoNode(option, index),
+						own === undefined ? undefined : demoNode(own, index),
+					),
+				),
+				scroll,
+			);
+		},
+	};
+}
+
+/** The sheet content for the active page, built once per version; `status` is the countdown line, if the ask has one. */
+export function sheetLayout(states: readonly QuestionState[], active: ActiveTab, scroll: NativeScrollRequest | undefined, status: string | undefined): SheetLayout {
+	const head = tabs(states, active);
+	const root = (page: readonly NativeChild[]): NativeNode => col([...(head === undefined ? [] : [head]), ...page], { gap: "md" });
+	if (active.kind === "review") return staticLayout(scrolled(root(reviewPage(states, status)), scroll));
+	return questionLayout(states, active.index, root, scroll, status);
 }
