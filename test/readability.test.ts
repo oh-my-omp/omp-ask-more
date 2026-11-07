@@ -161,22 +161,19 @@ describe("what the gate hands the judge", () => {
 
 describe("the ask after a rejection", () => {
 	const unreadable = scripted(() => ({ actor: 0 }));
-	const run = (rejected: WeakSet<object>, key: object, judge: NoulJudge) => gateOnce(rejected, key, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
+	const run = (retry: { owed: boolean }, judge: NoulJudge) => gateOnce(retry, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
 
 	it("goes through without asking the judge, and the one after is judged again", async () => {
-		const rejected = new WeakSet<object>();
-		const key = {};
-		expect((await run(rejected, key, unreadable)).kind).toBe("reject");
+		const retry = { owed: false };
+		expect((await run(retry, unreadable)).kind).toBe("reject");
 		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
-		expect(await run(rejected, key, failing)).toEqual({ kind: "pass" });
-		expect((await run(rejected, key, unreadable)).kind).toBe("reject");
+		expect(await run(retry, failing)).toEqual({ kind: "pass" });
+		expect((await run(retry, unreadable)).kind).toBe("reject");
 	});
 
-	it("is kept per session", async () => {
-		const rejected = new WeakSet<object>();
-		const first = {};
-		await run(rejected, first, unreadable);
-		expect((await run(rejected, {}, unreadable)).kind).toBe("reject");
-		expect(await run(rejected, first, unreadable)).toEqual({ kind: "pass" });
+	it("is owed only after a rejection", async () => {
+		const retry = { owed: false };
+		expect(await run(retry, scripted(() => ({})))).toEqual({ kind: "pass" });
+		expect((await run(retry, unreadable)).kind).toBe("reject");
 	});
 });

@@ -297,12 +297,15 @@ export async function readabilityGate(
 
 /**
  * The call after a rejection goes through unjudged: the model has been told what to fix, and a
- * judge that rejects again must not keep the ask from the reader. `rejected` holds the keys (one
- * per session) whose last ask was rejected; the next call with that key clears it and passes.
+ * judge that rejects again must not keep the ask from the reader. `retry.owed` is true from a
+ * rejection until the next call, which clears it and passes; whichever ask that is.
  */
-export async function gateOnce(rejected: WeakSet<object>, key: object, judge: () => Promise<Gate>): Promise<Gate> {
-	if (rejected.delete(key)) return { kind: "pass" };
+export async function gateOnce(retry: { owed: boolean }, judge: () => Promise<Gate>): Promise<Gate> {
+	if (retry.owed) {
+		retry.owed = false;
+		return { kind: "pass" };
+	}
 	const gate = await judge();
-	if (gate.kind === "reject") rejected.add(key);
+	retry.owed = gate.kind === "reject";
 	return gate;
 }

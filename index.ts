@@ -65,12 +65,12 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	return chain.primaryModel() === undefined ? undefined : chain;
 }
 
-/** Sessions whose last ask the readability gate rejected: their next ask is not judged. */
-const rejected = new WeakSet<object>();
+/** Whether the last ask was rejected by the readability gate: the next ask is not judged. */
+const retry = { owed: false };
 
 /** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. The ask after a rejection goes through unjudged. */
 function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal | undefined): Promise<Gate> {
-	return gateOnce(rejected, ctx.sessionManager, async () => {
+	return gateOnce(retry, async () => {
 		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
 		let enabled: boolean;
 		try {
