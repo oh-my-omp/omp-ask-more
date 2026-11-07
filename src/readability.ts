@@ -10,6 +10,7 @@
 // `sentence` next to the `dialog` it belongs to, a term is named in the instruction. Code finds the
 // sentences and the candidate terms (a model does not list reliably) and decides what the answers add up to.
 import type { JsonValue, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { tr } from "./i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
@@ -247,6 +248,9 @@ function quote(sentence: string): string {
 	return JSON.stringify(sentence.length > QUOTE_LENGTH ? `${sentence.slice(0, QUOTE_LENGTH)}…` : sentence);
 }
 
+/** What every readability rejection says of a question; the session's record of a rejected ask is recognised by it. */
+const REJECTION_MARK = "is hard to understand for a reader who sees only this dialog";
+
 /** The rejection the model reads: every failing question with the sentences and terms that fail, and what this surface shows. Fixed text around the model's own words, never judge output. */
 export function readabilityProblems(failing: readonly Unreadable[], surface: Surface): string[] {
 	const problems = failing.map(({ id, sentences, terms }) => {
@@ -254,7 +258,7 @@ export function readabilityProblems(failing: readonly Unreadable[], surface: Sur
 			...sentences.map(({ sentence, faults }) => `${quote(sentence)}: ${faults.map(fault => FAULT_TEXT[fault]).join("; ")}`),
 			...terms.map(term => `\`${term}\`: neither common knowledge nor explained in the dialog`),
 		];
-		return `question "${id}" is hard to understand for a reader who sees only this dialog and has never seen your session or this project; rewrite every item below so each sentence says who does what, each abbreviation is spelled out, and each name, number or earlier decision is said in plain words:\n${lines.map(line => `  - ${line}`).join("\n")}`;
+		return `question "${id}" ${REJECTION_MARK} and has never seen your session or this project; rewrite every item below so each sentence says who does what, each abbreviation is spelled out, and each name, number or earlier decision is said in plain words:\n${lines.map(line => `  - ${line}`).join("\n")}`;
 	});
 	switch (surface) {
 		case "sheet":
@@ -297,15 +301,23 @@ export async function readabilityGate(
 
 /**
  * The call after a rejection goes through unjudged: the model has been told what to fix, and a
- * judge that rejects again must not keep the ask from the reader. `retry.owed` is true from a
- * rejection until the next call, which clears it and passes; whichever ask that is.
+ * judge that rejects again must not keep the ask from the reader. Whether the last `ask` was
+ * rejected is read from the session's own record, the rejection being its result, so nothing else
+ * remembers it: another session, a restart, a fork or `/tree` each see their own history.
  */
-export async function gateOnce(retry: { owed: boolean }, judge: () => Promise<Gate>): Promise<Gate> {
-	if (retry.owed) {
-		retry.owed = false;
-		return { kind: "pass" };
+export async function gateUnlessRetry(branch: readonly BranchEntry[], judge: () => Promise<Gate>): Promise<Gate> {
+	return lastAskRejected(branch) ? { kind: "pass" } : judge();
+}
+
+/** An entry of the session's active branch. */
+export type BranchEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
+
+/** Whether the last `ask` result in the branch is a readability rejection. */
+export function lastAskRejected(branch: readonly BranchEntry[]): boolean {
+	for (let index = branch.length - 1; index >= 0; index--) {
+		const entry = branch[index];
+		if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") continue;
+		return entry.message.isError && entry.message.content.some(part => part.type === "text" && part.text.includes(REJECTION_MARK));
 	}
-	const gate = await judge();
-	retry.owed = gate.kind === "reject";
-	return gate;
+	return false;
 }

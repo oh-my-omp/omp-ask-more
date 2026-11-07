@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { candidateTerms, gateOnce, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
+import { type BranchEntry, candidateTerms, gateUnlessRetry, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
+import { rejectedResult } from "../src/result.ts";
 import { type AskQuestion, parametersSchema } from "../src/schema.ts";
 
 const questions: readonly AskQuestion[] = parametersSchema.parse({
@@ -161,19 +162,29 @@ describe("what the gate hands the judge", () => {
 
 describe("the ask after a rejection", () => {
 	const unreadable = scripted(() => ({ actor: 0 }));
-	const run = (retry: { owed: boolean }, judge: NoulJudge) => gateOnce(retry, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
 
-	it("goes through without asking the judge, and the one after is judged again", async () => {
-		const retry = { owed: false };
-		expect((await run(retry, unreadable)).kind).toBe("reject");
-		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
-		expect(await run(retry, failing)).toEqual({ kind: "pass" });
-		expect((await run(retry, unreadable)).kind).toBe("reject");
+	/** The session record of an `ask` call and its result. */
+	function askResult(content: string, isError: boolean): BranchEntry {
+		return { type: "message", id: "r", parentId: null, timestamp: "2026-11-08T00:00:00Z", message: { role: "toolResult", toolCallId: "c", toolName: "ask", content: [{ type: "text", text: content }], isError, timestamp: 0 } };
+	}
+
+	async function rejection(): Promise<BranchEntry> {
+		const gate = await readabilityGate(unreadable, questions, "sheet", undefined, noWarn);
+		if (gate.kind !== "reject") throw new Error("expected a rejection");
+		const result = rejectedResult(gate.problems);
+		return askResult(result.content.map(part => (part.type === "text" ? part.text : "")).join(""), true);
+	}
+
+	const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
+	const run = (branch: readonly BranchEntry[], judge: NoulJudge) => gateUnlessRetry(branch, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
+
+	it("goes through without asking the judge when the last ask in the session was rejected by the gate", async () => {
+		expect(await run([await rejection()], failing)).toEqual({ kind: "pass" });
 	});
 
-	it("is owed only after a rejection", async () => {
-		const retry = { owed: false };
-		expect(await run(retry, scripted(() => ({})))).toEqual({ kind: "pass" });
-		expect((await run(retry, unreadable)).kind).toBe("reject");
+	it("is judged when the session has no ask yet, or the last one was answered or rejected for another reason", async () => {
+		expect((await run([], unreadable)).kind).toBe("reject");
+		expect((await run([await rejection(), askResult("User answers:\nretry: 指数退避", false)], unreadable)).kind).toBe("reject");
+		expect((await run([await rejection(), askResult("ask rejected:\n- another ask is open in this session", true)], unreadable)).kind).toBe("reject");
 	});
 });
