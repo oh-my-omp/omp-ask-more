@@ -171,29 +171,23 @@ omp 用固定模板把 `/skill:grilling` 渲染成一条用户发出的消息：
 
 ## 可读性检查
 
-2026-11-03 用 omp 18.16.0 执行；`judge` 角色是原生判定模型 `futureppo-jev/decision-model-preview`。下面的数字都来自不带 `--session-model` 的 `bun run eval:readability`。
+2026-11-08 执行；`judge` 角色是 `typesafe/jev-1.14.0`，且 `retry.fallbackChains.judge: []`，所以不会有别的模型作答。判断调用都在 agent 的 eval kernel 里发出（`judge` 与 `judge_batch`），`src/readability.ts` 在那里被导入并跑过语料；没有运行 `bun run eval:readability`，也没有开 PTY 会话。
 
 **语料。** 2026-10-20 以来修改过的本地 omp 会话（515 个）里，`claude-opus-5-5` 发出过 168 次不重复的 `ask` 调用，共 320 题；其中 70 次调用（136 题）符合现行 schema。从中挑了 15 题（分属 14 次调用，覆盖原生 judge 的分数区间），连同所在的整次调用存进 `eval/readability-labelled.json`：5 题难懂（`conflict_features`、`moat-app1-boundary`、`formal`、`trigger`、`semantics`），10 题可读。标签由实现这项检查的 agent 标注；两次把这些条目交给用户标注的 `ask` 都超时没有回答。第 16 题 `narrow_scope` 来自用户反馈读不懂的 PR #265 那条 ask（一连串工单编号、缩写和没有主语的句子），按难懂加入 `eval/readability-labelled.json`。
 
-**整批 state。** 第一版把整次调用放进一个 state 判断。`conflict_features` 的 brief 引用了决定编号 N19、N24、D1、N14、L2，却没说它们是什么；它在七题的调用里 `undefined_terms` 得 0.91，单独判断只得 0.05。原生 judge 整批跑时“标记”了 320 题中的 55 题，逐题跑复现不出来。现在每题单独一次请求。
+**试过的模型。** 在 `futureppo-jev/decision-model-preview` 上逐句、逐术语问是非题，对照对话框原文读，答案是错的：它说 JSON、SSH、PR、AI 不是常识（0.39、0.12、0.12、0.08），说对话框已经解释过的 `K6`、`#592`、`bf9de1c`、`§1` 没解释，对“owner 手写了流式 JSON 序列化器”问谁在做，只给 0.17。`mercury-decide` 连不上：`/v1/systemone` 拒绝它（`requires a TypeSafe or QianwenAI channel`），`/v1/decisions` 对免费 slug 返回 404，对 `inception/mercury-decide` 用这个 token 返回 403。`typesafe/jev-1.14.0` 对这些情形反过来答对了（JSON 0.92、SSH 0.88、PR 0.79、AI 0.70 视为常识；“owner 手写了流式 JSON 序列化器”0.96；`hapi-hub` 里 `#592` 已解释 0.86，`live_wt` 里 `bf9de1c` 0.77、`951532d` 0.87）。
 
-**第一版请求**把原题 JSON 原样发出，配三个是非问题（未解释的词、缺背景、选项分不清），每个都以同一段 500 字的读者描述开头，问的是“文字从没解释过的词”这种缺失。原生 judge 对 43 题一题都没拦。同一路数的另外四种形式——改成纯文本、只问一个是非题、三选一、读者描述仍写在指令里的四档评分——把难懂题排在可读题之前的概率与随机无异（AUC 0.42–0.57）；逐个名词问文字是否说明了 `N19`、`K6` 是什么时，它对每个名词都答“没有”，包括已经把这些编号解释清楚的改写版 `conflict_features`。
+**后备模型。** OMP 内置的 `judge` 后备链依次是 `typesafe/jev-1.14.0`、`openrouter/typesafe/jev-1.14`，再到聊天模型。pool 上遇到限流（429）和超过 16 个问题的请求时，06:01 到 06:58 之间有 341 次判断在角色写着 `decision-model-preview` 的情况下悄悄由 jev 作答；`retry.fallbackChains.judge: []` 让出错的判断模型直接报错。
 
-**现行请求**按 TypeSafe 给 System One 判定模型的用法来写：state 是 `reader` 和 `dialog` 两个命名字段；一句点名这两个字段的简短指令；一个四档、每档描述一种情形的 Score。同样条件下，按这种写法试的六种形式里它排序最好（AUC 0.85，两次运行结果相同）；是非题“Can the `reader` understand, from `dialog` alone, what decision they are asked to make?”为 0.75，分档换两种措辞分别为 0.56 和 0.71。用 `bun run eval:readability` 测得：
+**问题必须怎么问。** 逐句、附上整个对话框问“这句话是否提到对话框没展示的东西”，在一些 ask 里几乎每一句都被标出，所以改成真正要抓的情形：只用名称或编号提到某个测试、审查轮次、结果、一组东西或以前的决定。问“对话框是否说了 X 是什么或要求什么”，PR #265 的 `#243`（0.98）和 `F106`（0.79）都放行了，因为 ask 说了 #243 要求什么；改问“只看过对话框的读者能否说出 X 是什么”，`F106` 0.09、`F107` 0.13、`#234` 0.26、`§3` 0.31。只查术语的检查找不到没有固定形状的词（`leaf-dense`、`owner`），所以“解释不了的词”这一问是对句子问的。
 
-| `judge` 角色 | 阈值 | 44 题中标记 | 精确率 | 召回率 | 误拦率 | 被误拦的调用 |
-|---|---|---|---|---|---|---|
-| `futureppo-jev/decision-model-preview`（原生） | 0.685 | 8 | 1.00 | 0.83 | 0.00 | 15 次中 0 次 |
-| `futureppo-jev/decision-model-preview`（原生） | 0.7 | 7 | 1.00 | 0.67 | 0.00 | 15 次中 0 次 |
+**拿现行的检查跑语料**（44 题、15 次调用、698 次判断请求）：判断了 575 个句子和 123 个术语；547 个句子不过关，59 个术语不过关；44 题全部被拒，其中 6 道标成 `hard` 的和 10 道标成 `readable` 的都在内（标签是 agent 标的，检查不拿召回换少拒）。`narrow_scope` 因 18 个句子和 5 个术语被拒（`F106`、`F107`、`d685d0d`、`#234`、`§3`）。有 28 个句子三个句子问题都通过；它们只在 eval 输出里读过，其中有些可疑（`她只在你问起时才提`、`runner 推送文件和结果`）。
 
-**读者描述。** 最初的读者只说工程师没看过 agent 之前的工作、文件和笔记。PR #265 那条 ask 引用了多个 issue、决议、评论、提交和缺陷编号却没说它们是什么，得分 0.647，被放行。现在读者写明工程师从没见过这个项目：既没见过工单、设计文档、代码，也没见过 agent 的会话；拒绝文字也点明缩写、工单编号和没有主语的句子。同一个 eval 随后给它 0.707。
+**改写后能过。** `narrow_scope` 这条 ask 改写成每句都有主语、没有工单编号、审查轮次用白话说明（一个问题、三个选项、11 个句子），在 `typesafe/jev-1.14.0` 上经 `readabilityGate` 得到 `pass`，没有警告。更早的几版没过：`第二，我们发给评审模型的文本要和修改前完全一致` 的“谁在做”只有 0.35，直到把这个分句的主语和动词写进同一个句子。
 
-原生分数：难懂的 `conflict_features` 0.88、`moat-app1-boundary` 0.75、`formal` 0.72、`narrow_scope` 0.71、`trigger` 0.69、`semantics` 0.38；可读的 0.13–0.67，最高是 `judge_scope` 0.67。阈值 0.685 落在这个只有 0.01 宽的间隔里。`semantics` 仍然漏掉。
-
-| 检查 | 命令 | 观察结果 |
+| 检查 | 命令 | 观察 |
 |---|---|---|
-| 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无错误；75 通过、0 失败，其中包括检查的结论（高于阈值的题拒绝，低于的放行）、每题一次请求且按面板或原生字段构造、state 里没有题目 id、判断模型出错和超过截止时间时各放行并只警告一次、调用方中止时取消，以及 `readability.judge` 的默认值、`false` 与非布尔值 |
-| 会话里的原生 judge | 140×45 PTY 中 `omp --no-extensions -e …/index.ts --model opencode-go/deepseek-v4.1-flash`，原生 `judge` 角色；让模型把文件里的 `conflict_features` 原样发出，被拒时改写 | 第一次调用返回 `ask rejected: - question "conflict_features" is hard to understand … it relies on names, codes, references or earlier decisions it never explains; …`；模型说明了 N19/N24/D1/N14 是设计文档里的条目、各自定了什么，再次调用，这次打开了面板，`enter` 返回 `conflict_features: 裁掉冲突部分，事件自动化的部分另开设计`。会话文件里有两条 `model_usage`：用途 `ask-readability`、角色 `typesafe`、`futureppo-jev/decision-model-preview`（520 和 758 输入 token） |
-| 关闭设置 | `.omp/plugin-overrides.json` 里设 `readability.judge: false`（在请求改版之前运行；检查在构造任何请求之前就返回） | 第一次调用就按原文打开了对话框；会话文件里没有 `ask-readability` 记录 |
+| 类型、单元 | `bun run check`、`bun test` | `tsc --noEmit` 无报错；82 通过、0 失败，其中有：句子和术语都读得懂的调用通过；一个没有主语的句子只拒绝它所在的题，并在拒绝里引用该句；一个句子的每条原因都写出；既不是常识又没说明的术语被列出，二者占一的不列；每题单独判断，用面板内容或只用原生字段；判断模型出错和超时各放行并给一条警告；调用方中止时取消；术语与句子的提取 |
+| 在语料上跑检查 | 在 eval kernel 里导入 `readabilityGate` 与 `judgeReadability`，`judge` 角色 `typesafe/jev-1.14.0` | 同上 |
 
-尚未在 runtime 验证：原生对话框上的检查（需要 `ctx.invokeTool` 存在而 `ui.custom` 不存在）、会话模型作为 OMP 兜底作答（需要一条完全没有原生模型的 `judge` 链）、会话里判断模型出错或超时（只有单元测试覆盖）、由人给出的标签。
+尚未在 runtime 验证：会话里经 `resolveJudge` 的检查（这里由 kernel 的 `judge` 代替）、原生对话框、会话里判断模型出错或超时、`bun run eval:readability`、由人给出的标签。
