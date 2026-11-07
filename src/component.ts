@@ -26,7 +26,7 @@ import { leafKey } from "@oh-my-pi/pi-tui/native/node";
 import type { TspScrollBy } from "@oh-my-pi/pi-wire";
 import type { ResolvedEvidence } from "./brief.ts";
 import { frameCount, frameInterval, halfBlockRows, type LoadedDemo, type QuestionDemos } from "./demo.ts";
-import { tr } from "./i18n.ts";
+import { type Lang, language, tr } from "./i18n.ts";
 import {
 	answerLabel,
 	type DemoMove,
@@ -115,6 +115,7 @@ interface StaticText {
 	readonly width: number;
 	readonly expanded: boolean;
 	readonly theme: Theme;
+	readonly lang: Lang;
 	readonly prefix: readonly string[];
 	readonly suffix: readonly string[];
 }
@@ -165,8 +166,8 @@ export class AskMoreComponent implements Component {
 	#drawnFrames = -1;
 	/**
 	 * The page's static text as last rendered: the question and brief, and the evidence, diagram and
-	 * risks. One value for the current page, width, evidence fold and theme — the events that can change
-	 * it — so a key press that only moves the cursor re-renders none of it. Cleared on dispose.
+	 * risks. One value for the current page, width, evidence fold, theme and UI language — the events that
+	 * can change it — so a key press that only moves the cursor re-renders none of it. Cleared on dispose.
 	 */
 	#static: StaticText | undefined;
 	/** The page built for the current version and scroll; a frame step re-draws only its demos. */
@@ -370,13 +371,14 @@ export class AskMoreComponent implements Component {
 	}
 
 	/**
-	 * The page's static text for `index`, `width`, the evidence fold and the current theme — the events
-	 * that can change it. One value is kept: a page, width, fold or theme change replaces it, and
+	 * The page's static text for `index`, `width`, the evidence fold, the current theme and the UI language — the
+	 * events that can change it. One value is kept: a page, width, fold, theme or language change replaces it, and
 	 * `dispose` drops it. A key press that only moves the cursor reuses it.
 	 */
 	#staticText(index: number, width: number, state: QuestionState): StaticText {
+		const lang = language();
 		const cached = this.#static;
-		if (cached !== undefined && cached.index === index && cached.width === width && cached.expanded === state.expanded && cached.theme === theme) {
+		if (cached !== undefined && cached.index === index && cached.width === width && cached.expanded === state.expanded && cached.theme === theme && cached.lang === lang) {
 			return cached;
 		}
 		const { question } = state;
@@ -443,7 +445,7 @@ export class AskMoreComponent implements Component {
 			paragraph(suffix, risks.map(risk => `- ${risk}`).join("\n"));
 		}
 
-		const text: StaticText = { index, width, expanded: state.expanded, theme, prefix, suffix };
+		const text: StaticText = { index, width, expanded: state.expanded, theme, lang, prefix, suffix };
 		this.#static = text;
 		return text;
 	}

@@ -9,7 +9,7 @@ import { frameCount } from "./demo.ts";
 import { tr } from "./i18n.ts";
 import type { Answer } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
-import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
+import { type ActiveTab, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
 
 /** Keys and ids the component routes (keys compared with `leafKey(event.key)`). */
 export const TABS_KEY = "tabs";
