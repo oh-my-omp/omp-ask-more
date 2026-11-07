@@ -91,14 +91,22 @@ function imageMime(head: Uint8Array): string | undefined {
 	return undefined;
 }
 
-async function readBounded(absolute: string): Promise<Uint8Array> {
+/** Leading bytes the ANSI page reads of an image: its type (`imageMime`) and whether it is an APNG (`isApng`). */
+const HEAD_BYTES = 4096;
+
+/**
+ * An image file within the read cap: all of it for Tern, which gets the bytes, and only its head for
+ * the ANSI page, where ffmpeg reads the file itself.
+ */
+async function readImage(absolute: string, whole: boolean): Promise<Uint8Array> {
 	const info = await stat(absolute);
 	if (info.isDirectory()) throw new DemoError(tr("is a directory", "是目录"));
 	if (info.size > MAX_FILE_BYTES) throw new DemoError(tr(`file is larger than ${MAX_FILE_BYTES} bytes`, `文件超过 ${MAX_FILE_BYTES} 字节`));
+	const length = whole ? info.size : Math.min(info.size, HEAD_BYTES);
 	const handle = await open(absolute, "r");
 	try {
-		const bytes = new Uint8Array(info.size);
-		await handle.read(bytes, 0, info.size, 0);
+		const bytes = new Uint8Array(length);
+		await handle.read(bytes, 0, length, 0);
 		return bytes;
 	} finally {
 		await handle.close();
@@ -107,7 +115,7 @@ async function readBounded(absolute: string): Promise<Uint8Array> {
 
 /** A PNG with an `acTL` chunk before its image data is an APNG; ffmpeg needs to be told. */
 function isApng(bytes: Uint8Array): boolean {
-	const text = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 4096))).toString("latin1");
+	const text = Buffer.from(bytes.subarray(0, Math.min(bytes.length, HEAD_BYTES))).toString("latin1");
 	const actl = text.indexOf("acTL");
 	const idat = text.indexOf("IDAT");
 	return actl >= 0 && (idat < 0 || actl < idat);
@@ -126,27 +134,50 @@ const PROBE_BYTES = 4096;
 const STDERR_TAIL = 4096;
 
 /**
- * Read `stream` to the end, keeping at most `cap` bytes; `onOver` runs once when the stream
- * passes the cap, and reading stops there. `tail` keeps the last bytes instead of failing.
+ * Read `stream` to the end into one buffer of `cap` bytes; `onOver` runs once when the stream
+ * passes the cap, and reading stops there. The buffer's pages are committed only as bytes land in
+ * them, so reserving the cap costs what the stream sends, and no chunk is held beside the copy.
  */
-async function readCapped(stream: ReadableStream<Uint8Array>, cap: number, mode: "fail" | "tail", onOver: () => void): Promise<{ bytes: Uint8Array; over: boolean }> {
-	const chunks: Uint8Array[] = [];
+async function readCapped(stream: ReadableStream<Uint8Array>, cap: number, onOver: () => void): Promise<{ bytes: Uint8Array; over: boolean }> {
+	const buffer = new Uint8Array(cap);
 	let total = 0;
 	const reader = stream.getReader();
 	for (;;) {
 		const { done, value } = await reader.read();
 		if (done) break;
-		chunks.push(value);
-		total += value.length;
-		if (total <= cap) continue;
-		if (mode === "fail") {
+		if (total + value.length > cap) {
 			onOver();
 			await reader.cancel();
 			return { bytes: new Uint8Array(), over: true };
 		}
-		while (total - (chunks[0]?.length ?? 0) >= cap && chunks.length > 1) total -= chunks.shift()?.length ?? 0;
+		buffer.set(value, total);
+		total += value.length;
 	}
-	return { bytes: Buffer.concat(chunks), over: false };
+	return { bytes: buffer.subarray(0, total), over: false };
+}
+
+/** The text of the last chunks of `stream` that hold at least `cap` bytes (all of it when shorter). */
+async function readTail(stream: ReadableStream<Uint8Array>, cap: number): Promise<string> {
+	const chunks: Uint8Array[] = [];
+	/** Chunks before `first` are dropped; the array is compacted once they are half of it. */
+	let first = 0;
+	let total = 0;
+	for await (const chunk of stream) {
+		chunks.push(chunk);
+		total += chunk.length;
+		for (let oldest = chunks[first]; oldest !== undefined && chunks.length - first > 1 && total - oldest.length >= cap; oldest = chunks[first]) {
+			total -= oldest.length;
+			first++;
+		}
+		if (first * 2 >= chunks.length) {
+			chunks.splice(0, first);
+			first = 0;
+		}
+	}
+	const decoder = new TextDecoder();
+	let text = "";
+	for (let index = first; index < chunks.length; index++) text += decoder.decode(chunks[index], { stream: true });
+	return text + decoder.decode();
 }
 
 /**
@@ -164,15 +195,11 @@ async function run(argv: readonly string[], maxBytes: number, signal: AbortSigna
 	const onAbort = () => child.kill();
 	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
-		const [stdout, stderr, code] = await Promise.all([
-			readCapped(child.stdout, maxBytes, "fail", () => child.kill()),
-			readCapped(child.stderr, STDERR_TAIL, "tail", () => {}),
-			child.exited,
-		]);
+		const [stdout, stderr, code] = await Promise.all([readCapped(child.stdout, maxBytes, () => child.kill()), readTail(child.stderr, STDERR_TAIL), child.exited]);
 		if (stdout.over) throw new DemoError(tr(`the decoded output passed ${maxBytes} bytes; use a shorter or smaller file`, `解码输出超过 ${maxBytes} 字节，换更短或更小的文件`));
 		if (timedOut) throw new DemoError(tr(`decoding took longer than ${DECODE_TIMEOUT_MS / 1000} s`, `解码超过 ${DECODE_TIMEOUT_MS / 1000} 秒`));
 		if (signal?.aborted) throw new DemoError(tr("aborted", "已中止"));
-		if (code !== 0) throw new DemoError(new TextDecoder().decode(stderr.bytes).trim().split("\n").at(-1) || `${argv[0]} exited with ${code}`);
+		if (code !== 0) throw new DemoError(stderr.trim().split("\n").at(-1) || `${argv[0]} exited with ${code}`);
 		return stdout.bytes;
 	} finally {
 		clearTimeout(timer);
@@ -270,7 +297,7 @@ async function loadFile(spec: Extract<DemoSpec, { kind: "file" }>, cwd: string, 
 	const absolute = isAbsolute(spec.path) ? spec.path : resolve(cwd, spec.path);
 	const video = (DEMO_VIDEO_EXTENSIONS as readonly string[]).includes(extensionOf(spec.path));
 	try {
-		const bytes = video ? undefined : await readBounded(absolute);
+		const bytes = video ? undefined : await readImage(absolute, surface === "native");
 		if (video) await stat(absolute);
 		if (bytes !== undefined && imageMime(bytes) === undefined) throw new DemoError(tr("not a GIF, PNG or WebP image", "不是 GIF、PNG 或 WebP 图片"));
 		if (surface === "native") {
@@ -303,20 +330,29 @@ export async function loadDemo(
 	}
 }
 
-/** Every demo of every question, loaded in parallel for `surface`. */
-export function loadQuestionDemos(
+/**
+ * Demos loaded at once. Each may hold a decoder's output (up to 16 MiB) and runs an ffmpeg that
+ * already uses every core, so more at once adds memory and risks the decode timeout, not speed.
+ */
+const LOAD_CONCURRENCY = 2;
+
+/** Every demo of every question for `surface`, at most `LOAD_CONCURRENCY` loading at a time. */
+export async function loadQuestionDemos(
 	questions: readonly { readonly brief: { readonly demo?: DemoParams }; readonly options: readonly { readonly demo?: DemoParams }[] }[],
 	cwd: string,
 	surface: Surface,
 	columns: number,
 	signal: AbortSignal | undefined,
 ): Promise<QuestionDemos[]> {
-	return Promise.all(
-		questions.map(async question => ({
-			question: await loadDemo(question.brief.demo, cwd, surface, columns, signal),
-			options: await Promise.all(question.options.map(option => loadDemo(option.demo, cwd, surface, columns, signal))),
-		})),
-	);
+	const params = questions.flatMap(question => [question.brief.demo, ...question.options.map(option => option.demo)]);
+	const loaded: (LoadedDemo | undefined)[] = new Array(params.length);
+	let next = 0;
+	const worker = async () => {
+		for (let index = next++; index < params.length; index = next++) loaded[index] = await loadDemo(params[index], cwd, surface, columns, signal);
+	};
+	await Promise.all(Array.from({ length: Math.min(LOAD_CONCURRENCY, params.length) }, worker));
+	let at = 0;
+	return questions.map(question => ({ question: loaded[at++], options: question.options.map(() => loaded[at++]) }));
 }
 
 /** Frames a demo cycles through; 1 for a demo the sheet does not animate itself. */
@@ -343,29 +379,71 @@ export function frameInterval(demo: LoadedDemo): number | undefined {
 	}
 }
 
+/** Bytes one cell can take: `ESC[38;2;255;255;255;48;2;255;255;255m` and the three of `▀`. */
+const CELL_BYTES = 39;
+/** `ESC[0m`, closing every row. */
+const RESET = [0x1b, 0x5b, 0x30, 0x6d] as const;
+
+/** The row being encoded, reused for every row of every frame; grown when a wider raster comes. */
+let rowBytes = new Uint8Array(MAX_ANSI_WIDTH * CELL_BYTES + RESET.length);
+const rowDecoder = new TextDecoder();
+
+/** Write `n` (0–255) in decimal at `at`; returns the index after it. */
+function writeDecimal(out: Uint8Array, at: number, n: number): number {
+	if (n >= 100) out[at++] = 0x30 + Math.floor(n / 100);
+	if (n >= 10) out[at++] = 0x30 + (Math.floor(n / 10) % 10);
+	out[at++] = 0x30 + (n % 10);
+	return at;
+}
+
+/** Write `<layer>8;2;r;g;b` for the pixel at `pixel` (`layer` is `3` foreground, `4` background). */
+function writeColor(out: Uint8Array, at: number, layer: 0x33 | 0x34, frame: Uint8Array, pixel: number): number {
+	out[at++] = layer;
+	out[at++] = 0x38;
+	out[at++] = 0x3b;
+	out[at++] = 0x32;
+	for (let channel = 0; channel < 3; channel++) {
+		out[at++] = 0x3b;
+		at = writeDecimal(out, at, frame[pixel + channel] ?? 0);
+	}
+	return at;
+}
+
 /**
  * One RGB frame (`width` × `rows * 2` pixels) as text rows: each cell is `▀` with the upper pixel
- * as foreground and the lower as background, every row ending in a reset so no color leaks.
+ * as foreground and the lower as background, every row ending in a reset so no color leaks. Each
+ * row is written as bytes into one reused buffer and decoded once: a string per row, nothing per cell.
  */
 export function halfBlockRows(frame: Uint8Array, width: number, rows: number): string[] {
+	if (rowBytes.length < width * CELL_BYTES + RESET.length) rowBytes = new Uint8Array(width * CELL_BYTES + RESET.length);
+	const out = rowBytes;
 	const lines: string[] = [];
 	for (let row = 0; row < rows; row++) {
-		let line = "";
-		let lastFg = "";
-		let lastBg = "";
+		let at = 0;
+		let lastFg = -1;
+		let lastBg = -1;
 		for (let column = 0; column < width; column++) {
 			const top = (row * 2 * width + column) * 3;
 			const bottom = ((row * 2 + 1) * width + column) * 3;
-			const fg = `38;2;${frame[top]};${frame[top + 1]};${frame[top + 2]}`;
-			const bg = `48;2;${frame[bottom]};${frame[bottom + 1]};${frame[bottom + 2]}`;
+			const fg = ((frame[top] ?? 0) << 16) | ((frame[top + 1] ?? 0) << 8) | (frame[top + 2] ?? 0);
+			const bg = ((frame[bottom] ?? 0) << 16) | ((frame[bottom + 1] ?? 0) << 8) | (frame[bottom + 2] ?? 0);
 			// Each color is written only when it changes; both in one sequence when both do.
-			const changed = [fg === lastFg ? "" : fg, bg === lastBg ? "" : bg].filter(part => part !== "");
-			if (changed.length > 0) line += `\x1b[${changed.join(";")}m`;
+			if (fg !== lastFg || bg !== lastBg) {
+				out[at++] = 0x1b;
+				out[at++] = 0x5b;
+				if (fg !== lastFg) at = writeColor(out, at, 0x33, frame, top);
+				if (fg !== lastFg && bg !== lastBg) out[at++] = 0x3b;
+				if (bg !== lastBg) at = writeColor(out, at, 0x34, frame, bottom);
+				out[at++] = 0x6d;
+			}
 			lastFg = fg;
 			lastBg = bg;
-			line += "▀";
+			out[at++] = 0xe2;
+			out[at++] = 0x96;
+			out[at++] = 0x80;
 		}
-		lines.push(`${line}\x1b[0m`);
+		out.set(RESET, at);
+		lines.push(rowDecoder.decode(out.subarray(0, at + RESET.length)));
 	}
 	return lines;
 }

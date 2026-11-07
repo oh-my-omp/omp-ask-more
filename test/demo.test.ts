@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { halfBlockRows, loadDemo, rasterSize } from "../src/demo.ts";
+import { halfBlockRows, loadDemo, loadQuestionDemos, rasterSize } from "../src/demo.ts";
 import { tr } from "../src/i18n.ts";
 import { demoSchema } from "../src/schema.ts";
 
@@ -22,6 +22,29 @@ describe("halfBlockRows", () => {
 		// 2 × 2 pixels: the same upper pixel over two different lower pixels.
 		const frame = new Uint8Array([1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3]);
 		expect(halfBlockRows(frame, 2, 1)).toEqual(["\x1b[38;2;1;1;1;48;2;2;2;2m▀\x1b[48;2;3;3;3m▀\x1b[0m"]);
+	});
+
+	it("writes every channel value in decimal, on rasters wider than the page allows", () => {
+		// 70 × 2 pixels: channel values cycle through 1-, 2- and 3-digit numbers; no two cells match.
+		const values = [0, 9, 10, 99, 100, 255];
+		const width = 70;
+		const frame = new Uint8Array(width * 2 * 3).map((_, index) => values[index % values.length] ?? 0);
+		const expected = Array.from({ length: width }, (_, column) => {
+			const top = frame.subarray(column * 3, column * 3 + 3).join(";");
+			const bottom = frame.subarray((width + column) * 3, (width + column) * 3 + 3).join(";");
+			return `\x1b[38;2;${top};48;2;${bottom}m▀`;
+		});
+		// Equal neighbours keep their color: drop codes that repeat the previous cell's.
+		let previous = ["", ""];
+		const line = expected
+			.map(cell => {
+				const [, fg = "", bg = ""] = /38;2;([\d;]+);48;2;([\d;]+)m/.exec(cell) ?? [];
+				const parts = [fg === previous[0] ? "" : `38;2;${fg}`, bg === previous[1] ? "" : `48;2;${bg}`].filter(part => part !== "");
+				previous = [fg, bg];
+				return `${parts.length > 0 ? `\x1b[${parts.join(";")}m` : ""}▀`;
+			})
+			.join("");
+		expect(halfBlockRows(frame, width, 1)).toEqual([`${line}\x1b[0m`]);
 	});
 });
 
@@ -61,6 +84,28 @@ describe("loadDemo", () => {
 		const loaded = await loadDemo(demoSchema.parse({ kind: "file", path: "dot.gif", caption: " dot " }), dir, "native", 64, undefined);
 		expect(loaded).toMatchObject({ kind: "image", mime: "image/gif", caption: "dot" });
 		if (loaded?.kind === "image") expect(Buffer.from(loaded.bytes).equals(gif)).toBe(true);
+	});
+
+	it("keeps every demo in its question and option slot when more load than run at once", async () => {
+		const frames = (body: string) => demoSchema.parse({ kind: "frames", frames: [{ body }, { body: `${body}'` }] });
+		const missing = (path: string) => demoSchema.parse({ kind: "file", path });
+		const loaded = await loadQuestionDemos(
+			[
+				{ brief: { demo: missing("q0.gif") }, options: [{ demo: frames("o0") }, {}, { demo: missing("o2.mp4") }] },
+				{ brief: {}, options: [{ demo: missing("p0.png") }, { demo: frames("p1") }] },
+				{ brief: { demo: frames("q2") }, options: [{}, { demo: missing("r1.webp") }] },
+			],
+			dir,
+			"ansi",
+			64,
+			undefined,
+		);
+		const slot = (demo: (typeof loaded)[number]["question"]) => (demo === undefined ? "-" : demo.kind === "frames" ? (demo.frames[0]?.body ?? "") : demo.kind === "error" ? demo.path : demo.kind);
+		expect(loaded.map(question => [slot(question.question), ...question.options.map(slot)])).toEqual([
+			["q0.gif", "o0", "-", "o2.mp4"],
+			["-", "p0.png", "p1"],
+			["q2", "-", "r1.webp"],
+		]);
 	});
 
 	it("plays frames at the default interval when none is given", async () => {
