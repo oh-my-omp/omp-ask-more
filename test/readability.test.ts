@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { type BranchEntry, candidateTerms, gateUnlessRetry, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
 import { rejectedResult } from "../src/result.ts";
-import { type AskQuestion, parametersSchema } from "../src/schema.ts";
+import { type AskQuestion, askParamsSchema } from "../src/schema.ts";
 
-const questions: readonly AskQuestion[] = parametersSchema.parse({
+const questions: readonly AskQuestion[] = askParamsSchema.parse({
 	questions: [
 		{
 			id: "retry",
@@ -94,7 +94,7 @@ describe("readability gate", () => {
 	});
 
 	it("rejects a code that is neither common knowledge nor explained, and passes one that is either", async () => {
-		const coded = parametersSchema.parse({
+		const coded = askParamsSchema.parse({
 			questions: [
 				{
 					id: "coded",

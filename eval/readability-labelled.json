@@ -30,22 +30,6 @@
 						"where": "C1：会话 env 只能从该 Lab 的 daemon 集合 ∩ presence 中选（docs/design/pepgent/pepgent.md:134）；K1：daemon 集合唯一来源是 soroi 实例配置表的 ConfigGet（:198）；soroi 尚未实现（:24）；现有会话默认 envId='local'（apps/web/src/server/persistence/session-store.ts:166-168）。",
 						"what": "在 soroi 出现前，Lab 内的 AI 会话没有合法的 env 来源。设计没有过渡规则，而改设计或等待外部项目是产品与排期取舍。",
 						"how": "选过渡规则：先改 C1 与 lab-gateway 文档，第一条真实切片立即可做。选等 soroi：只做身份与 shell，Lab 切片排在 soroi 之后。选只做草稿：交付身份、shell 和 Draft/* 故事。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "docs/design/pepgent/pepgent.md",
-								"start": 129,
-								"end": 135,
-								"note": "Proposal、AgentSession 与 C1"
-							},
-							{
-								"kind": "file",
-								"path": "docs/design/pepgent/pepgent.md",
-								"start": 196,
-								"end": 205,
-								"note": "K1–K8"
-							}
-						],
 						"risks": [
 							"过渡规则若不随部署记录作废，会变成第二份 daemon 来源"
 						]
@@ -172,6 +156,24 @@
 						"what": "品牌外观是你的偏好，约定只规定落点。",
 						"how": "沿用：Draft 故事与页面全用语义 token。改主题：先在主题源改主色与标题字族，再画页面。"
 					}
+				}
+			],
+			"evidence": [
+				{
+					"question": "env_blocker",
+					"kind": "file",
+					"path": "docs/design/pepgent/pepgent.md",
+					"start": 129,
+					"end": 135,
+					"note": "Proposal、AgentSession 与 C1"
+				},
+				{
+					"question": "env_blocker",
+					"kind": "file",
+					"path": "docs/design/pepgent/pepgent.md",
+					"start": 196,
+					"end": 205,
+					"note": "K1–K8"
 				}
 			],
 			"labels": {
@@ -341,14 +343,7 @@
 					"brief": {
 						"where": "VM110 moat-app1：hapi-hub（running，约 170 MiB）、hapi-cloudflared；声明在 homelab-apps komodo/syncs/stacks.toml 的 [[stack]] hapi。",
 						"what": "#592 记录操作员说「hapi早就退役了」，但当时只删了 runner 的部署声明，明确不动 hub Stack。从仓库和代码无法判断 hub 是否仍在使用。",
-						"how": "选退役：按 K6 删除声明、停掉容器、保留卷，并删 cf-ingress hapi tunnel。选保留：只把它纳入 VM 重新规划。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "homelab-tf#592 范围边界",
-								"text": "不在范围: hapi hub Stack（homelab-apps 的 [[stack]] name = \"hapi\"）、cf-ingress 的 hapi tunnel、omv/pve 主机上的 runner 数据与 unit。"
-							}
-						]
+						"how": "选退役：按 K6 删除声明、停掉容器、保留卷，并删 cf-ingress hapi tunnel。选保留：只把它纳入 VM 重新规划。"
 					}
 				},
 				{
@@ -473,6 +468,14 @@
 					}
 				}
 			],
+			"evidence": [
+				{
+					"question": "hapi-hub",
+					"kind": "text",
+					"source": "homelab-tf#592 范围边界",
+					"text": "不在范围: hapi hub Stack（homelab-apps 的 [[stack]] name = \"hapi\"）、cf-ingress 的 hapi tunnel、omv/pve 主机上的 runner 数据与 unit。"
+				}
+			],
 			"labels": {
 				"operator-tools": "readable"
 			}
@@ -506,31 +509,34 @@
 					"brief": {
 						"where": "design/eval.md：“正式运行与测试”写“只有正式运行进 store，测试和试探从头到尾不进 store”；“试探与确认”写“只有最后那次 eval 写进 store，成为正式的一步”；占位表写“试探的结果由宿主持有，确认时写入 store”。",
 						"what": "文档没有写正式执行是怎么发生的：确认是触发一次正式执行，还是直接收下试探结果，还是另有一种调用。三处说法互相冲突，只能由你定。",
-						"how": "按你的选择改写“试探与确认”“正式运行与测试”和占位表，让三处只表达一种含义。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "design/eval.md",
-								"start": 138,
-								"end": 145,
-								"note": "试探与确认"
-							},
-							{
-								"kind": "file",
-								"path": "design/eval.md",
-								"start": 169,
-								"end": 173,
-								"note": "正式运行与测试"
-							},
-							{
-								"kind": "file",
-								"path": "design/eval.md",
-								"start": 190,
-								"end": 190,
-								"note": "我写的占位，和上面冲突"
-							}
-						]
+						"how": "按你的选择改写“试探与确认”“正式运行与测试”和占位表，让三处只表达一种含义。"
 					}
+				}
+			],
+			"evidence": [
+				{
+					"question": "formal",
+					"kind": "file",
+					"path": "design/eval.md",
+					"start": 138,
+					"end": 145,
+					"note": "试探与确认"
+				},
+				{
+					"question": "formal",
+					"kind": "file",
+					"path": "design/eval.md",
+					"start": 169,
+					"end": 173,
+					"note": "正式运行与测试"
+				},
+				{
+					"question": "formal",
+					"kind": "file",
+					"path": "design/eval.md",
+					"start": 190,
+					"end": 190,
+					"note": "我写的占位，和上面冲突"
 				}
 			],
 			"labels": {
@@ -548,23 +554,7 @@
 					"brief": {
 						"where": "design/ 下四份文档：soroi.md（值与捕获模型）、layers.md（从 AI4S 原型推出的待补层）、subagent.md（omp fork 重写 subagent）、remote.md（Komodo/Slurm/k8s 后端）。",
 						"what": "四份文档把四层东西都叫 soroi：值与捕获模型、omp fork（进程化 subagent、IRC、多读方）、执行后端、AI4S 业务界面。soroi.md:17 说“soroi 只负责值和捕获”，但 soroi.md:126-131 又把后端、omp 插件、omp fork 都列成 soroi 的组成。你自己也用过两种范围：“捕获和记录本质上只是 omp 里所需要的自定义插件”“就是做几个插件”，以及“soroi 的前端原型”“这是 soroi 的业务层”。名字覆盖到哪一层，代码和文档都决定不了，只能你定。",
-						"how": "选定后我按这个范围重写 soroi.md 的定义和组成表：范围外的部分改称“soroi 的宿主”“soroi 的执行层”或“建在 soroi 上的应用”，不再写成 soroi 自身的组成。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "design/soroi.md",
-								"start": 120,
-								"end": 131,
-								"note": "组成表把后端、omp 插件、omp fork、执行底座都列为 soroi 的组成"
-							},
-							{
-								"kind": "file",
-								"path": "design/remote.md",
-								"start": 72,
-								"end": 72,
-								"note": "store 只在这里被点名，四份文档都没定义它"
-							}
-						]
+						"how": "选定后我按这个范围重写 soroi.md 的定义和组成表：范围外的部分改称“soroi 的宿主”“soroi 的执行层”或“建在 soroi 上的应用”，不再写成 soroi 自身的组成。"
 					},
 					"options": [
 						{
@@ -592,23 +582,7 @@
 					"brief": {
 						"where": "soroi.md:21-28 把 Pure 写成 kernel 里的值：读取即登记、未消费即警告（soroi.md:102）。layers.md:25-29 又要求：记录比 kernel 活得久、旧值能在后续会话里重新成为 Pure、跨会话的消费关系可查；layers.md:47 要求函数和输入都相同就复用旧记录。",
 						"what": "这些要求只有在 Pure 的身份由 store 发放（键为函数版本 + 输入），kernel 里的 Pure 只是句柄时才成立。现有文档两种写法并存，store 本身也没有定义。不先定权威，记录、复用、来源这些 soroi 独有的部分就写不下去，而这正是 soroi 区别于“omp + 插件 + 后端”的地方。",
-						"how": "选 store 时，soroi.md 的重心移到记录模型：store 是值的唯一权威，Pure/Capture 是客户端 API，消费规则和未消费警告落在 store 的事实上。选 kernel 时，store 只是 kernel 值的日志副本，跨会话复用要另行定义。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "design/layers.md",
-								"start": 23,
-								"end": 30,
-								"note": "记录、跨会话引用与复用的要求"
-							},
-							{
-								"kind": "file",
-								"path": "design/soroi.md",
-								"start": 21,
-								"end": 28,
-								"note": "Pure 目前写成 kernel 内的值"
-							}
-						]
+						"how": "选 store 时，soroi.md 的重心移到记录模型：store 是值的唯一权威，Pure/Capture 是客户端 API，消费规则和未消费警告落在 store 的事实上。选 kernel 时，store 只是 kernel 值的日志副本，跨会话复用要另行定义。"
 					},
 					"options": [
 						{
@@ -623,6 +597,40 @@
 						}
 					],
 					"recommended": 0
+				}
+			],
+			"evidence": [
+				{
+					"question": "scope",
+					"kind": "file",
+					"path": "design/soroi.md",
+					"start": 120,
+					"end": 131,
+					"note": "组成表把后端、omp 插件、omp fork、执行底座都列为 soroi 的组成"
+				},
+				{
+					"question": "scope",
+					"kind": "file",
+					"path": "design/remote.md",
+					"start": 72,
+					"end": 72,
+					"note": "store 只在这里被点名，四份文档都没定义它"
+				},
+				{
+					"question": "authority",
+					"kind": "file",
+					"path": "design/layers.md",
+					"start": 23,
+					"end": 30,
+					"note": "记录、跨会话引用与复用的要求"
+				},
+				{
+					"question": "authority",
+					"kind": "file",
+					"path": "design/soroi.md",
+					"start": 21,
+					"end": 28,
+					"note": "Pure 目前写成 kernel 内的值"
 				}
 			],
 			"labels": {
@@ -640,24 +648,7 @@
 					"brief": {
 						"where": "草稿 agent/extensions/tool-topics/TOPIC-task-judge.md（未提交）。eval 里 judge() 实测可用：单次约 0.5 秒，能识别出一个 assignment 塞了两件事（single=0.33），也能判出结果满足验收（done=1）；judgeBatch 正确分出 research/change/mixed 三类。",
 						"what": "两位评审都要求删掉草稿中的拆分、isolated、完成度三条判断，因为 task-split-check、isolation-nudge、task-completion-judge 已经在派发和交付时自动做了。删完之后 topic 主写哪种用法，取决于你说的“意图”指什么，代码和文档里找不到答案。",
-						"how": "选 A：topic 主写给不是模型自己写的批量条目分诊，再按标签决定派发方式；judgeBatch 的具体写法指向 tool://eval/workflow。选 B：topic 主写用户请求有多种合理理解时，先列出候选理解，用 judge 选一个再写 assignment。选 C：两种都写，A 在前。三种都会删掉重复钩子的那三条，加一句“这些检查钩子已经在做”，然后跑真实会话验证。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "discuss:divergent 评审",
-								"text": "judge 只能看到你传进去的 state；主模型读用户消息时有完整上下文，让一个看不到上下文的小模型判断‘追问状态还是新任务’，结果更差，还多一步。"
-							},
-							{
-								"kind": "text",
-								"source": "discuss:steady 评审",
-								"text": "when: before classifying ambiguous request intent with eval judge to shape a task assignment"
-							},
-							{
-								"kind": "text",
-								"source": "本会话实测：task-completion-judge 日志判定 done，但交付结果里没有 completion_judge 字段",
-								"text": "Structured / StructuredOn 两次结果都只有 {\"answer\"|\"result\": \"DELTA\"}"
-							}
-						]
+						"how": "选 A：topic 主写给不是模型自己写的批量条目分诊，再按标签决定派发方式；judgeBatch 的具体写法指向 tool://eval/workflow。选 B：topic 主写用户请求有多种合理理解时，先列出候选理解，用 judge 选一个再写 assignment。选 C：两种都写，A 在前。三种都会删掉重复钩子的那三条，加一句“这些检查钩子已经在做”，然后跑真实会话验证。"
 					},
 					"options": [
 						{
@@ -677,6 +668,26 @@
 						}
 					],
 					"recommended": 0
+				}
+			],
+			"evidence": [
+				{
+					"question": "judge_scope",
+					"kind": "text",
+					"source": "discuss:divergent 评审",
+					"text": "judge 只能看到你传进去的 state；主模型读用户消息时有完整上下文，让一个看不到上下文的小模型判断‘追问状态还是新任务’，结果更差，还多一步。"
+				},
+				{
+					"question": "judge_scope",
+					"kind": "text",
+					"source": "discuss:steady 评审",
+					"text": "when: before classifying ambiguous request intent with eval judge to shape a task assignment"
+				},
+				{
+					"question": "judge_scope",
+					"kind": "text",
+					"source": "本会话实测：task-completion-judge 日志判定 done，但交付结果里没有 completion_judge 字段",
+					"text": "Structured / StructuredOn 两次结果都只有 {\"answer\"|\"result\": \"DELTA\"}"
 				}
 			],
 			"labels": {
@@ -712,23 +723,7 @@
 					"brief": {
 						"where": "design/intent-register.md 第 0 节有原话来源的会话 id 和 entry；design/intent-audit.md 对照的是一份已删除的“旧稿”（:3），不是你的原话，也不是 astra 的原设计。系统文档 §1 现在只有意图编号和原话片段。",
 						"what": "你在上一个会话里说过：“文档里没有一个字提到原始意图，详细的来源是什么，对照原始的差异”。你也说过“原本良好的有边界的复杂的设计”，而那次任务是接手 astra 的设计。所以“原始”有两种读法，按哪一种做，文档内容完全不同。",
-						"how": "选原话：系统文档 §1 改为“意图编号 → 原话直接给出的 / 本设计推导的”，详细来源统一放在 intent-register，intent-audit.md 拆掉。选 astra 原设计：先由只读调查从 astra 会话整理出原设计，再逐系统写出差异。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "design/intent-audit.md",
-								"start": 3,
-								"end": 3,
-								"note": "现有对照对象是已删除的旧稿"
-							},
-							{
-								"kind": "file",
-								"path": "design/intent-register.md",
-								"start": 7,
-								"end": 13,
-								"note": "原话来源与会话 id"
-							}
-						]
+						"how": "选原话：系统文档 §1 改为“意图编号 → 原话直接给出的 / 本设计推导的”，详细来源统一放在 intent-register，intent-audit.md 拆掉。选 astra 原设计：先由只读调查从 astra 会话整理出原设计，再逐系统写出差异。"
 					}
 				},
 				{
@@ -753,6 +748,24 @@
 						"what": "调查底稿记录的是取证事实，不是设计，所以“不写代码规则”这类设计文档规则未必适用；但你说的是“全部”。",
 						"how": "只修 design/：调查底稿不动，设计文档引用它们作为证据。也修底稿：先审计再删改，改动的是证据文本。"
 					}
+				}
+			],
+			"evidence": [
+				{
+					"question": "original",
+					"kind": "file",
+					"path": "design/intent-audit.md",
+					"start": 3,
+					"end": 3,
+					"note": "现有对照对象是已删除的旧稿"
+				},
+				{
+					"question": "original",
+					"kind": "file",
+					"path": "design/intent-register.md",
+					"start": 7,
+					"end": 13,
+					"note": "原话来源与会话 id"
 				}
 			],
 			"labels": {
@@ -788,23 +801,7 @@
 					"brief": {
 						"where": "AIRI 桌面版本地有个消息通道 ws://127.0.0.1:6121/ws，外部程序用 AIRI 自己生成的密钥（~/Library/Application Support/ai.moeru.airi/server-channel-config.json）登录后可以往里发三种消息。omp 这边，omp-todo-more 每次 DONE 都会在工具结果里带上「这次完成了哪些项」，另一个 omp 插件可以监听到。",
 						"what": "三种消息对你的打扰程度完全不同，这是口味问题，代码决定不了。",
-						"how": "我会写一个 omp 插件：每个 omp 进程启动时连上 AIRI，把这个进程当前全部 todo 交给她（这就是你说的「初始化」）；之后每次完成按你选的方式推送；omp 进程退出时 AIRI 自动忘掉它的 todo。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "packages/plugin-protocol/src/types/events.ts",
-								"start": 1284,
-								"end": 1324,
-								"note": "spark:notify：通知角色，模型可以选择不回应"
-							},
-							{
-								"kind": "file",
-								"path": "packages/core-agent/src/agents/spark-notify/agent.ts",
-								"start": 87,
-								"end": 93,
-								"note": "提示词明确允许她不出声"
-							}
-						]
+						"how": "我会写一个 omp 插件：每个 omp 进程启动时连上 AIRI，把这个进程当前全部 todo 交给她（这就是你说的「初始化」）；之后每次完成按你选的方式推送；omp 进程退出时 AIRI 自动忘掉它的 todo。"
 					}
 				},
 				{
@@ -827,16 +824,7 @@
 					"brief": {
 						"where": "omp-todo-more 给 task:high/mid/low/free 子代理也装了 todo 工具，每个子代理有自己的 todo；插件能通过 ctx.agent.kind 分辨 main 还是 sub。",
 						"what": "子代理的 todo 是主任务的拆细步骤，推不推影响信息量和噪音。",
-						"how": "选只推主会话：插件忽略 kind=sub 的会话。选都推：子代理的 todo 挂在它的主会话下面一起交给 AIRI。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/index.ts",
-								"start": 73,
-								"end": 78,
-								"note": "子代理也装了 todo 工具"
-							}
-						]
+						"how": "选只推主会话：插件忽略 kind=sub 的会话。选都推：子代理的 todo 挂在它的主会话下面一起交给 AIRI。"
 					}
 				},
 				{
@@ -859,17 +847,42 @@
 					"brief": {
 						"where": "AIRI 收到的进度只存在内存里，重启就没了；但 omp 每个会话的 todo 每次变化都已经写进 ~/.omp/agent/sessions/**/*.jsonl，带时间戳。",
 						"what": "「每天都在干什么」需要能回看过去，记录本来就在 omp 的会话文件里，只差一个读取工具。",
-						"how": "选要：做一个 AIRI 能调用的查询工具（接到 AIRI 的 MCP 设置里），按日期读 omp 会话文件、列出当天完成的项；不另存一份数据。选不要：只做推送和初始化。",
-						"evidence": [
-							{
-								"kind": "file",
-								"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/src/commit.ts",
-								"start": 14,
-								"end": 33,
-								"note": "每次 todo 变化都写进会话记录"
-							}
-						]
+						"how": "选要：做一个 AIRI 能调用的查询工具（接到 AIRI 的 MCP 设置里），按日期读 omp 会话文件、列出当天完成的项；不另存一份数据。选不要：只做推送和初始化。"
 					}
+				}
+			],
+			"evidence": [
+				{
+					"question": "push",
+					"kind": "file",
+					"path": "packages/plugin-protocol/src/types/events.ts",
+					"start": 1284,
+					"end": 1324,
+					"note": "spark:notify：通知角色，模型可以选择不回应"
+				},
+				{
+					"question": "push",
+					"kind": "file",
+					"path": "packages/core-agent/src/agents/spark-notify/agent.ts",
+					"start": 87,
+					"end": 93,
+					"note": "提示词明确允许她不出声"
+				},
+				{
+					"question": "scope",
+					"kind": "file",
+					"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/index.ts",
+					"start": 73,
+					"end": 78,
+					"note": "子代理也装了 todo 工具"
+				},
+				{
+					"question": "history",
+					"kind": "file",
+					"path": "/Users/mouriya/Ext/code/omomp/omp-todo-more/src/commit.ts",
+					"start": 14,
+					"end": 33,
+					"note": "每次 todo 变化都写进会话记录"
 				}
 			],
 			"labels": {
@@ -888,26 +901,6 @@
 						"where": "design/layers.md:9 写着“`Agent` 体按智能体模板启动，模板规定 harness”，出处是原型的“设置·智能体模板”页（lab-assistant 用 Claude Code，verdict-scorer 用 Codex CLI，lit-scout 用 Pi，oc-sandbox 用 OpenCode）。但前面讨论的结论是“eval 启动的是 omp 自己的 subagent”。两者对远程运行的要求完全不同。",
 						"what": "三个后端的调研结论：Komodo、Slurm、k8s 都只管启动、状态、中止和日志，都不提供文件进出和运行后浏览，也都不保证远程能连回 soroi。harness 放在哪边，决定了缺的这两块由谁补、怎么补。这是产品取向，代码和文档定不了。",
 						"how": "选本机：每个后端只需实现 open / exec / close 三个操作，文件进出走 exec 上的 tar 管道，由本机中间件主动拉取；不需要远程连回，模板镜像不用改，Slurm 计算节点也不需要能访问模型 API。选远程：每个模板运行环境都要带一个 runner，负责拉输入、交回结果、上传文件、结束时上传工作目录；soroi 要有远程能访问的 gateway 和 store；后端适配器是 launch / status / tail / abort。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "local://Slurm.md:94（Princeton 站点政策）",
-								"text": "compute-node internet API access via proxy/default is very limited and preapproved … general internet access is not supported.",
-								"note": "远程连回在实验室集群上通常是最难拿到的前提"
-							},
-							{
-								"kind": "text",
-								"source": "local://Komodo.md:15",
-								"text": "RunStackService automatically removes the one-off container. Its unmounted writable filesystem is therefore not a post-run artifact store.",
-								"note": "选远程 harness 时，文件必须在容器退出前推出去"
-							},
-							{
-								"kind": "text",
-								"source": "本会话工具清单 remote_env_init / container_exec",
-								"text": "Open an interactive PTY in the current remote-build container through Komodo",
-								"note": "omp 里已有“agent 在本机、工作区在 Komodo 容器里”的同类机制（只看了描述，没读实现）"
-							}
-						],
 						"risks": [
 							"选本机：每次工具调用都要跨一次网络，频繁跑 bash 的 agent 会变慢；智能体模板页的“按模板选 harness”变成只选模型和模板文件",
 							"选远程：runner + gateway + store 是最大的一块工作；每个站点都要放行从计算节点到 soroi 和模型 API 的出口"
@@ -939,21 +932,7 @@
 					"brief": {
 						"where": "Komodo 2.3 不支持 k8s（路线图上标为 Undecided）。调研过的候选：Rancher、Portainer、Karmada、OCM、Argo Workflows、Kueue、Volcano、Tekton，详见 local://K8sFront.md。",
 						"what": "你说 k8s 可以引入一个类似 Komodo 的东西。几个候选能力差别很大，而且不论选哪个，soroi 这一侧调用的都是同一套 k8s API，差别只在连接方式和要额外运维的组件。",
-						"how": "选 kubeconfig：模板目录记录集群 context 和 namespace，适配器直接用 @kubernetes/client-node 操作 Job/Pod，不多部署任何东西。选 Rancher：适配器不变，只是 kubeconfig 指向 Rancher 代理；下游集群的 agent 主动连 Rancher，soroi 只连一个入口，但要运维一整套 Rancher。选 Argo：k8s 后端改走 Argo 的 Workflow、模板和 artifact，和另外两个后端的数据通路就不一样了。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "local://K8sFront.md:92",
-								"text": "Rancher explicitly says the authentication proxy forwards all Kubernetes API calls and generates downstream kubeconfigs that proxy through Rancher.",
-								"note": "Rancher 是最接近 Komodo 的“一个入口管多个集群”"
-							},
-							{
-								"kind": "text",
-								"source": "local://K8sFront.md:13",
-								"text": "Argo Workflows is the closest execution-oriented match … ordinary Argo is not itself a fleet-wide job gateway.",
-								"note": "Argo 强在模板和 artifact，不管多集群"
-							}
-						]
+						"how": "选 kubeconfig：模板目录记录集群 context 和 namespace，适配器直接用 @kubernetes/client-node 操作 Job/Pod，不多部署任何东西。选 Rancher：适配器不变，只是 kubeconfig 指向 Rancher 代理；下游集群的 agent 主动连 Rancher，soroi 只连一个入口，但要运维一整套 Rancher。选 Argo：k8s 后端改走 Argo 的 Workflow、模板和 artifact，和另外两个后端的数据通路就不一样了。"
 					},
 					"options": [
 						{
@@ -973,6 +952,43 @@
 						}
 					],
 					"recommended": 0
+				}
+			],
+			"evidence": [
+				{
+					"question": "harness",
+					"kind": "text",
+					"source": "local://Slurm.md:94（Princeton 站点政策）",
+					"text": "compute-node internet API access via proxy/default is very limited and preapproved … general internet access is not supported.",
+					"note": "远程连回在实验室集群上通常是最难拿到的前提"
+				},
+				{
+					"question": "harness",
+					"kind": "text",
+					"source": "local://Komodo.md:15",
+					"text": "RunStackService automatically removes the one-off container. Its unmounted writable filesystem is therefore not a post-run artifact store.",
+					"note": "选远程 harness 时，文件必须在容器退出前推出去"
+				},
+				{
+					"question": "harness",
+					"kind": "text",
+					"source": "本会话工具清单 remote_env_init / container_exec",
+					"text": "Open an interactive PTY in the current remote-build container through Komodo",
+					"note": "omp 里已有“agent 在本机、工作区在 Komodo 容器里”的同类机制（只看了描述，没读实现）"
+				},
+				{
+					"question": "k8sfront",
+					"kind": "text",
+					"source": "local://K8sFront.md:92",
+					"text": "Rancher explicitly says the authentication proxy forwards all Kubernetes API calls and generates downstream kubeconfigs that proxy through Rancher.",
+					"note": "Rancher 是最接近 Komodo 的“一个入口管多个集群”"
+				},
+				{
+					"question": "k8sfront",
+					"kind": "text",
+					"source": "local://K8sFront.md:13",
+					"text": "Argo Workflows is the closest execution-oriented match … ordinary Argo is not itself a fleet-wide job gateway.",
+					"note": "Argo 强在模板和 artifact，不管多集群"
 				}
 			],
 			"labels": {
@@ -1123,14 +1139,7 @@
 					"brief": {
 						"where": "fork-features/monitor-subscription.ts: regex 模式每批匹配行是一个事件，算一次 return，默认 max_returns=10。judge 每个间隔（默认 60s）对当前可见屏幕问一次 met/not_met，屏幕与上次已判屏幕相同则跳过。",
 						"what": "judge 的答案描述的是状态，不是事件。用户只规定了“意图+最后一屏、间隔默认 60 秒”，没规定 met 持续成立时重复唤醒的语义，代码和约定都决定不了。",
-						"how": "选边沿：记录上一次判定结果，仅 not_met→met 时发 monitor_judge_match。选电平：每次 met 都发，直到 max_returns。两者都只在进程 End 时结束（End 不判）。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "discuss:divergent review",
-								"text": "A changing screen where the intent stays true would still fire every interval, up to max_returns (default 10). That's about 10 wakes over 10 minutes, all saying the same thing."
-							}
-						]
+						"how": "选边沿：记录上一次判定结果，仅 not_met→met 时发 monitor_judge_match。选电平：每次 met 都发，直到 max_returns。两者都只在进程 End 时结束（End 不判）。"
 					}
 				},
 				{
@@ -1158,20 +1167,28 @@
 					"brief": {
 						"where": "fork-features/stop-gate.ts 的判定失败只用 ctx.ui.notify 提醒人，因为 stop gate 有后备检测器。monitor 没有后备检测器：等待的 agent 只靠 monitor 通知唤醒，沉默提醒默认 20 分钟后才发。",
 						"what": "运行期 judge 失败要通知谁、要不要结束 monitor，是取舍问题；两位评审意见相反（steady 支持通知并继续，divergent 支持通知并结束）。",
-						"how": "选项一新增 monitor_judge_failed 通知，monitor 下个周期重试。选项二复用 max_returns 的结束路径，再加失败通知。选项三只给人发 UI warning。启动时就没有 judge 模型，三种都直接返回 judge_unavailable 错误。",
-						"evidence": [
-							{
-								"kind": "text",
-								"source": "discuss:steady review",
-								"text": "推荐 (b)：每个连续 failure streak 的第一次失败发送一次 agent-facing notice；成功判断后重置；不计 max_returns、不结束 monitor。"
-							},
-							{
-								"kind": "text",
-								"source": "discuss:divergent review",
-								"text": "I back (c), end the monitor with an agent-facing failure notice: by the time a throw reaches you, all fallbacks have failed; what's left is mostly persistent."
-							}
-						]
+						"how": "选项一新增 monitor_judge_failed 通知，monitor 下个周期重试。选项二复用 max_returns 的结束路径，再加失败通知。选项三只给人发 UI warning。启动时就没有 judge 模型，三种都直接返回 judge_unavailable 错误。"
 					}
+				}
+			],
+			"evidence": [
+				{
+					"question": "trigger",
+					"kind": "text",
+					"source": "discuss:divergent review",
+					"text": "A changing screen where the intent stays true would still fire every interval, up to max_returns (default 10). That's about 10 wakes over 10 minutes, all saying the same thing."
+				},
+				{
+					"question": "failure",
+					"kind": "text",
+					"source": "discuss:steady review",
+					"text": "推荐 (b)：每个连续 failure streak 的第一次失败发送一次 agent-facing notice；成功判断后重置；不计 max_returns、不结束 monitor。"
+				},
+				{
+					"question": "failure",
+					"kind": "text",
+					"source": "discuss:divergent review",
+					"text": "I back (c), end the monitor with an agent-facing failure notice: by the time a throw reaches you, all fallbacks have failed; what's left is mostly persistent."
 				}
 			],
 			"labels": {

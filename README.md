@@ -173,9 +173,9 @@ The parameters are the native ones, without `multi`, plus extension fields:
 
 | Kept from the native `ask` | Added |
 |---|---|
-| tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
+| tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` | per question `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
 
-The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The shapes are written for it: a demo is one of two kinds, `{kind: "frames", frames, interval_ms?}` or `{kind: "file", path}`, and so is an evidence entry, `{kind: "file", path, start?, end?}`, whose lines are numbers, never text, or `{kind: "text", source, text, lang?}`. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
+The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The schema is one root object, with no union of objects at any depth and no nesting past a question's `brief` and `options`: a `kind` field picks the form of an evidence entry (`file`, whose lines are numbers and never text, or `text`) and of a demo (`frames` or `file`), and the fields of the other kind are left out. The evidence and demos of a call sit beside its questions and name the question `id` they belong to, an option's demo also naming the option's `label`. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
 
 The tool description contains the purpose and pointers to body-only topics served by `docTopics()`: `xd://ask/routing` (questions and skill/workflow mapping), `xd://ask/rounds` (dialog behavior, batching and retries), and `xd://ask/results` (answer variants). Together they explain:
 
@@ -203,20 +203,7 @@ ask({
       where: "retry() 与 3 处调用点，429 后上游出现重复写入。",
       what: "选择失败后的重试策略，决定是否引入幂等键。",
       how: "选 A 要加迁移；选 B 只改 retry() 内部，不动调用方。",
-      evidence: [
-        { kind: "file", path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
-        { kind: "file", path: "src/order/paid.ts", start: 88, end: 96 },
-        { kind: "text", source: "server.log, 2026-10-30 14:02", text: "POST /orders 429\nPOST /orders 200\nPOST /orders 200", note: "同一笔订单写了两次" }
-      ],
       diagram: "flowchart LR\n  client --> retry --> write",
-      demo: {
-        kind: "frames",
-        frames: [
-          { body: "`write #1` → 429", caption: "第一次写入被限流" },
-          { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
-        ],
-        interval_ms: 1500
-      },
       risks: ["迁移期间双写"]
     },
     options: [
@@ -224,8 +211,7 @@ ask({
         description: "需要 1 表 2 字段",
         tradeoff: "重试安全，代价是迁移",
         holds_when: "下游能给出稳定请求键",
-        cost: "1 张表、2 个字段，可回滚",
-        demo: { kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
+        cost: "1 张表、2 个字段，可回滚" },
       { label: "固定 3 次重试", description: "改动最小",
         tradeoff: "不动 schema，但重复写会继续发生",
         cost: "只改 retry() 内部" }
@@ -236,11 +222,25 @@ ask({
     question: "默认日志级别用哪一档？",
     brief: { where: "…", what: "…", how: "…" },
     options: [ /* … */ ]
-  }]
+  }],
+  evidence: [
+    { question: "retry-strategy", kind: "file", path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
+    { question: "retry-strategy", kind: "file", path: "src/order/paid.ts", start: 88, end: 96 },
+    { question: "retry-strategy", kind: "text", source: "server.log, 2026-10-30 14:02", text: "POST /orders 429\nPOST /orders 200\nPOST /orders 200", note: "同一笔订单写了两次" }
+  ],
+  demos: [
+    { question: "retry-strategy", kind: "frames",
+      frames: [
+        { body: "`write #1` → 429", caption: "第一次写入被限流" },
+        { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
+      ],
+      interval_ms: 1500 },
+    { question: "retry-strategy", option: "指数退避 + 幂等键", kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" }
+  ]
 })
 ```
 
-Limits: 2–5 options per question; no `multi`. Evidence has no count or length limit: a file entry's window is read up to its `end` and no further, so a few lines of a large file cost no more than a small file; `start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate entries. A text entry's `source` is one line. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
+Limits: 2–5 options per question; no `multi`. Every evidence entry and demo names the question it belongs to by `id`, and an option's demo its option by `label`; one naming a question or option the call does not hold, carrying a field of the other `kind`, or a second demo on the same brief or option is rejected with that field named. Evidence has no count or length limit: a file entry's window is read up to its `end` and no further, so a few lines of a large file cost no more than a small file; `start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate entries. A text entry's `source` is one line. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
 
 The result is the native one: `User answers:` and one line per question, in the order asked:
 

@@ -50,11 +50,13 @@ schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字�
 
 | 保持 | 新增 |
 |---|---|
-| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`）；不含 `multi`，每题只取一个答案 | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
+| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`）；不含 `multi`，每题只取一个答案 | 每题 `brief {where, what, how, diagram?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`；问题旁边另有 `evidence[]` 与 `demos[]`，都用 `id` 指明属于哪个问题，选项的演示另用 `label` 指明属于哪个选项 |
 
 `arktype` 保留未声明键，因此持久化的扩展调用仍能通过 `recoverAskQuestions`（`ask.ts:94-109`），`/tree` 重答会重新打开它；那里原生对话框只渲染原生字段。
 
-参数形状按严格模式选定，严格模式下模型必须生成每个字段。两种形状二选一时，用以 `kind` 区分的联合，模型只构造其中一支，不会去填另一支；“两个可选字段、只能给一个”的写法曾让严格模式下的模型发出 `{frames: […], path: ""}`。每个可选字符串都拒绝 `""`，所以空占位值和 null 一样在校验前被去掉。行号是整数，而不是 `"41-58"` 这样的字符串。`tryEnforceStrictSchema` 必须让 schema 保持严格（`test/schema.test.ts`）；它表达不了的形状会悄悄退回非严格模式。
+参数定义按插件 rule 要求的形状写：单个根对象，任何层级都没有对象联合，嵌套最深到问题的 `brief` 与 `options`。证据条目或演示是单个对象，由 `kind` 枚举选形状，另一形状的字段留空；`src/schema.ts#parseParams` 把调用映射成界面消费的内部判别联合，拒绝属于另一 `kind` 的字段、本 `kind` 缺的必填字段，以及指向本次调用不存在的问题或选项的引用。
+
+参数形状也按严格模式选定，严格模式下模型必须生成每个字段。`kind` 用不到的字段都保持可选，严格模式的模型把它们发成 `null`，由 omp 在校验前去掉；“两个可选字段、只能给一个”的写法曾让严格模式下的模型发出 `{frames: […], path: ""}`，所以按 `kind` 必填的检查放在 `parseParams` 而不是 schema。每个可选字符串都拒绝 `""`，所以空占位值和 null 一样在校验前被去掉。行号是整数，而不是 `"41-58"` 这样的字符串。`tryEnforceStrictSchema` 必须让 schema 保持严格（`test/schema.test.ts`）；它表达不了的形状会悄悄退回非严格模式。
 
 omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was …)`，所以每个字段的说明先写期望的值（`an array of …`、`non-empty text …`、`a 1-based line number …`、`a demo tagged by kind: …`），再写这个值的用途：把 `questions` 发成字符串的模型读到的是 “questions must be an array of independent decisions, … (was a string)”。一个说明里最多一个 " or "；多于一个时，检查会把它改写成并列的候选。
 
@@ -71,11 +73,15 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 ## 校验
 
-校验发生在工具边界、任何 UI 打开之前，检查每一题，一次返回全部问题，绝不降级成更薄的 ask。
+校验发生在工具边界、任何 UI 打开之前，检查每一题，一次返回全部问题，绝不降级成更薄的 ask。`parseParams` 在映射调用时把每条证据和演示挂到它的目标上，挂不上的记为该条目的问题并指明字段：
 
 | 规则 | 拒绝信息 |
 |---|---|
 | 至少一个问题 | `questions: empty` |
+| 证据或演示的 `question` 不是本次调用的题目 id | `evidence[i].question: "<id>" is not the id of any question in this call` |
+| 选项演示的 `option` 不是该题的选项标签 | `demos[i].option: "<label>" is not a label of an option of question "<id>"` |
+| 条目带了另一 `kind` 的字段，或缺本 `kind` 的必填字段 | 逐个指明字段与所属 `kind` |
+| 同一 brief 或选项上的第二个演示 | 指明位置与「每处一个」的规则 |
 | id 非空且在本次调用内唯一 | `questions[i].id: duplicate "<id>"` |
 | `brief.where/what/how` 非空 | `questions[i].brief.<field>: empty` |
 | 每个选项 `tradeoff` 非空 | `questions[i].options[j].tradeoff: empty` |
@@ -184,7 +190,7 @@ sequenceDiagram
 
 ```
 index.ts           插件入口：注册 ask、校验、运行可读性检查、挂载全屏 overlay、委托；给调用的 skill 加上规则
-src/schema.ts      原生字段 + brief/tradeoff、zod 参数、逐题校验
+src/schema.ts      wire 与内部 zod 形状、入口映射、原生投影、逐题校验
 src/brief.ts       证据：按工作目录读取文件行段、读到最后一行即停，文字证据切成行
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
 src/state.ts       每题状态（光标、答案、Other 输入框、折叠、滚动、演示播放）与当前标签

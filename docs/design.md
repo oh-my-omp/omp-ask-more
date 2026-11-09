@@ -50,11 +50,13 @@ The schema is the native one extended the way `omp-todo-more` extends `todo`:
 
 | Kept | Added |
 |---|---|
-| Tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` (`packages/coding-agent/src/tools/ask.ts:52-88`); not `multi`, since every question takes one answer | per question `brief {where, what, how, evidence?, diagram?, demo?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`, `demo?` |
+| Tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` (`packages/coding-agent/src/tools/ask.ts:52-88`); not `multi`, since every question takes one answer | per question `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
 
 `arktype` keeps undeclared keys, so a persisted extended call still passes `recoverAskQuestions` (`ask.ts:94-109`) and `/tree` re-answer reopens it; the native dialog there renders the native fields only.
 
-The shapes are chosen for strict mode, where the model has to produce every field. A choice between two shapes is a union tagged by `kind`, so the model builds one branch and never fills the other; two optional fields with an "exactly one" rule made strict models send `{frames: […], path: ""}`. Every optional string rejects `""`, so an empty placeholder is dropped before validation the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
+The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry or a demo is a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated unions the dialog consumes, rejecting a field of the other kind, a missing required one, and a reference to a question or option the call does not hold.
+
+The shapes are also chosen for strict mode, where the model has to produce every field. Each field a `kind` does not use stays optional, so a strict model sends it as `null`, which omp drops; two optional fields under an "exactly one" rule once made strict models send `{frames: […], path: ""}`, so required-with-kind is checked in `parseParams`, not the schema. Every optional string rejects `""`, so an empty placeholder is dropped before validation the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
 omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`, so each field's description opens with the value it expects (`an array of …`, `non-empty text …`, `a 1-based line number …`, `a demo tagged by kind: …`) and then says what the value is for: a model that sent `questions` as a string reads "questions must be an array of independent decisions, … (was a string)". A description holds at most one " or "; with more, the check rewrites it as a list of alternatives.
 
@@ -71,11 +73,15 @@ How the fields are drawn:
 
 ## Validation
 
-Validation runs at the tool boundary, before any UI opens, checks every question, returns every problem at once, and never degrades into a thinner ask.
+Validation runs at the tool boundary, before any UI opens, checks every question, returns every problem at once, and never degrades into a thinner ask. `parseParams` attaches every evidence entry and demo to its target while it maps the call, so an entry that misses its mark is a problem of that entry, named by field:
 
 | Rule | Rejection |
 |---|---|
 | at least one question | `questions: empty` |
+| an evidence entry or demo names a `question` id the call does not hold | `evidence[i].question: "<id>" is not the id of any question in this call` |
+| an option demo names an `option` label its question does not hold | `demos[i].option: "<label>" is not a label of an option of question "<id>"` |
+| an entry carries a field of the other `kind`, or lacks one its `kind` requires | names each field and the `kind` it belongs to |
+| a second demo on the same brief or option | names the slot and its one-demo rule |
 | ids non-empty and unique in the call | `questions[i].id: duplicate "<id>"` |
 | `brief.where/what/how` non-empty | `questions[i].brief.<field>: empty` |
 | every option has a non-empty `tradeoff` | `questions[i].options[j].tradeoff: empty` |
@@ -184,7 +190,7 @@ sequenceDiagram
 
 ```
 index.ts           plugin entry: registers ask, validates, runs the readability check, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
-src/schema.ts      native fields + brief/tradeoff, zod parameters, per-question validation
+src/schema.ts      wire and internal zod shapes, entry map, native projection, per-question validation
 src/brief.ts       evidence: file windows read up to their last line against the working directory, quoted text as lines
 src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
 src/state.ts       per-question state (cursor, answer, Other field, folding, scroll, demo playback) and the active tab
