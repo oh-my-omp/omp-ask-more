@@ -10,21 +10,31 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "@oh-my-pi/pi-coding-agent/sdk";
 import { type Finding, judgeReadability, unreadableQuestions } from "../src/readability.ts";
-import { questionSchema } from "../src/schema.ts";
+import { type AskQuestion, demoParamSchema, evidenceParamSchema, parseParams, questionParamSchema } from "../src/schema.ts";
 
+/** A recorded ask in the parameters the model sends, so reading the corpus exercises the entry parse. */
 const corpusSchema = z.object({
 	calls: z.array(
 		z.object({
 			id: z.string().min(1),
 			surface: z.enum(["sheet", "native"]),
-			questions: z.array(questionSchema).min(1),
+			questions: z.array(questionParamSchema).min(1),
+			evidence: z.array(evidenceParamSchema).optional(),
+			demos: z.array(demoParamSchema).optional(),
 			/** The human's verdict per question id; unlabelled questions are scored but not counted. */
 			labels: z.record(z.string(), z.enum(["readable", "hard"])).optional(),
 		}),
 	),
 });
 
-type RecordedCall = z.infer<typeof corpusSchema>["calls"][number];
+type CorpusCall = z.infer<typeof corpusSchema>["calls"][number];
+
+interface RecordedCall {
+	readonly id: string;
+	readonly surface: CorpusCall["surface"];
+	readonly questions: readonly AskQuestion[];
+	readonly labels?: CorpusCall["labels"];
+}
 
 interface Scored {
 	readonly call: RecordedCall;
@@ -82,8 +92,18 @@ async function main(): Promise<void> {
 			for (let index = next++; index < calls.length; index = next++) {
 				const call = calls[index];
 				if (call === undefined) break;
+				const checked = parseParams({
+					questions: call.questions,
+					...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+					...(call.demos === undefined ? {} : { demos: call.demos }),
+				});
+				if (!checked.ok) {
+					failed.push(`${call.id}: ${checked.problems.join("; ")}`);
+					continue;
+				}
+				const recorded: RecordedCall = { id: call.id, surface: call.surface, questions: checked.questions, ...(call.labels === undefined ? {} : { labels: call.labels }) };
 				try {
-					scored.push({ call, findings: await judgeReadability(judge, call.questions, call.surface, AbortSignal.timeout(120_000)) });
+					scored.push({ call: recorded, findings: await judgeReadability(judge, recorded.questions, recorded.surface, AbortSignal.timeout(120_000)) });
 				} catch (error) {
 					failed.push(`${call.id}: ${error instanceof Error ? error.message : String(error)}`);
 				}

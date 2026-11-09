@@ -20,7 +20,7 @@ import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
-import { type AskParams, type AskQuestion, nativeQuestion, parametersSchema, validate } from "./src/schema.ts";
+import { type AskParamsWire, type AskQuestion, nativeQuestion, parametersSchema, parseParams } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
 import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/timeout.ts";
@@ -117,11 +117,11 @@ function notifier(ctx: ExtensionContext, policy: TimeoutPolicy, questions: reado
 async function ask(
 	ctx: ExtensionContext,
 	ui: ExtensionUIContext,
-	params: AskParams,
+	params: AskParamsWire,
 	signal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
 ): Promise<AgentToolResult<AskToolDetails>> {
-	const checked = validate(params);
+	const checked = parseParams(params);
 	if (!checked.ok) return rejectedResult(checked.problems);
 	const questions = checked.questions;
 

@@ -173,9 +173,9 @@ stateDiagram-v2
 
 | 沿用原生 `ask` | 新增 |
 |---|---|
-| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?` | 每题 `brief {where, what, how, evidence?, diagram?, demo?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`、`demo?` |
+| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?` | 每题 `brief {where, what, how, diagram?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`；问题旁边另有 `evidence[]` 与 `demos[]`，都用 `id` 指明属于哪个问题，选项的演示另用 `label` 指明属于哪个选项 |
 
-工具按严格工具调用注册，provider 会把模型的参数限定在 schema 之内。参数形状也是按此设计的：演示是两种之一，`{kind: "frames", frames, interval_ms?}` 或 `{kind: "file", path}`；证据也是两种之一，`{kind: "file", path, start?, end?}` 用数字指明行号而不是文本，或 `{kind: "text", source, text, lang?}`。严格模式下，模型把没用到的可选字段都填成 `null`，omp 在检查调用之前把它们去掉。
+工具按严格工具调用注册，provider 会把模型的参数限定在 schema 之内。schema 是单个根对象，任何层级都没有对象联合，嵌套最深到问题的 `brief` 与 `options`：证据条目由 `kind` 选形状（`file` 的行号是数字而不是文本，或 `text`），演示同样由 `kind` 选（`frames` 或 `file`），另一形状的字段留空。一次调用的证据和演示与问题并列，用 `id` 指明所属问题；选项的演示另用 `label` 指明所属选项。严格模式下，模型把没用到的可选字段都填成 `null`，omp 在检查调用之前把它们去掉。
 
 工具说明只保留用途和指向 `docTopics()` 返回的纯正文 topic 的指针：`xd://ask/routing`（提问及 skill/工作流映射）、`xd://ask/rounds`（对话框行为、批次与重试）、`xd://ask/results`（答案变体）。它们共同说明：
 
@@ -203,20 +203,7 @@ ask({
       where: "retry() 与 3 处调用点，429 后上游出现重复写入。",
       what: "选择失败后的重试策略，决定是否引入幂等键。",
       how: "选 A 要加迁移；选 B 只改 retry() 内部，不动调用方。",
-      evidence: [
-        { kind: "file", path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
-        { kind: "file", path: "src/order/paid.ts", start: 88, end: 96 },
-        { kind: "text", source: "server.log, 2026-10-30 14:02", text: "POST /orders 429\nPOST /orders 200\nPOST /orders 200", note: "同一笔订单写了两次" }
-      ],
       diagram: "flowchart LR\n  client --> retry --> write",
-      demo: {
-        kind: "frames",
-        frames: [
-          { body: "`write #1` → 429", caption: "第一次写入被限流" },
-          { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
-        ],
-        interval_ms: 1500
-      },
       risks: ["迁移期间双写"]
     },
     options: [
@@ -224,8 +211,7 @@ ask({
         description: "需要 1 表 2 字段",
         tradeoff: "重试安全，代价是迁移",
         holds_when: "下游能给出稳定请求键",
-        cost: "1 张表、2 个字段，可回滚",
-        demo: { kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" } },
+        cost: "1 张表、2 个字段，可回滚" },
       { label: "固定 3 次重试", description: "改动最小",
         tradeoff: "不动 schema，但重复写会继续发生",
         cost: "只改 retry() 内部" }
@@ -236,11 +222,25 @@ ask({
     question: "默认日志级别用哪一档？",
     brief: { where: "…", what: "…", how: "…" },
     options: [ /* … */ ]
-  }]
+  }],
+  evidence: [
+    { question: "retry-strategy", kind: "file", path: "src/retry.ts", start: 41, end: 58, note: "现有重试只有 1 次" },
+    { question: "retry-strategy", kind: "file", path: "src/order/paid.ts", start: 88, end: 96 },
+    { question: "retry-strategy", kind: "text", source: "server.log, 2026-10-30 14:02", text: "POST /orders 429\nPOST /orders 200\nPOST /orders 200", note: "同一笔订单写了两次" }
+  ],
+  demos: [
+    { question: "retry-strategy", kind: "frames",
+      frames: [
+        { body: "`write #1` → 429", caption: "第一次写入被限流" },
+        { body: "`write #1` → 200 · `write #1` → 200", caption: "重试后同一笔写了两次" }
+      ],
+      interval_ms: 1500 },
+    { question: "retry-strategy", option: "指数退避 + 幂等键", kind: "file", path: "docs/retry-idempotent.gif", caption: "第二次写入被幂等键拦下" }
+  ]
 })
 ```
 
-限制：每题 2–5 个选项；不支持 `multi`。证据不限条数和行数：文件证据只读到行段的 `end` 为止，所以大文件里的几行和小文件一样便宜；只给 `start` 就是一行，两个都不给就显示文件前 40 行，不相邻的几段各写一条。文字证据的 `source` 只能是一行。演示：2–12 帧，每帧 300–5000 毫秒（默认 1200）；文件最大 16 MB，只播前 15 秒。违反规则的调用在任何界面打开之前就被拒绝，一次列出全部问题，由模型改好再调用。
+限制：每题 2–5 个选项；不支持 `multi`。每条证据和演示都用 `id` 指明所属问题，选项的演示另用 `label` 指明所属选项；指向调用里不存在的问题或选项、带上另一种 `kind` 的字段、或在同一简报或选项上给第二个演示，都会被拒绝并点名字段。证据不限条数和行数：文件证据只读到行段的 `end` 为止，所以大文件里的几行和小文件一样便宜；只给 `start` 就是一行，两个都不给就显示文件前 40 行，不相邻的几段各写一条。文字证据的 `source` 只能是一行。演示：2–12 帧，每帧 300–5000 毫秒（默认 1200）；文件最大 16 MB，只播前 15 秒。违反规则的调用在任何界面打开之前就被拒绝，一次列出全部问题，由模型改好再调用。
 
 结果是原生形状：`User answers:` 加每题一行，按提问顺序：
 
