@@ -8,7 +8,10 @@
 		"type": "git",
 		"url": "git+https://github.com/oh-my-omp/omp-ask-more.git"
 	},
-	"files": ["index.ts", "src", "tern"],
+	"files": ["index.ts", "src", "tern", "CHANGELOG.md"],
+	"omomp": {
+		"changelog": "CHANGELOG.md"
+	},
 	"omp": {
 		"extensions": ["./index.ts"],
 		"settings": {
