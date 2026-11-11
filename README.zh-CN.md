@@ -39,8 +39,10 @@ https://github.com/user-attachments/assets/101da4a7-ec8b-4c83-8286-2cd0d8a7d1fe
 ## 安装
 
 ```sh
-omp plugin install https://github.com/oh-my-omp/omp-ask-more
+omp plugin install https://github.com/oh-my-omp/omp-ask-more#release
 ```
+
+`#release` 是发布通道：`main` 上是开发中的改动，每天的发布运行把它们变成一个版本。每个版本的变更写在 [`CHANGELOG.md`](CHANGELOG.md) 里，升级后 omp 会把它们作为 What's New 显示出来。
 
 本地开发用 `omp plugin link /path/to/omp-ask-more`。不需要任何配置：[超时设置](#超时与通知)和[可读性检查](#可读性检查)都有默认值。原生 `ask` 要保持开启，没有 TUI 的会话会把提问交给它。
 
@@ -51,6 +53,10 @@ tern plugin install github.com/oh-my-omp/omp-ask-more/tern
 ```
 
 开发时用 `tern plugin link /path/to/omp-ask-more/tern`。两者都会让 Tern 重新加载插件，无需重启。它让 ask 面板用上 omp 其他 overlay 的无衬线字体，并在 Console 聊天风格下留出问题前 `?` 标记所在的左侧空白。不装它面板照常可用，简报以终端字体显示。
+
+## 发布
+
+PR 只在 [`CHANGELOG.md`](CHANGELOG.md) 的 `## [Unreleased]` 下写条目，不改版本号；提交用 [lgit](https://github.com/can1357/llm-git)，条目由它写。发布运行给这一段加上版本号和日期，同步 `package.json` 与 `tern/plugin.toml` 的版本，并把 `release` 分支和版本 tag 移到新提交上。它每天 GMT+9 02:00 运行一次，也可以手动触发；`## [Unreleased]` 下没有条目时不发布。
 
 ## 界面语言
 

@@ -39,8 +39,10 @@ https://github.com/user-attachments/assets/4b4f696c-136b-440b-a4d5-798a0f47e519
 ## Install
 
 ```sh
-omp plugin install https://github.com/oh-my-omp/omp-ask-more
+omp plugin install https://github.com/oh-my-omp/omp-ask-more#release
 ```
+
+`#release` is the release channel: `main` carries the work in progress, and a daily release run turns it into a version. Each version's changes are in [`CHANGELOG.md`](CHANGELOG.md), which omp shows as What's New after an update.
 
 For local development, `omp plugin link /path/to/omp-ask-more`. Nothing needs configuring: the [timeout settings](#timeout-and-notifications) and the [readability check](#readability-check) have defaults. Keep the native `ask` enabled; sessions without the TUI hand the ask to it.
 
@@ -51,6 +53,10 @@ tern plugin install github.com/oh-my-omp/omp-ask-more/tern
 ```
 
 or `tern plugin link /path/to/omp-ask-more/tern` while developing. Either one reloads Tern's plugins; no restart is needed. It gives the ask sheet the sans text face of omp's other overlays and, in the Console chat style, the gutter the question's `?` marker hangs in. Without it the sheet works and shows the brief in the terminal face.
+
+## Releases
+
+A pull request adds its entries under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) and leaves the version alone; commits are made with [lgit](https://github.com/can1357/llm-git), which writes them. The release run gives that section a version and a date, bumps `package.json` and `tern/plugin.toml`, and moves the `release` branch and the version tag to the new commit. It runs every day at 02:00 GMT+9 and can also be started by hand; with nothing under `## [Unreleased]` it publishes nothing.
 
 ## UI language
 
