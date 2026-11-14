@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-11-15
+
 ### Changed
 
 - Ran `notify.command` through omp's built-in POSIX shell so it behaves the same on every platform instead of spawning `sh -c`
