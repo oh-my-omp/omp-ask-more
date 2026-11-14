@@ -1,7 +1,7 @@
 // Delivery of a timeout notification. Best effort: a channel that fails becomes a warning in the
 // session and never changes the ask, which keeps waiting or hands over on its own clock.
+import { Shell } from "@oh-my-pi/pi-natives";
 import { TERMINAL } from "@oh-my-pi/pi-tui";
-import { ptree } from "@oh-my-pi/pi-utils";
 import { tr } from "./i18n.ts";
 import { type Channel, clock } from "./timeout.ts";
 
@@ -36,21 +36,32 @@ export function commandEnvironment(event: NoticeEvent): Record<string, string> {
 	};
 }
 
+/**
+ * Runs the command in omp's own POSIX shell, inside this process, so it reads the same on every
+ * platform. That shell starts from the environment this process had at launch, so the current
+ * environment is passed whole, with the event variables on top.
+ */
 async function runCommand(command: string, event: NoticeEvent, warn: (message: string) => void): Promise<void> {
 	try {
-		const result = await ptree.exec(["sh", "-c", command], {
+		const result = await new Shell().run({
+			command,
 			cwd: event.cwd,
-			env: { ...Bun.env, ...commandEnvironment(event) },
-			timeout: COMMAND_TIMEOUT_MS,
-			allowNonZero: true,
-			allowAbort: true,
+			env: { ...definedEnvironment(), ...commandEnvironment(event) },
+			timeoutMs: COMMAND_TIMEOUT_MS,
 		});
 		// The command text may carry a token, so the warning names only the outcome.
-		if (result.exitError?.aborted) warn(tr(`notify command killed after ${COMMAND_TIMEOUT_MS / 1000} s`, `通知命令运行超过 ${COMMAND_TIMEOUT_MS / 1000} 秒，已终止`));
+		if (result.timedOut) warn(tr(`notify command killed after ${COMMAND_TIMEOUT_MS / 1000} s`, `通知命令运行超过 ${COMMAND_TIMEOUT_MS / 1000} 秒，已终止`));
 		else if (result.exitCode !== 0) warn(tr(`notify command exited with ${result.exitCode ?? "no status"}`, `通知命令退出码 ${result.exitCode ?? "未知"}`));
 	} catch (error) {
 		warn(tr(`notify command could not start: ${error instanceof Error ? error.message : String(error)}`, `通知命令无法启动：${error instanceof Error ? error.message : String(error)}`));
 	}
+}
+
+/** This process's environment without unset entries, as the shell takes only strings. */
+function definedEnvironment(): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [name, value] of Object.entries(Bun.env)) if (value !== undefined) env[name] = value;
+	return env;
 }
 
 /** Send `event` through every channel; returns at once, a command finishes in the background. */

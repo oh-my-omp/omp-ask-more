@@ -31,15 +31,15 @@
 	"peerDependencies": {
 		"@oh-my-pi/pi-agent-core": "*",
 		"@oh-my-pi/pi-coding-agent": "*",
-		"@oh-my-pi/pi-tui": "*",
-		"@oh-my-pi/pi-utils": "*"
+		"@oh-my-pi/pi-natives": "*",
+		"@oh-my-pi/pi-tui": "*"
 	},
 	"devDependencies": {
 		"@oh-my-pi/pi-agent-core": "latest",
 		"@oh-my-pi/pi-ai": "latest",
 		"@oh-my-pi/pi-coding-agent": "latest",
+		"@oh-my-pi/pi-natives": "latest",
 		"@oh-my-pi/pi-tui": "latest",
-		"@oh-my-pi/pi-utils": "latest",
 		"@types/bun": "latest",
 		"typescript": "latest"
 	}

@@ -117,7 +117,7 @@ An open ask counts down while nobody touches it. These are native **plugin setti
 |---|---|---|
 | `timeout` | `1800` | seconds without input before the first step; `0` turns timing off |
 | `notify.terminal` | `true` | at that step, a terminal notification (OSC 99, OSC 9 or BEL, whichever the terminal takes) |
-| `notify.command` | unset | at that step, a shell command run as `sh -c`; `OMP_ASK_MORE_NOTIFY_COMMAND` takes precedence, even when empty (which disables the command). A project command differing from the trusted global baseline is ignored with a warning |
+| `notify.command` | unset | at that step, a POSIX shell command, run in omp's own shell (the same on every platform); `OMP_ASK_MORE_NOTIFY_COMMAND` takes precedence, even when empty (which disables the command). A project command differing from the trusted global baseline is ignored with a warning |
 | `returnTimeout` | `1200` | seconds after the notification for you to come back |
 | `onExpiry` | `decide` | when the last countdown ends: `decide` hands the unanswered questions to the model, `wait` keeps the ask open |
 
