@@ -117,7 +117,7 @@ Ask-more 面向 OMP，不支持 Pi。界面标签与通知在生成文字时按�
 |---|---|---|
 | `timeout` | `1800` | 无操作多少秒后进入第一步；`0` 关闭计时 |
 | `notify.terminal` | `true` | 在这一步发终端通知（OSC 99、OSC 9 或 BEL，取终端支持的那种） |
-| `notify.command` | 未设置 | 在这一步以 `sh -c` 运行的 shell 命令；`OMP_ASK_MORE_NOTIFY_COMMAND` 优先，包括空值（关闭命令）。与可信全局基线不同的项目命令被忽略并给出警告 |
+| `notify.command` | 未设置 | 在这一步运行的 POSIX shell 命令，由 omp 自带的 shell 执行（各平台相同）；`OMP_ASK_MORE_NOTIFY_COMMAND` 优先，包括空值（关闭命令）。与可信全局基线不同的项目命令被忽略并给出警告 |
 | `returnTimeout` | `1200` | 通知之后留给你回来的秒数 |
 | `onExpiry` | `decide` | 最后一段倒计时结束时：`decide` 把未答的问题交给模型，`wait` 让 ask 一直开着 |
 
