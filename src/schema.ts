@@ -378,7 +378,7 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 	if (question.options.length < 2) {
 		problems.push(`${at}.options: a decision needs at least two options; act and state the choice instead of asking for one.`);
 	}
-			const seen = new Set<string>();
+	const seen = new Set<string>();
 	question.options.forEach((option, index) => {
 		const optionAt = `${at}.options[${index}]`;
 		const label = option.label.trim();
