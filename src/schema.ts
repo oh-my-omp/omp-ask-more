@@ -1,13 +1,15 @@
-// The tool's parameters: the native `ask` fields this plugin supports, plus the extension fields
-// that carry the decision. Native components render the native part and ignore the rest; this
-// plugin's component renders both. See README.md#what-the-model-sends-and-gets.
+// The tool's parameters: the questions of one decision batch — id, question, header, options and a
+// recommendation — plus the extension fields that carry the decision (brief, tradeoffs, evidence,
+// demos). The plugin's own page renders all of it; when a session cannot host that page, the batch
+// delegates to the host's `ask` as the HTML form `askFormHtml` builds. See
+// README.md#what-the-model-sends-and-gets.
 //
 // The model sees `parametersSchema`, whose shape follows the plugin rule (工具参数「形状」): one
 // root object and no object union anywhere. An evidence entry and a demo are single objects whose
 // `kind` enum picks the form, and the entries of a call sit beside the questions, keyed back by
 // question id and option label, so an object never nests deeper than two levels (a demo's frames
 // are the second level). `parseParams` maps that into the internal shapes below — the
-// discriminated unions the dialog, the readability check and the native projection consume — and
+// discriminated unions the dialog, the readability check and the form generator consume — and
 // rejects a field that does not belong to its `kind` or names a question or option the call does
 // not hold, before any UI opens.
 //
@@ -20,11 +22,10 @@
 // more, the check rewrites the text as a list of alternatives.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
-/** Labels the UI adds itself; the native tool rejects them too (`tools/ask.ts:52-58`). */
+/** Labels a surface adds itself: the delegated form's `Other` answer, the sheet's `Other…` row. */
 export const RESERVED_LABELS: Readonly<Record<string, true>> = {
-	"Other (type your own)": true,
-	"Chat about this": true,
-	"Next →": true,
+	Other: true,
+	"Other…": true,
 };
 
 /** Demo bounds: enough frames to show a change over time, slow enough to read each one. */
@@ -90,7 +91,6 @@ export const briefSchema = z.object({
 export const optionSchema = z.object({
 	label: z.string().min(1).describe("the option's short title, shown on its row; unique within the question and not one the UI adds"),
 	description: z.string().min(1).describe("one line that disambiguates the option; never the tradeoff").optional(),
-	preview: z.string().min(1).describe("Markdown the native surface can show").optional(),
 	tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 	holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 	cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
@@ -106,7 +106,7 @@ export const questionSchema = z.object({
 	brief: briefSchema,
 });
 
-/** The internal parameters: what the dialog, the readability check and the native projection take. */
+/** The internal parameters: what the dialog, the readability check and the form generator take. */
 export const askParamsSchema = z.object({
 	questions: z.array(questionSchema).min(1).describe("an array of independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
 });
@@ -125,7 +125,6 @@ export const optionParamSchema = z
 	.object({
 		label: z.string().min(1).describe("the option's short title, shown on its row; unique within the question and not one the UI adds"),
 		description: z.string().min(1).describe("one line that disambiguates the option; never the tradeoff").optional(),
-		preview: z.string().min(1).describe("Markdown the native surface can show").optional(),
 		tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 		holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 		cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
@@ -272,7 +271,6 @@ function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
 		options: param.options.map(option => ({
 			label: option.label,
 			...(option.description === undefined ? {} : { description: option.description }),
-			...(option.preview === undefined ? {} : { preview: option.preview }),
 			tradeoff: option.tradeoff,
 			...(option.holds_when === undefined ? {} : { holds_when: option.holds_when }),
 			...(option.cost === undefined ? {} : { cost: option.cost }),
@@ -380,11 +378,12 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 	if (question.options.length < 2) {
 		problems.push(`${at}.options: a decision needs at least two options; act and state the choice instead of asking for one.`);
 	}
-	const seen = new Set<string>();
+			const seen = new Set<string>();
 	question.options.forEach((option, index) => {
 		const optionAt = `${at}.options[${index}]`;
 		const label = option.label.trim();
 		if (label.length === 0) problems.push(`${optionAt}.label: empty`);
+		else if (option.label !== option.label.replace(/\s+/g, " ").trim()) problems.push(`${optionAt}.label: one line with single spaces, so the form returns it unchanged`);
 		else if (RESERVED_LABELS[label] === true) problems.push(`${optionAt}.label: "${option.label}" is added by the UI; give the option its own label`);
 		else if (seen.has(label)) problems.push(`${optionAt}.label: duplicate "${option.label}"`);
 		else seen.add(label);
@@ -467,17 +466,31 @@ function validateFile(demo: FileDemo, at: string): string[] {
 	return [];
 }
 
-/** The native shape of one question: extension fields dropped, `preview` kept when the model wrote one. */
-export function nativeQuestion(question: AskQuestion): Record<string, unknown> {
-	return {
-		id: question.id,
-		question: question.question,
-		...(question.header !== undefined ? { header: question.header } : {}),
-		options: question.options.map(option => ({
-			label: option.label,
-			...(option.description !== undefined ? { description: option.description } : {}),
-			...(option.preview !== undefined ? { preview: option.preview } : {}),
-		})),
-		...(question.recommended !== undefined ? { recommended: question.recommended } : {}),
-	};
+/** Text or an attribute value as HTML. */
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * The batch as one HTML form for the host's `ask` ({@link ExtensionContext.invokeTool} takes
+ * `{html}`): a `<fieldset>` per question — its `header` as the legend, one `label: tradeoff`
+ * line per option, then the question as the text right before the group so the host's field
+ * questions read it — and a radio per option whose `value` is the label itself, with the
+ * `recommended` one checked. Radio groups get the host's own "Other" free-text answer; its
+ * prompt forbids a form-written one.
+ */
+export function askFormHtml(questions: readonly AskQuestion[]): string {
+	const sections = questions.map(question => {
+		const name = escapeHtml(question.id);
+		const legend = question.header === undefined ? "" : `<legend>${escapeHtml(question.header)}</legend>`;
+		const tradeoffs = `<ul>${question.options.map(option => `<li>${escapeHtml(option.label)}: ${escapeHtml(option.tradeoff)}</li>`).join("")}</ul>`;
+		const options = question.options
+			.map((option, index) => {
+				const label = escapeHtml(option.label);
+				return `<label><input type="radio" name="${name}" value="${label}"${index === question.recommended ? " checked" : ""}>${label}</label>`;
+			})
+			.join("\n");
+		return `<fieldset>${legend}${tradeoffs}<p>${escapeHtml(question.question)}</p>${options}</fieldset>`;
+	});
+	return `<form>\n${sections.join("\n")}\n</form>`;
 }

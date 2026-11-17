@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Changed `ask` parameters to a single object containing a `questions[]` list, removing the `preview` option
+- Changed `ask` result details from `results` to the host's `details.answers[]` form-answer array
+
+### Added
+
+- Added label validation that rejects `ask` option labels which are not single-spaced one-liners
+
+### Changed
+
+- Delegated the whole question batch to the host's native `ask` as one HTML form
+- Changed the reserved option labels to `Other` and `Other…`
+
+### Fixed
+
+- Stopped `/tree` from reopening asks, with answer cards showing `(no answer)` instead of `Cancelled`
+- Skipped the session judge for non-local agent sessions
+
 ## [0.1.14] - 2026-11-15
 
 ### Changed

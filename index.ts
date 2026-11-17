@@ -1,15 +1,18 @@
 /**
- * ask-more: registers `ask` under the native name with the native parameters extended by a
- * `brief` and per-option tradeoffs. An interactive TUI session answers in this plugin's component
- * (an ANSI dialog, or a modal sheet in Tern); any other session delegates to the native built-in,
- * which renders the native fields and ignores the extension ones. The answer and the persisted call
- * keep the native contracts (`AskToolDetails`, `/tree` recovery), so nothing downstream changes.
- * While `ask` is active, every user-invoked skill reaches the model with the rule that its
- * questions go through `ask` (src/skill-prompt.ts).
+ * ask-more: registers `ask` under the native name, with the questions extended by a `brief` and
+ * per-option tradeoffs. An interactive TUI session answers in this plugin's component (an ANSI
+ * dialog, or a modal sheet in Tern); any other session delegates the batch to the native
+ * built-in as one HTML form (src/schema.ts#askFormHtml). Results take the host's `AskToolDetails`
+ * shape (`details.answers[]`), so the transcript card draws every question and its answer; the
+ * persisted call keeps the model's own `questions[]` parameters, which the host's `/tree`
+ * re-answer cannot reopen — it lands on the result as an ordinary leaf. While `ask` is active,
+ * every user-invoked skill reaches the model with the rule that its questions go through `ask`
+ * (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
+import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session-handle";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
@@ -20,7 +23,7 @@ import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
-import { type AskParamsWire, type AskQuestion, nativeQuestion, parametersSchema, parseParams } from "./src/schema.ts";
+import { type AskParamsWire, type AskQuestion, askFormHtml, parametersSchema, parseParams } from "./src/schema.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
 import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/timeout.ts";
@@ -28,7 +31,7 @@ import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/time
 /** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
 let asking = false;
 
-/** The native dialog when this session cannot host the richer surface: the whole batch at once. */
+/** The host's own `ask` when this session cannot host the richer surface: the batch as one form. */
 async function delegate(
 	invoke: NonNullable<ExtensionContext["invokeTool"]>,
 	questions: readonly AskQuestion[],
@@ -36,7 +39,7 @@ async function delegate(
 	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
 ): Promise<AgentToolResult<AskToolDetails>> {
 	return invoke<AskToolDetails>(
-		{ questions: questions.map(nativeQuestion) },
+		{ html: askFormHtml(questions) },
 		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
 	);
 }
@@ -49,7 +52,8 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
 		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
-	if (session == null) return undefined;
+	// Only the session on this thread exposes the settings and registries the judge needs.
+	if (session == null || !isLocalAgentSession(session)) return undefined;
 	const chain = resolveJudge({
 		settings: session.settings,
 		registry: session.modelRegistry,

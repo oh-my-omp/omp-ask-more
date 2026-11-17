@@ -68,7 +68,12 @@ describe("timed-out result", () => {
 		expect(result.content).toEqual([
 			{ type: "text", text: 'User answers:\na: y\nb: (timed out: the user did not answer; decide it yourself with your best judgment)\nc: "mine"' },
 		]);
-		expect(result.details?.results?.map(entry => [entry.selectedOptions, entry.customInput])).toEqual([[["y"], undefined], [[], undefined], [[], "mine"]]);
+		expect(result.details?.answers?.map(entry => [entry.name, entry.question, entry.answer])).toEqual([
+			["a", "Pick a", "y"],
+			["b", "Pick b", ""],
+			["c", "Pick c", "mine"],
+		]);
+		expect(result.details && "timedOut" in result.details).toBe(false);
 	});
 
 	it("leaves a submitted unanswered question as cancelled", () => {
