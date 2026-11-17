@@ -13,6 +13,7 @@
 
 ### Changed
 
+- Rendered `ask` results and their descriptions through the host's ask card renderer so answers display like the built-in `ask`
 - Delegated the whole question batch to the host's native `ask` as one HTML form
 - Changed the reserved option labels to `Other` and `Other…`
 

@@ -10,7 +10,7 @@
  * (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { AgentRegistry, type AskToolDetails, askToolRenderer, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session-handle";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
@@ -199,7 +199,12 @@ export default function askMore(pi: ExtensionAPI): void {
 		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
-	} satisfies ToolDefinition<typeof parametersSchema> & { docTopics(): Readonly<Record<string, string>> };
+		// The host draws its ask card only for its built-in `ask`; this tool replaces it, so it hands
+		// its `{ answers }` details to the same renderer. The host renderer's `args` are the HTML form
+		// (it reads password fields from it); this tool's arguments are `questions[]`, so none are passed.
+		renderResult: (result, options, theme) => askToolRenderer.renderResult(result, options, theme),
+		describeResult: (result, options) => askToolRenderer.describeResult(result, options),
+	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & { docTopics(): Readonly<Record<string, string>> };
 	pi.registerTool(tool);
 	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
 	// place left to carry the rule. Registering costs omp a clone of the history per model call.
