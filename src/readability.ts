@@ -45,7 +45,7 @@ function dialog(question: AskQuestion, surface: Surface): JsonObject {
 			return {
 				...field("title", question.header),
 				question: question.question,
-				options: question.options.map((option): JsonObject => ({ label: option.label, ...field("note", option.description), ...field("preview", option.preview) })),
+				options: question.options.map((option): JsonObject => ({ label: option.label, effect: option.tradeoff })),
 			};
 	}
 }
@@ -59,7 +59,9 @@ function shownText(question: AskQuestion, surface: Surface): { readonly prose: s
 			return { prose, all: [...defined(question.header), ...prose, ...question.options.map(option => option.label)] };
 		}
 		case "native": {
-			const prose = [question.question, ...question.options.flatMap(option => defined(option.description, option.preview))];
+			// The delegated form shows the header as the section title, one `label: tradeoff`
+			// line per option as context, and the question; the brief never reaches it.
+			const prose = [question.question, ...question.options.map(option => option.tradeoff)];
 			return { prose, all: [...defined(question.header), ...prose, ...question.options.map(option => option.label)] };
 		}
 	}
@@ -264,7 +266,7 @@ export function readabilityProblems(failing: readonly Unreadable[], surface: Sur
 		case "sheet":
 			return problems;
 		case "native":
-			return [...problems, "this session shows only each question's text and header and each option's label, description and preview; the brief and tradeoffs are not shown, so put the context there"];
+			return [...problems, "this session shows only each question's text and header and each option's label and tradeoff; the brief is not shown, so put the context there"];
 	}
 }
 

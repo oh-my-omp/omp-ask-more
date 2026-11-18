@@ -115,7 +115,7 @@ describe("readability gate", () => {
 		expect(gate.problems[0]).not.toContain("`SSH`");
 	});
 
-	it("judges each question alone: the full sheet, or only the native fields when the native dialog shows the ask", async () => {
+	it("judges each question alone: the full sheet, or the text its delegated form shows", async () => {
 		const sheet: { state: string; asked: string[] }[] = [];
 		await readabilityGate(scripted(() => ({}), sheet), questions, "sheet", undefined, noWarn);
 		expect(sheet.some(call => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
@@ -124,8 +124,10 @@ describe("readability gate", () => {
 		const gate = await readabilityGate(scripted(() => ({ actor: 0 }), native), questions, "native", undefined, noWarn);
 		const retry = native.filter(call => call.state.includes("重试应该怎么做"));
 		expect(retry.length).toBeGreaterThan(0);
-		expect(retry.every(call => !call.state.includes("每次失败都立即重发") && !call.state.includes("不迁移，但重复写继续"))).toBe(true);
-		expect(gate.kind === "reject" && gate.problems.at(-1)).toContain("the brief and tradeoffs are not shown");
+		// The form shows the labels and their tradeoffs but never the brief.
+		expect(retry.some(call => call.state.includes("不迁移，但重复写继续"))).toBe(true);
+		expect(retry.every(call => !call.state.includes("每次失败都立即重发"))).toBe(true);
+		expect(gate.kind === "reject" && gate.problems.at(-1)).toContain("the brief is not shown");
 	});
 
 	it("asks without the check, with a warning, when the judge fails", async () => {
