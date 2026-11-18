@@ -6,7 +6,10 @@ import type { AskToolDetails, QuestionResult } from "@oh-my-pi/pi-coding-agent";
 import type { AskQuestion } from "./schema.ts";
 
 /** What the user gave one question. A cursor resting on an option is not an answer. */
-export type Answer = { readonly kind: "unanswered" } | { readonly kind: "option"; readonly index: number } | { readonly kind: "custom"; readonly text: string };
+export type Answer =
+	| { readonly kind: "unanswered" }
+	| { readonly kind: "option"; readonly index: number }
+	| { readonly kind: "custom"; readonly text: string };
 
 export const UNANSWERED: Answer = { kind: "unanswered" };
 
@@ -14,7 +17,7 @@ function questionResult(question: AskQuestion, answer: Answer): QuestionResult {
 	const base = {
 		id: question.id,
 		question: question.question,
-		options: question.options.map(option => option.label),
+		options: question.options.map((option) => option.label),
 		multi: false,
 	};
 	switch (answer.kind) {
@@ -43,7 +46,7 @@ function answerText(result: QuestionResult, unanswered: string): string {
 function batchResult(questions: readonly AskQuestion[], answers: readonly Answer[], unanswered: string): AgentToolResult<AskToolDetails> {
 	const results = questions.map((question, index) => questionResult(question, answers[index] ?? UNANSWERED));
 	return {
-		content: [{ type: "text", text: `User answers:\n${results.map(result => answerText(result, unanswered)).join("\n")}` }],
+		content: [{ type: "text", text: `User answers:\n${results.map((result) => answerText(result, unanswered)).join("\n")}` }],
 		details: { results },
 	};
 }
@@ -66,7 +69,7 @@ export function cancelledResult(questions: readonly AskQuestion[]): AgentToolRes
 /** A refused ask: the model gets every problem at once and calls again. */
 export function rejectedResult(problems: readonly string[]): AgentToolResult<Record<string, never>> {
 	return {
-		content: [{ type: "text", text: `ask rejected:\n${problems.map(problem => `- ${problem}`).join("\n")}` }],
+		content: [{ type: "text", text: `ask rejected:\n${problems.map((problem) => `- ${problem}`).join("\n")}` }],
 		details: {},
 		isError: true,
 	};

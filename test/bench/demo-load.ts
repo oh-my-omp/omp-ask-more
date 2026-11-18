@@ -35,12 +35,15 @@ const VIDEO_ERRORS = ["corrupt.mp4"];
 /** The file demos, four to a question: the question's own, then one per option. */
 function questions(): { brief: { demo?: DemoParams }; options: { demo?: DemoParams }[] }[] {
 	const names = video ? VIDEOS : MIXED;
-	const paths = [...Array.from({ length: count }, (_, index) => names[index % names.length] ?? ""), ...(video ? VIDEO_ERRORS : MIXED_ERRORS)];
+	const paths = [
+		...Array.from({ length: count }, (_, index) => names[index % names.length] ?? ""),
+		...(video ? VIDEO_ERRORS : MIXED_ERRORS),
+	];
 	const demos: DemoParams[] = paths.map((path, index) => ({ kind: "file", path, caption: `demo ${index}` }));
 	const grouped: { brief: { demo?: DemoParams }; options: { demo?: DemoParams }[] }[] = [];
 	for (let start = 0; start < demos.length; start += 4) {
 		const [own, ...options] = demos.slice(start, start + 4);
-		grouped.push({ brief: own === undefined ? {} : { demo: own }, options: [...options.map(demo => ({ demo })), {}] });
+		grouped.push({ brief: own === undefined ? {} : { demo: own }, options: [...options.map((demo) => ({ demo })), {}] });
 	}
 	return grouped;
 }
@@ -51,9 +54,25 @@ function described(demo: LoadedDemo | undefined): unknown {
 		case "frames":
 			return demo;
 		case "image":
-			return { kind: demo.kind, path: demo.path, caption: demo.caption, mime: demo.mime, size: demo.bytes.length, bytes: sha256(demo.bytes) };
+			return {
+				kind: demo.kind,
+				path: demo.path,
+				caption: demo.caption,
+				mime: demo.mime,
+				size: demo.bytes.length,
+				bytes: sha256(demo.bytes),
+			};
 		case "raster":
-			return { kind: demo.kind, path: demo.path, caption: demo.caption, width: demo.width, rows: demo.rows, intervalMs: demo.intervalMs, frames: demo.frames.length, pixels: sha256(...demo.frames) };
+			return {
+				kind: demo.kind,
+				path: demo.path,
+				caption: demo.caption,
+				width: demo.width,
+				rows: demo.rows,
+				intervalMs: demo.intervalMs,
+				frames: demo.frames.length,
+				pixels: sha256(...demo.frames),
+			};
 		case "error":
 			return demo;
 	}
@@ -79,11 +98,15 @@ if (args.worker) {
 		return child;
 	});
 
-	const { result, ms, rssBeforeMiB, liveBeforeMiB, committedBeforeMiB, mallocMiB } = await measured(() => sampledPeak(() => loadQuestionDemos(asked, fixtures, surface, COLUMNS, undefined)));
+	const { result, ms, rssBeforeMiB, liveBeforeMiB, committedBeforeMiB, mallocMiB } = await measured(() =>
+		sampledPeak(() => loadQuestionDemos(asked, fixtures, surface, COLUMNS, undefined)),
+	);
 	const loaded = result.result;
-	const errors = loaded.flatMap(entry => [entry.question, ...entry.options]).flatMap(demo => (demo?.kind === "error" ? [demo.error] : []));
+	const errors = loaded
+		.flatMap((entry) => [entry.question, ...entry.options])
+		.flatMap((demo) => (demo?.kind === "error" ? [demo.error] : []));
 	// The 20 s decode timeout fires on a loaded machine whatever the code under test: not a result to compare.
-	const timedOut = errors.find(error => /decoding took longer than|解码超过 \d+ 秒/.test(error));
+	const timedOut = errors.find((error) => /decoding took longer than|解码超过 \d+ 秒/.test(error));
 	if (timedOut !== undefined) {
 		console.log(`a decode timed out (${timedOut})`);
 		process.exit(EXIT_RETRY);
@@ -103,28 +126,33 @@ if (args.worker) {
 			wallMs: ms,
 		},
 		units: asked.length,
-		digest: sha256(JSON.stringify(loaded.map(entry => ({ question: described(entry.question), options: entry.options.map(described) })))),
+		digest: sha256(JSON.stringify(loaded.map((entry) => ({ question: described(entry.question), options: entry.options.map(described) })))),
 		notes: {
 			surface,
 			kinds: loaded
-				.flatMap(entry => [entry.question, ...entry.options])
-				.map(demo => (demo === undefined ? "-" : demo.kind === "error" ? `error(${demo.path}: ${demo.error})` : demo.kind))
+				.flatMap((entry) => [entry.question, ...entry.options])
+				.map((demo) => (demo === undefined ? "-" : demo.kind === "error" ? `error(${demo.path}: ${demo.error})` : demo.kind))
 				.join(","),
 		},
 	});
 } else {
 	await ensureFixtures();
-	await compare(import.meta.path, args, `demo-load: loadQuestionDemos, ${count} file demos + error cases, surface ${surface}${video ? ", videos near the GIF cap" : ""}`, [
-		{ name: "peakRssAboveStartMiB", unit: "MiB", expect: { kind: "lower", minDrop: video ? 0.15 : 0.3 } },
-		{ name: "peakRssMiB", unit: "MiB", expect: { kind: "report" } },
-		// mimalloc counts a reserved buffer at its full size in live, committed and requested bytes,
-		// though only the pages written become resident: shown, not judged.
-		{ name: "peakLiveMiB", unit: "MiB above window start", expect: { kind: "report" } },
-		{ name: "heldLiveMiB", unit: "MiB above window start", expect: { kind: "report" } },
-		{ name: "peakCommittedMiB", unit: "MiB above window start", expect: { kind: "report" } },
-		{ name: "mallocMiB", unit: "MiB requested", expect: { kind: "report" } },
-		{ name: "maxConcurrentDecoders", unit: "processes", expect: { kind: "atMost", limit: 2 } },
-		{ name: "decoders", unit: "processes", expect: { kind: "report" } },
-		{ name: "wallMs", unit: "ms", expect: { kind: "report" } },
-	]);
+	await compare(
+		import.meta.path,
+		args,
+		`demo-load: loadQuestionDemos, ${count} file demos + error cases, surface ${surface}${video ? ", videos near the GIF cap" : ""}`,
+		[
+			{ name: "peakRssAboveStartMiB", unit: "MiB", expect: { kind: "lower", minDrop: video ? 0.15 : 0.3 } },
+			{ name: "peakRssMiB", unit: "MiB", expect: { kind: "report" } },
+			// mimalloc counts a reserved buffer at its full size in live, committed and requested bytes,
+			// though only the pages written become resident: shown, not judged.
+			{ name: "peakLiveMiB", unit: "MiB above window start", expect: { kind: "report" } },
+			{ name: "heldLiveMiB", unit: "MiB above window start", expect: { kind: "report" } },
+			{ name: "peakCommittedMiB", unit: "MiB above window start", expect: { kind: "report" } },
+			{ name: "mallocMiB", unit: "MiB requested", expect: { kind: "report" } },
+			{ name: "maxConcurrentDecoders", unit: "processes", expect: { kind: "atMost", limit: 2 } },
+			{ name: "decoders", unit: "processes", expect: { kind: "report" } },
+			{ name: "wallMs", unit: "ms", expect: { kind: "report" } },
+		],
+	);
 }

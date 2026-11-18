@@ -53,10 +53,14 @@ export async function ensureFixtures(): Promise<string> {
 		if ("text" in file) {
 			await writeFile(partial, file.text);
 		} else {
-			const ffmpeg = Bun.spawn(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", file.lavfi, ...file.output, partial], { stderr: "inherit" });
+			const ffmpeg = Bun.spawn(
+				["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", file.lavfi, ...file.output, partial],
+				{ stderr: "inherit" },
+			);
 			if ((await ffmpeg.exited) !== 0) throw new Error(`ffmpeg could not make ${name}`);
 			const { size } = await stat(partial);
-			if (file.size !== undefined && (file.size === "under") !== size <= CAP) throw new Error(`${name} is ${size} bytes, expected ${file.size} ${CAP}`);
+			if (file.size !== undefined && (file.size === "under") !== size <= CAP)
+				throw new Error(`${name} is ${size} bytes, expected ${file.size} ${CAP}`);
 		}
 		await rename(partial, path);
 	}

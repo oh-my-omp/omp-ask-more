@@ -11,12 +11,15 @@
 // sentences and the candidate terms (a model does not list reliably) and decides what the answers add up to.
 import type { JsonValue, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { tr } from "./i18n.ts";
+import { tr } from "../omomp-shared/i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
 /** The part of the host's judge the gate uses: yes/no questions over one state. */
 export interface NoulJudge {
-	judge(request: JudgmentRequest<Record<string, NoulQuestion>>, options: { signal: AbortSignal }): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
+	judge(
+		request: JudgmentRequest<Record<string, NoulQuestion>>,
+		options: { signal: AbortSignal },
+	): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
 }
 
 /** Where the questions will be shown, which decides what text the reader actually gets. */
@@ -39,13 +42,17 @@ function dialog(question: AskQuestion, surface: Surface): JsonObject {
 				situation: question.brief.where,
 				decision: question.brief.what,
 				consequences: question.brief.how,
-				options: question.options.map((option): JsonObject => ({ label: option.label, effect: option.tradeoff, ...field("note", option.description) })),
+				options: question.options.map(
+					(option): JsonObject => ({ label: option.label, effect: option.tradeoff, ...field("note", option.description) }),
+				),
 			};
 		case "native":
 			return {
 				...field("title", question.header),
 				question: question.question,
-				options: question.options.map((option): JsonObject => ({ label: option.label, ...field("note", option.description), ...field("preview", option.preview) })),
+				options: question.options.map(
+					(option): JsonObject => ({ label: option.label, ...field("note", option.description), ...field("preview", option.preview) }),
+				),
 			};
 	}
 }
@@ -55,12 +62,18 @@ function shownText(question: AskQuestion, surface: Surface): { readonly prose: s
 	const defined = (...values: readonly (string | undefined)[]): string[] => values.filter((value): value is string => value !== undefined);
 	switch (surface) {
 		case "sheet": {
-			const prose = [question.question, question.brief.where, question.brief.what, question.brief.how, ...question.options.flatMap(option => defined(option.tradeoff, option.description))];
-			return { prose, all: [...defined(question.header), ...prose, ...question.options.map(option => option.label)] };
+			const prose = [
+				question.question,
+				question.brief.where,
+				question.brief.what,
+				question.brief.how,
+				...question.options.flatMap((option) => defined(option.tradeoff, option.description)),
+			];
+			return { prose, all: [...defined(question.header), ...prose, ...question.options.map((option) => option.label)] };
 		}
 		case "native": {
-			const prose = [question.question, ...question.options.flatMap(option => defined(option.description, option.preview))];
-			return { prose, all: [...defined(question.header), ...prose, ...question.options.map(option => option.label)] };
+			const prose = [question.question, ...question.options.flatMap((option) => defined(option.description, option.preview))];
+			return { prose, all: [...defined(question.header), ...prose, ...question.options.map((option) => option.label)] };
 		}
 	}
 }
@@ -71,11 +84,12 @@ const URL = /https?:\/\/\S+/g;
  * What a reader outside the project cannot look up and a model cannot be trusted to list: issue and
  * section numbers, codes (`F106`, `K6`, `VM110`), commit hashes, long numbers and upper-case abbreviations.
  */
-const TERM = /(?<![\w#])#\d+\b|§\s?\d+(?:\.\d+)*|\b[A-Z]{1,4}-?\d+[a-z]?\b|\b[A-Z]{2,}\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|\b\d{8,}\b/g;
+const TERM =
+	/(?<![\w#])#\d+\b|§\s?\d+(?:\.\d+)*|\b[A-Z]{1,4}-?\d+[a-z]?\b|\b[A-Z]{2,}\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|\b\d{8,}\b/g;
 
 /** The distinct candidate terms in the dialog's texts, in order of appearance. */
 export function candidateTerms(texts: readonly string[]): string[] {
-	const found = texts.flatMap(text => (text.replace(URL, " ").match(TERM) ?? []).map(term => term.replace(/\s/g, "")));
+	const found = texts.flatMap((text) => (text.replace(URL, " ").match(TERM) ?? []).map((term) => term.replace(/\s/g, "")));
 	return [...new Set(found)];
 }
 
@@ -84,12 +98,12 @@ const SENTENCE_MIN_LENGTH = 6;
 
 /** The distinct sentences of the dialog's prose, split at full stops, semicolons and line breaks, a link standing as `<link>`. */
 export function sentencesOf(texts: readonly string[]): string[] {
-	const all = texts.flatMap(text =>
+	const all = texts.flatMap((text) =>
 		text
 			.replace(URL, "<link>")
 			.split(/[。；;！？!?\n]|(?<=[.])\s/)
-			.map(part => part.replace(/^[ ，,：:]+|[ ，,：:]+$/g, ""))
-			.filter(part => part.length >= SENTENCE_MIN_LENGTH),
+			.map((part) => part.replace(/^[ ，,：:]+|[ ，,：:]+$/g, ""))
+			.filter((part) => part.length >= SENTENCE_MIN_LENGTH),
 	);
 	return [...new Set(all)];
 }
@@ -98,11 +112,13 @@ const SENTENCE_QUESTIONS = {
 	actor: { type: "noul", instructions: "In `sentence`, is it stated or obvious who or what performs the action?" },
 	unshown: {
 		type: "noul",
-		instructions: "Does `sentence` mention a test, review round, result, set of items or earlier decision only by a name or number, without saying what it is?",
+		instructions:
+			"Does `sentence` mention a test, review round, result, set of items or earlier decision only by a name or number, without saying what it is?",
 	},
 	jargon: {
 		type: "noul",
-		instructions: "Does `sentence` contain a word, abbreviation, name or number that a reader who has seen only `dialog` and has never seen this project could not explain?",
+		instructions:
+			"Does `sentence` contain a word, abbreviation, name or number that a reader who has seen only `dialog` and has never seen this project could not explain?",
 	},
 } satisfies Record<string, NoulQuestion>;
 
@@ -169,7 +185,12 @@ async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) 
 }
 
 /** Every question's findings, in input order; each question is judged on its own, as its surface shows it. */
-export async function judgeReadability(judge: NoulJudge, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal): Promise<readonly Finding[]> {
+export async function judgeReadability(
+	judge: NoulJudge,
+	questions: readonly AskQuestion[],
+	surface: Surface,
+	signal: AbortSignal,
+): Promise<readonly Finding[]> {
 	const stop = new AbortController();
 	const options = { signal: AbortSignal.any([signal, stop.signal]) };
 	const sentenceJobs: { readonly at: number; readonly sentence: string }[] = [];
@@ -209,7 +230,11 @@ export type SentenceFault = "actor" | "unshown" | "jargon";
 
 /** Every reason this sentence fails; none means it reads. */
 export function sentenceFaults(finding: SentenceFinding): SentenceFault[] {
-	return [...(finding.actor < YES ? (["actor"] as const) : []), ...(finding.unshown >= YES ? (["unshown"] as const) : []), ...(finding.jargon >= YES ? (["jargon"] as const) : [])];
+	return [
+		...(finding.actor < YES ? (["actor"] as const) : []),
+		...(finding.unshown >= YES ? (["unshown"] as const) : []),
+		...(finding.jargon >= YES ? (["jargon"] as const) : []),
+	];
 }
 
 /** A code or abbreviation fails when engineers in general would not know it and the dialog does not say what it is. */
@@ -229,8 +254,10 @@ export function unreadableQuestions(questions: readonly AskQuestion[], findings:
 	return questions.flatMap((question, index) => {
 		const finding = findings[index];
 		if (finding === undefined) return [];
-		const sentences = finding.sentences.map(item => ({ sentence: item.sentence, faults: sentenceFaults(item) })).filter(item => item.faults.length > 0);
-		const terms = finding.terms.filter(termFails).map(item => item.term);
+		const sentences = finding.sentences
+			.map((item) => ({ sentence: item.sentence, faults: sentenceFaults(item) }))
+			.filter((item) => item.faults.length > 0);
+		const terms = finding.terms.filter(termFails).map((item) => item.term);
 		return sentences.length > 0 || terms.length > 0 ? [{ id: question.id, sentences, terms }] : [];
 	});
 }
@@ -255,16 +282,19 @@ const REJECTION_MARK = "is hard to understand for a reader who sees only this di
 export function readabilityProblems(failing: readonly Unreadable[], surface: Surface): string[] {
 	const problems = failing.map(({ id, sentences, terms }) => {
 		const lines = [
-			...sentences.map(({ sentence, faults }) => `${quote(sentence)}: ${faults.map(fault => FAULT_TEXT[fault]).join("; ")}`),
-			...terms.map(term => `\`${term}\`: neither common knowledge nor explained in the dialog`),
+			...sentences.map(({ sentence, faults }) => `${quote(sentence)}: ${faults.map((fault) => FAULT_TEXT[fault]).join("; ")}`),
+			...terms.map((term) => `\`${term}\`: neither common knowledge nor explained in the dialog`),
 		];
-		return `question "${id}" ${REJECTION_MARK} and has never seen your session or this project; rewrite every item below so each sentence says who does what, each abbreviation is spelled out, and each name, number or earlier decision is said in plain words:\n${lines.map(line => `  - ${line}`).join("\n")}`;
+		return `question "${id}" ${REJECTION_MARK} and has never seen your session or this project; rewrite every item below so each sentence says who does what, each abbreviation is spelled out, and each name, number or earlier decision is said in plain words:\n${lines.map((line) => `  - ${line}`).join("\n")}`;
 	});
 	switch (surface) {
 		case "sheet":
 			return problems;
 		case "native":
-			return [...problems, "this session shows only each question's text and header and each option's label, description and preview; the brief and tradeoffs are not shown, so put the context there"];
+			return [
+				...problems,
+				"this session shows only each question's text and header and each option's label, description and preview; the brief and tradeoffs are not shown, so put the context there",
+			];
 	}
 }
 
@@ -272,7 +302,10 @@ export function readabilityProblems(failing: readonly Unreadable[], surface: Sur
 export const JUDGE_DEADLINE_MS = 30_000;
 
 /** What the ask does after the gate. */
-export type Gate = { readonly kind: "pass" } | { readonly kind: "reject"; readonly problems: readonly string[] } | { readonly kind: "cancelled" };
+export type Gate =
+	| { readonly kind: "pass" }
+	| { readonly kind: "reject"; readonly problems: readonly string[] }
+	| { readonly kind: "cancelled" };
 
 /**
  * Judge the call. A judge that fails or misses its deadline lets the ask through with a warning;
@@ -288,12 +321,21 @@ export async function readabilityGate(
 ): Promise<Gate> {
 	const deadline = AbortSignal.timeout(deadlineMs);
 	try {
-		const findings = await judgeReadability(judge, questions, surface, signal === undefined ? deadline : AbortSignal.any([signal, deadline]));
+		const findings = await judgeReadability(
+			judge,
+			questions,
+			surface,
+			signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
+		);
 		const failing = unreadableQuestions(questions, findings);
 		return failing.length === 0 ? { kind: "pass" } : { kind: "reject", problems: readabilityProblems(failing, surface) };
 	} catch (error) {
 		if (signal?.aborted) return { kind: "cancelled" };
-		const detail = deadline.aborted ? tr(`no answer within ${deadlineMs / 1000}s`, `${deadlineMs / 1000} 秒内没有结果`) : error instanceof Error ? error.message : String(error);
+		const detail = deadline.aborted
+			? tr(`no answer within ${deadlineMs / 1000}s`, `${deadlineMs / 1000} 秒内没有结果`)
+			: error instanceof Error
+				? error.message
+				: String(error);
 		warn(tr(`readability check skipped: ${detail}`, `已跳过可读性检查：${detail}`));
 		return { kind: "pass" };
 	}
@@ -317,7 +359,7 @@ export function lastAskRejected(branch: readonly BranchEntry[]): boolean {
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];
 		if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") continue;
-		return entry.message.isError && entry.message.content.some(part => part.type === "text" && part.text.includes(REJECTION_MARK));
+		return entry.message.isError && entry.message.content.some((part) => part.type === "text" && part.text.includes(REJECTION_MARK));
 	}
 	return false;
 }

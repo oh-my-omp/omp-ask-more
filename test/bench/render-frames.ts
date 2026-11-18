@@ -10,9 +10,9 @@
 // The digest covers every drawn page line and every described node tree, so both outputs must stay
 // byte-identical.
 import { join } from "node:path";
-import { initThemeSync, type DescribeContext, type NativeNode } from "@oh-my-pi/pi-tui";
-import type * as ComponentModule from "../../src/component.ts";
+import { type DescribeContext, initThemeSync, type NativeNode } from "@oh-my-pi/pi-tui";
 import type { ResolvedEvidence } from "../../src/brief.ts";
+import type * as ComponentModule from "../../src/component.ts";
 import type { LoadedDemo, QuestionDemos } from "../../src/demo.ts";
 import { questionSchema } from "../../src/schema.ts";
 import { compare, measured, parseArgs, report, sha256, VirtualClock } from "./harness.ts";
@@ -133,7 +133,10 @@ if (args.worker) {
 			what: "decide whether a frame step may rebuild the whole page",
 			how: "each frame redraws only the demo region",
 			diagram: "flowchart LR\n  tick --> frame\n  frame --> page",
-			risks: ["a full rebuild per frame keeps every evidence line joined at every tick", "a page-sized copy per frame keeps a second row array alive"],
+			risks: [
+				"a full rebuild per frame keeps every evidence line joined at every tick",
+				"a page-sized copy per frame keeps a second row array alive",
+			],
 		},
 		options: [
 			{ label: "Keep", tradeoff: "the clip keeps playing" },
@@ -141,8 +144,18 @@ if (args.worker) {
 		],
 	});
 	const evidence: readonly ResolvedEvidence[] = [
-		{ kind: "file", path: "src/component.ts", start: 1, end: 20000, lines: Array.from({ length: 20000 }, (_, line) => `const line${line} = "${"x".repeat(40)}";`) },
-		{ kind: "text", source: "bun test", lines: Array.from({ length: 12000 }, (_, line) => `ok ${line} - case ${line} passes with ${"y".repeat(30)}`) },
+		{
+			kind: "file",
+			path: "src/component.ts",
+			start: 1,
+			end: 20000,
+			lines: Array.from({ length: 20000 }, (_, line) => `const line${line} = "${"x".repeat(40)}";`),
+		},
+		{
+			kind: "text",
+			source: "bun test",
+			lines: Array.from({ length: 12000 }, (_, line) => `ok ${line} - case ${line} passes with ${"y".repeat(30)}`),
+		},
 	];
 	const raster: LoadedDemo = {
 		kind: "raster",
@@ -155,7 +168,7 @@ if (args.worker) {
 	};
 	const frames: LoadedDemo = {
 		kind: "frames",
-		frames: [1, 2, 3, 4].map(step => ({ body: `# frame ${step}\n\n- status ${step}` })),
+		frames: [1, 2, 3, 4].map((step) => ({ body: `# frame ${step}\n\n- status ${step}` })),
 		intervalMs: INTERVAL_MS,
 		caption: "the question's own demo",
 	};
@@ -163,7 +176,15 @@ if (args.worker) {
 
 	initThemeSync();
 	const clock = new VirtualClock(ROWS);
-	const component = new AskMoreComponent({ tui: clock, questions: [question], evidence: [evidence], demos, finish: () => {}, timeout: { kind: "off" }, notify: () => {} });
+	const component = new AskMoreComponent({
+		tui: clock,
+		questions: [question],
+		evidence: [evidence],
+		demos,
+		finish: () => {},
+		timeout: { kind: "off" },
+		notify: () => {},
+	});
 	const hasher = new Bun.CryptoHasher("sha256");
 	const seen = new Map<string, number>();
 	// One page before the window: neither variant is charged for its first build.
