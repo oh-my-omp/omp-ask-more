@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "../src/settings.ts";
 import { DESCRIPTION, docTopics } from "../src/description.ts";
+import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "../src/settings.ts";
 
 let cwd: string;
 const env = process.env.OMP_ASK_MORE_NOTIFY_COMMAND;
@@ -29,7 +29,13 @@ describe("native plugin settings", () => {
 	it("uses a project timeout without trusting its command; the next ask gets a new snapshot", async () => {
 		await override({ timeout: 1, returnTimeout: 2, onExpiry: "decide", "notify.terminal": false, "notify.command": "project-command" });
 		const first = await readTimeoutSettings({ cwd });
-		expect(first).toEqual({ timeoutSeconds: 1, returnSeconds: 2, onExpiry: "decide", terminal: false, command: { kind: "set", command: "project-command", fromProject: true } });
+		expect(first).toEqual({
+			timeoutSeconds: 1,
+			returnSeconds: 2,
+			onExpiry: "decide",
+			terminal: false,
+			command: { kind: "set", command: "project-command", fromProject: true },
+		});
 		await override({ timeout: 0, returnTimeout: 3, onExpiry: "wait", "notify.terminal": true });
 		expect((await readTimeoutSettings({ cwd })).timeoutSeconds).toBe(0);
 		expect(first.timeoutSeconds).toBe(1);
@@ -46,7 +52,10 @@ describe("native plugin settings", () => {
 
 	it("preserves the host's first-readable-file precedence", async () => {
 		await mkdir(join(cwd, ".claude"));
-		await Bun.write(join(cwd, ".claude/plugin-overrides.json"), JSON.stringify({ settings: { "omp-ask-more": { timeout: 4, "notify.command": "lower-priority" } } }));
+		await Bun.write(
+			join(cwd, ".claude/plugin-overrides.json"),
+			JSON.stringify({ settings: { "omp-ask-more": { timeout: 4, "notify.command": "lower-priority" } } }),
+		);
 		await override({ timeout: 2, "notify.command": "" });
 		expect((await readTimeoutSettings({ cwd })).command).toEqual({ kind: "unset" });
 		await Bun.write(join(cwd, ".omp/plugin-overrides.json"), "{");
@@ -60,7 +69,12 @@ describe("native plugin settings", () => {
 			await override({ timeout: value });
 			await expect(readTimeoutSettings({ cwd })).rejects.toBeInstanceOf(SettingsError);
 		}
-		for (const [key, value] of [["returnTimeout", 0.5], ["onExpiry", "other"], ["notify.terminal", "false"], ["notify.command", 42]] as const) {
+		for (const [key, value] of [
+			["returnTimeout", 0.5],
+			["onExpiry", "other"],
+			["notify.terminal", "false"],
+			["notify.command", 42],
+		] as const) {
 			await override({ [key]: value });
 			await expect(readTimeoutSettings({ cwd })).rejects.toBeInstanceOf(SettingsError);
 		}

@@ -6,7 +6,7 @@
 // as omp's own video attachments are. A file that cannot be loaded is drawn as an error, never fatal.
 import { open, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
-import { tr } from "./i18n.ts";
+import { tr } from "../omomp-shared/i18n.ts";
 import { DEFAULT_FRAME_MS, DEMO_VIDEO_EXTENSIONS, type DemoParams, extensionOf } from "./schema.ts";
 
 export interface DemoFrame {
@@ -71,7 +71,7 @@ export function demoSpec(demo: DemoParams): DemoSpec {
 		case "frames":
 			return {
 				kind: "frames",
-				frames: demo.frames.map(frame => ({ body: frame.body, ...(trimmed(frame.caption) ? { caption: trimmed(frame.caption) } : {}) })),
+				frames: demo.frames.map((frame) => ({ body: frame.body, ...(trimmed(frame.caption) ? { caption: trimmed(frame.caption) } : {}) })),
 				intervalMs: demo.interval_ms ?? DEFAULT_FRAME_MS,
 				...(caption ? { caption } : {}),
 			};
@@ -138,7 +138,11 @@ const STDERR_TAIL = 4096;
  * passes the cap, and reading stops there. The buffer's pages are committed only as bytes land in
  * them, so reserving the cap costs what the stream sends, and no chunk is held beside the copy.
  */
-async function readCapped(stream: ReadableStream<Uint8Array>, cap: number, onOver: () => void): Promise<{ bytes: Uint8Array; over: boolean }> {
+async function readCapped(
+	stream: ReadableStream<Uint8Array>,
+	cap: number,
+	onOver: () => void,
+): Promise<{ bytes: Uint8Array; over: boolean }> {
 	const buffer = new Uint8Array(cap);
 	let total = 0;
 	const reader = stream.getReader();
@@ -165,7 +169,11 @@ async function readTail(stream: ReadableStream<Uint8Array>, cap: number): Promis
 	for await (const chunk of stream) {
 		chunks.push(chunk);
 		total += chunk.length;
-		for (let oldest = chunks[first]; oldest !== undefined && chunks.length - first > 1 && total - oldest.length >= cap; oldest = chunks[first]) {
+		for (
+			let oldest = chunks[first];
+			oldest !== undefined && chunks.length - first > 1 && total - oldest.length >= cap;
+			oldest = chunks[first]
+		) {
 			total -= oldest.length;
 			first++;
 		}
@@ -195,9 +203,20 @@ async function run(argv: readonly string[], maxBytes: number, signal: AbortSigna
 	const onAbort = () => child.kill();
 	signal?.addEventListener("abort", onAbort, { once: true });
 	try {
-		const [stdout, stderr, code] = await Promise.all([readCapped(child.stdout, maxBytes, () => child.kill()), readTail(child.stderr, STDERR_TAIL), child.exited]);
-		if (stdout.over) throw new DemoError(tr(`the decoded output passed ${maxBytes} bytes; use a shorter or smaller file`, `解码输出超过 ${maxBytes} 字节，换更短或更小的文件`));
-		if (timedOut) throw new DemoError(tr(`decoding took longer than ${DECODE_TIMEOUT_MS / 1000} s`, `解码超过 ${DECODE_TIMEOUT_MS / 1000} 秒`));
+		const [stdout, stderr, code] = await Promise.all([
+			readCapped(child.stdout, maxBytes, () => child.kill()),
+			readTail(child.stderr, STDERR_TAIL),
+			child.exited,
+		]);
+		if (stdout.over)
+			throw new DemoError(
+				tr(
+					`the decoded output passed ${maxBytes} bytes; use a shorter or smaller file`,
+					`解码输出超过 ${maxBytes} 字节，换更短或更小的文件`,
+				),
+			);
+		if (timedOut)
+			throw new DemoError(tr(`decoding took longer than ${DECODE_TIMEOUT_MS / 1000} s`, `解码超过 ${DECODE_TIMEOUT_MS / 1000} 秒`));
 		if (signal?.aborted) throw new DemoError(tr("aborted", "已中止"));
 		if (code !== 0) throw new DemoError(stderr.trim().split("\n").at(-1) || `${argv[0]} exited with ${code}`);
 		return stdout.bytes;
@@ -214,7 +233,19 @@ function inputArgs(absolute: string, apng: boolean): string[] {
 /** Pixel size of the first video stream. */
 async function probeSize(absolute: string, apng: boolean, signal: AbortSignal | undefined): Promise<{ width: number; height: number }> {
 	const out = await run(
-		[binary("ffprobe"), "-v", "error", ...(apng ? ["-f", "apng"] : []), "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", absolute],
+		[
+			binary("ffprobe"),
+			"-v",
+			"error",
+			...(apng ? ["-f", "apng"] : []),
+			"-select_streams",
+			"v:0",
+			"-show_entries",
+			"stream=width,height",
+			"-of",
+			"csv=p=0:s=x",
+			absolute,
+		],
 		PROBE_BYTES,
 		signal,
 	);
@@ -236,7 +267,12 @@ export function rasterSize(width: number, height: number, columns: number): { wi
 	return { width: cells, rows };
 }
 
-async function loadRaster(absolute: string, bytes: Uint8Array | undefined, columns: number, signal: AbortSignal | undefined): Promise<{ width: number; rows: number; frames: Uint8Array[] }> {
+async function loadRaster(
+	absolute: string,
+	bytes: Uint8Array | undefined,
+	columns: number,
+	signal: AbortSignal | undefined,
+): Promise<{ width: number; rows: number; frames: Uint8Array[] }> {
 	const apng = bytes !== undefined && imageMime(bytes) === "image/png" && isApng(bytes);
 	const source = await probeSize(absolute, apng, signal);
 	const size = rasterSize(source.width, source.height, columns);
@@ -292,14 +328,21 @@ async function videoToGif(absolute: string, signal: AbortSignal | undefined): Pr
 	return out;
 }
 
-async function loadFile(spec: Extract<DemoSpec, { kind: "file" }>, cwd: string, surface: Surface, columns: number, signal: AbortSignal | undefined): Promise<LoadedDemo> {
+async function loadFile(
+	spec: Extract<DemoSpec, { kind: "file" }>,
+	cwd: string,
+	surface: Surface,
+	columns: number,
+	signal: AbortSignal | undefined,
+): Promise<LoadedDemo> {
 	const caption = spec.caption ? { caption: spec.caption } : {};
 	const absolute = isAbsolute(spec.path) ? spec.path : resolve(cwd, spec.path);
 	const video = (DEMO_VIDEO_EXTENSIONS as readonly string[]).includes(extensionOf(spec.path));
 	try {
 		const bytes = video ? undefined : await readImage(absolute, surface === "native");
 		if (video) await stat(absolute);
-		if (bytes !== undefined && imageMime(bytes) === undefined) throw new DemoError(tr("not a GIF, PNG or WebP image", "不是 GIF、PNG 或 WebP 图片"));
+		if (bytes !== undefined && imageMime(bytes) === undefined)
+			throw new DemoError(tr("not a GIF, PNG or WebP image", "不是 GIF、PNG 或 WebP 图片"));
 		if (surface === "native") {
 			if (bytes !== undefined) return { kind: "image", path: spec.path, bytes, mime: imageMime(bytes) ?? "image/gif", ...caption };
 			return { kind: "image", path: spec.path, bytes: await videoToGif(absolute, signal), mime: "image/gif", ...caption };
@@ -344,15 +387,16 @@ export async function loadQuestionDemos(
 	columns: number,
 	signal: AbortSignal | undefined,
 ): Promise<QuestionDemos[]> {
-	const params = questions.flatMap(question => [question.brief.demo, ...question.options.map(option => option.demo)]);
+	const params = questions.flatMap((question) => [question.brief.demo, ...question.options.map((option) => option.demo)]);
 	const loaded: (LoadedDemo | undefined)[] = new Array(params.length);
 	let next = 0;
 	const worker = async () => {
-		for (let index = next++; index < params.length; index = next++) loaded[index] = await loadDemo(params[index], cwd, surface, columns, signal);
+		for (let index = next++; index < params.length; index = next++)
+			loaded[index] = await loadDemo(params[index], cwd, surface, columns, signal);
 	};
 	await Promise.all(Array.from({ length: Math.min(LOAD_CONCURRENCY, params.length) }, worker));
 	let at = 0;
-	return questions.map(question => ({ question: loaded[at++], options: question.options.map(() => loaded[at++]) }));
+	return questions.map((question) => ({ question: loaded[at++], options: question.options.map(() => loaded[at++]) }));
 }
 
 /** Frames a demo cycles through; 1 for a demo the sheet does not animate itself. */

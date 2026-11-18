@@ -6,9 +6,9 @@ import type { DescribeContext, NativeUiEvent } from "@oh-my-pi/pi-tui";
 import { TspDocument } from "@oh-my-pi/pi-tui/native/apply";
 import { Reconciler } from "@oh-my-pi/pi-tui/native/reconcile";
 import type { TspNode, TspSpan, TspText } from "@oh-my-pi/pi-wire";
+import { tr } from "../omomp-shared/i18n.ts";
 import { AskMoreComponent, type SheetHost, type Submission } from "../src/component.ts";
 import type { LoadedDemo, QuestionDemos } from "../src/demo.ts";
-import { tr } from "../src/i18n.ts";
 import { encodeAct, parseAct, type SheetAct } from "../src/nodes.ts";
 import { type AskQuestion, questionSchema } from "../src/schema.ts";
 import type { TimeoutPolicy } from "../src/timeout.ts";
@@ -44,7 +44,7 @@ class Clock implements SheetHost {
 	advance(ms: number): void {
 		const until = this.#now + ms;
 		for (;;) {
-			const next = this.#timers.filter(timer => timer.live && timer.due <= until).sort((a, b) => a.due - b.due)[0];
+			const next = this.#timers.filter((timer) => timer.live && timer.due <= until).sort((a, b) => a.due - b.due)[0];
 			if (next === undefined) break;
 			next.live = false;
 			this.#now = next.due;
@@ -69,12 +69,12 @@ function question(id: string, labels: readonly string[]): AskQuestion {
 		header: id,
 		question: `Pick ${id}`,
 		brief: { where: "now", what: "decide", how: "after" },
-		options: labels.map(label => ({ label, tradeoff: `${label} costs` })),
+		options: labels.map((label) => ({ label, tradeoff: `${label} costs` })),
 	});
 }
 
 function frames(...bodies: string[]): LoadedDemo {
-	return { kind: "frames", frames: bodies.map(body => ({ body })), intervalMs: 1000 };
+	return { kind: "frames", frames: bodies.map((body) => ({ body })), intervalMs: 1000 };
 }
 
 function findAll(root: TspNode, test: (node: TspNode) => boolean): TspNode[] {
@@ -126,7 +126,7 @@ class Sheet {
 			questions,
 			evidence: questions.map(() => []),
 			demos,
-			finish: submission => this.submissions.push(submission),
+			finish: (submission) => this.submissions.push(submission),
 			timeout: timing.timeout ?? { kind: "off" },
 			notify: timing.notify ?? (() => {}),
 		});
@@ -141,7 +141,7 @@ class Sheet {
 
 	/** The one button of the current frame whose act passes `test`. */
 	button(test: (act: SheetAct) => boolean): TspNode {
-		return only(this.frame(), node => {
+		return only(this.frame(), (node) => {
 			const act = actOf(node);
 			return act !== undefined && test(act);
 		});
@@ -167,7 +167,7 @@ class Sheet {
 
 	/** A click (`select`) or double click (`activate`) on item `itemKey` of `list`. */
 	pick(type: "select" | "activate", list: TspNode, itemKey: string): void {
-		const item = (list.c ?? []).find(child => this.#reconciler.itemKey(child.id) === itemKey);
+		const item = (list.c ?? []).find((child) => this.#reconciler.itemKey(child.id) === itemKey);
 		if (item === undefined) throw new Error(`no item ${itemKey}`);
 		this.#send({ type, key: this.#keypath(list.id), item: this.#reconciler.itemKey(item.id) });
 	}
@@ -201,7 +201,7 @@ class Sheet {
 	/** Review, then Submit: the answers the sheet hands back. */
 	submitFromReview(): readonly Submission[] {
 		this.tab("review");
-		this.click(this.button(act => act.kind === "submit"));
+		this.click(this.button((act) => act.kind === "submit"));
 		return this.submissions;
 	}
 
@@ -233,7 +233,17 @@ describe("sheet acts", () => {
 	});
 
 	it("names no act for an id missing a part, carrying an extra one, or with a non-index", () => {
-		for (const id of ["answer:1", "answer:1:2:3", "answer:-1:0", "answer:1:x", "submit:0", "other", "demo:0:option:next", "demo:0:question:spin", "enter"]) {
+		for (const id of [
+			"answer:1",
+			"answer:1:2:3",
+			"answer:-1:0",
+			"answer:1:x",
+			"submit:0",
+			"other",
+			"demo:0:option:next",
+			"demo:0:question:spin",
+			"enter",
+		]) {
 			expect(parseAct(id)).toBeUndefined();
 		}
 	});
@@ -252,8 +262,8 @@ describe("Tern sheet styling contract", () => {
 		sheet.key(UP);
 		const list = sheet.list();
 		const items = list.c ?? [];
-		expect(items.map(item => item.p?.role)).toEqual(["omp.ask.option", "omp.ask.option", "omp.ask.option", "omp.ask.other"]);
-		expect(items.map(item => item.p?.tone)).toEqual([undefined, "accent", undefined, undefined]);
+		expect(items.map((item) => item.p?.role)).toEqual(["omp.ask.option", "omp.ask.option", "omp.ask.option", "omp.ask.other"]);
+		expect(items.map((item) => item.p?.tone)).toEqual([undefined, "accent", undefined, undefined]);
 		expect(sheet.selected(list)).toBe("option:0");
 	});
 
@@ -262,7 +272,7 @@ describe("Tern sheet styling contract", () => {
 		sheet.pick("activate", sheet.list(), "option:0");
 		const head = only(sheet.frame(), withRole("omp.ask.head"));
 		const tabs = only(head, withRole("omp.ask.questions"));
-		const labels = tabs.k === "tabs" ? (tabs.p?.items ?? []).map(item => plain(item.label)) : [];
+		const labels = tabs.k === "tabs" ? (tabs.p?.items ?? []).map((item) => plain(item.label)) : [];
 		expect(labels).toEqual(["✓ a", "b", tr("Review", "汇总")]);
 	});
 
@@ -282,7 +292,7 @@ describe("Tern sheet events", () => {
 		sheet.pick("select", sheet.list(), "option:1");
 		const list = sheet.list();
 		expect(sheet.selected(list)).toBe("option:1");
-		expect((list.c ?? []).map(item => item.p?.tone)).toEqual([undefined, undefined, undefined]);
+		expect((list.c ?? []).map((item) => item.p?.tone)).toEqual([undefined, undefined, undefined]);
 		sheet.pick("activate", list, "option:1");
 		expect(sheet.submitFromReview()).toEqual([{ kind: "submit", answers: [{ kind: "option", index: 1 }, { kind: "unanswered" }] }]);
 	});
@@ -318,14 +328,14 @@ describe("Tern sheet events", () => {
 		sheet.key("o");
 		for (const char of "mine") sheet.key(char);
 		sheet.click(next);
-		sheet.click(sheet.button(act => act.kind === "saveOther"));
+		sheet.click(sheet.button((act) => act.kind === "saveOther"));
 		expect(sheet.submitFromReview()).toEqual([{ kind: "submit", answers: [{ kind: "custom", text: "mine" }, { kind: "unanswered" }] }]);
 	});
 
 	it("leaves the focused option's demo alone when a control drawn for the previous option arrives", () => {
 		const demos: QuestionDemos[] = [{ question: undefined, options: [frames("x1", "x2"), frames("y1", "y2")] }];
 		const sheet = new Sheet([question("a", ["x", "y"])], demos);
-		const counter = () => textOf(only(sheet.frame(), node => node.k === "text" && /^\d+\/2$/.test(textOf(node))));
+		const counter = () => textOf(only(sheet.frame(), (node) => node.k === "text" && /^\d+\/2$/.test(textOf(node))));
 		const isNextFrame = (act: SheetAct) => act.kind === "demo" && act.move === "next";
 		const stale = sheet.button(isNextFrame);
 		sheet.key(DOWN);
@@ -338,7 +348,7 @@ describe("Tern sheet events", () => {
 	it("submits only from the review", () => {
 		const sheet = new Sheet([question("a", ["x", "y"]), question("b", ["p", "q"])]);
 		sheet.tab("review");
-		const submit = sheet.button(act => act.kind === "submit");
+		const submit = sheet.button((act) => act.kind === "submit");
 		sheet.tab("0");
 		sheet.click(submit);
 		expect(sheet.submissions).toEqual([]);
@@ -346,7 +356,7 @@ describe("Tern sheet events", () => {
 
 	it("cancels once, however often Cancel all is clicked", () => {
 		const sheet = new Sheet([question("a", ["x", "y"])]);
-		const cancel = sheet.button(act => act.kind === "cancel");
+		const cancel = sheet.button((act) => act.kind === "cancel");
 		sheet.click(cancel);
 		sheet.click(cancel);
 		expect(sheet.submissions).toEqual([{ kind: "cancel" }]);
@@ -355,7 +365,14 @@ describe("Tern sheet events", () => {
 
 const MIN = 60_000;
 const DECIDE: TimeoutPolicy = { kind: "decide", idleMs: 30 * MIN };
-const NOTIFY_THEN_DECIDE: TimeoutPolicy = { kind: "notify", idleMs: 30 * MIN, channels: [{ kind: "terminal" }], then: { kind: "decide", returnMs: 20 * MIN } };
+const NOTIFY_THEN_DECIDE: TimeoutPolicy = {
+	kind: "notify",
+	idleMs: 30 * MIN,
+	channels: [{ kind: "terminal" }],
+	// biome-ignore lint/suspicious/noThenProperty: the policy type names this field `then`
+	then: { kind: "decide", returnMs: 20 * MIN },
+};
+// biome-ignore lint/suspicious/noThenProperty: the policy type names this field `then`
 const NOTIFY_THEN_WAIT: TimeoutPolicy = { kind: "notify", idleMs: 30 * MIN, channels: [{ kind: "terminal" }], then: { kind: "wait" } };
 const ENTER = "\r";
 
@@ -378,7 +395,7 @@ describe("countdown", () => {
 		clock.advance(29 * MIN);
 		expect(sheet.submissions).toEqual([]);
 		clock.advance(MIN);
-		expect(sheet.submissions.map(submission => submission.kind)).toEqual(["timeout"]);
+		expect(sheet.submissions.map((submission) => submission.kind)).toEqual(["timeout"]);
 	});
 
 	it("starts over when the terminal edits the Other field", () => {
@@ -394,7 +411,7 @@ describe("countdown", () => {
 	it("notifies once, says so on the sheet, and hands over when the return window ends", () => {
 		const clock = new Clock();
 		const dues: (Date | undefined)[] = [];
-		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: due => dues.push(due) });
+		const sheet = new Sheet([question("a", ["x", "y"])], [], { host: clock, timeout: NOTIFY_THEN_DECIDE, notify: (due) => dues.push(due) });
 		const idle = sheet.countdown();
 		expect(idle).toBeDefined();
 		const rendersBefore = clock.renders;

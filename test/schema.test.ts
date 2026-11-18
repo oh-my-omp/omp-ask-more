@@ -1,7 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import { recoverAskQuestions } from "@oh-my-pi/pi-coding-agent";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { type AskParams, type AskParamsWire, demoSchema, evidenceSchema, nativeQuestion, parametersSchema, parseParams, validate } from "../src/schema.ts";
+import { recoverAskQuestions } from "@oh-my-pi/pi-coding-agent";
+import {
+	type AskParams,
+	type AskParamsWire,
+	demoSchema,
+	evidenceSchema,
+	nativeQuestion,
+	parametersSchema,
+	parseParams,
+	validate,
+} from "../src/schema.ts";
 
 /** A wire call: one question, two options, nothing extended. */
 function wire(overrides: Partial<AskParamsWire> = {}): AskParamsWire {
@@ -40,8 +49,14 @@ describe("parseParams", () => {
 	});
 
 	it("maps a frames demo in the brief position onto the question's brief", () => {
-		const params = parsed({ demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 }] });
-		expect(params.questions[0]!.brief.demo).toEqual({ kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 });
+		const params = parsed({
+			demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 }],
+		});
+		expect(params.questions[0]!.brief.demo).toEqual({
+			kind: "frames",
+			frames: [{ body: "a" }, { body: "b", caption: "second" }],
+			interval_ms: 800,
+		});
 	});
 
 	it("maps a file demo in the brief position onto the question's brief", () => {
@@ -124,7 +139,8 @@ describe("parseParams", () => {
 			}),
 		);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(['demos[1].option: option "指数退避" of question "retry" already has a demo; one demo per option']);
+		if (!checked.ok)
+			expect(checked.problems).toEqual(['demos[1].option: option "指数退避" of question "retry" already has a demo; one demo per option']);
 	});
 
 	it("keeps the new shape valid for the native ask schema", () => {
@@ -134,8 +150,8 @@ describe("parseParams", () => {
 			demos: [{ question: "retry", option: "固定 3 次", kind: "file", path: "docs/retry.gif" }],
 		});
 		const recovered = recoverAskQuestions(args);
-		expect(recovered?.map(question => question.id)).toEqual(["retry"]);
-		expect(recovered?.[0]?.options.map(option => option.label)).toEqual(["指数退避", "固定 3 次"]);
+		expect(recovered?.map((question) => question.id)).toEqual(["retry"]);
+		expect(recovered?.[0]?.options.map((option) => option.label)).toEqual(["指数退避", "固定 3 次"]);
 	});
 });
 
@@ -152,7 +168,8 @@ describe("validate", () => {
 		params.questions.push(second);
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
+		if (!checked.ok)
+			expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
 	});
 
 	it("rejects two questions with the same id", () => {
@@ -269,7 +286,9 @@ describe("strict tool calling", () => {
 	it("keeps the parameters representable in strict mode", () => {
 		// A shape omp cannot express in strict mode silently falls back to non-strict, and the
 		// provider then makes the model fill every optional field (the openai-codex failure).
-		const wireSchema = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<typeof toolWireSchema>[0]);
+		const wireSchema = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<
+			typeof toolWireSchema
+		>[0]);
 		expect(tryEnforceStrictSchema(wireSchema as Record<string, unknown>).strict).toBe(true);
 	});
 });
@@ -282,10 +301,7 @@ describe("nativeQuestion", () => {
 		expect(nativeQuestion(question)).toEqual({
 			id: "retry",
 			question: "重试应该怎么做？",
-			options: [
-				{ label: "指数退避", preview: "preview text" },
-				{ label: "固定 3 次" },
-			],
+			options: [{ label: "指数退避", preview: "preview text" }, { label: "固定 3 次" }],
 			recommended: 1,
 		});
 	});

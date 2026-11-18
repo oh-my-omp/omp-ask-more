@@ -8,22 +8,30 @@
  * questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
-import { AgentRegistry, type AskToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext, type OverlayOptions, type ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import {
+	AgentRegistry,
+	type AskToolDetails,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ExtensionUIContext,
+	type OverlayOptions,
+	type ToolDefinition,
+} from "@oh-my-pi/pi-coding-agent";
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isNativeRendering } from "@oh-my-pi/pi-tui";
+import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
 import { AskMoreComponent, type Submission } from "./src/component.ts";
 import { loadQuestionDemos } from "./src/demo.ts";
 import { DESCRIPTION, docTopics } from "./src/description.ts";
-import { tr } from "./src/i18n.ts";
 import { sheetTitle } from "./src/nodes.ts";
 import { sendNotice } from "./src/notify.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
 import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
 import { type AskParamsWire, type AskQuestion, nativeQuestion, parametersSchema, parseParams } from "./src/schema.ts";
-import { withSkillAskRule } from "./src/skill-prompt.ts";
 import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
-import { type TimeoutPolicy, timeoutPolicy, policyProblemText } from "./src/timeout.ts";
+import { withSkillAskRule } from "./src/skill-prompt.ts";
+import { policyProblemText, type TimeoutPolicy, timeoutPolicy } from "./src/timeout.ts";
 
 /** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
 let asking = false;
@@ -48,14 +56,14 @@ async function delegate(
 function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
-		.find(ref => ref.session?.sessionManager === ctx.sessionManager)?.session;
+		.find((ref) => ref.session?.sessionManager === ctx.sessionManager)?.session;
 	if (session == null) return undefined;
 	const chain = resolveJudge({
 		settings: session.settings,
 		registry: session.modelRegistry,
 		sessionModel: session.model,
 		sessionId: session.sessionId,
-		metadataResolver: provider => session.agent.metadataForProvider(provider),
+		metadataResolver: (provider) => session.agent.metadataForProvider(provider),
 		purpose: "ask-readability",
 		onUsage: journalJudgmentUsage(session.sessionManager),
 		telemetry: session.agent.telemetry,
@@ -66,7 +74,12 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 }
 
 /** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. The ask after a rejected one goes through unjudged. */
-function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], surface: Surface, signal: AbortSignal | undefined): Promise<Gate> {
+function screen(
+	ctx: ExtensionContext,
+	questions: readonly AskQuestion[],
+	surface: Surface,
+	signal: AbortSignal | undefined,
+): Promise<Gate> {
 	return gateUnlessRetry(ctx.sessionManager.getBranch(), async () => {
 		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
 		let enabled: boolean;
@@ -104,7 +117,7 @@ const SHEET: OverlayOptions = { fullscreen: true, width: "100%", maxHeight: "100
 /** Notify through the policy's channels; a failing channel is a warning and never touches the ask. */
 function notifier(ctx: ExtensionContext, policy: TimeoutPolicy, questions: readonly AskQuestion[]): (due: Date | undefined) => void {
 	const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
-	return due => {
+	return (due) => {
 		if (policy.kind !== "notify") return;
 		try {
 			sendNotice(policy.channels, { title: sheetTitle(questions), questions: questions.length, cwd: ctx.cwd, due }, warn);
@@ -143,7 +156,7 @@ async function ask(
 		const { policy, problems } = timeoutPolicy(await readTimeoutSettings(ctx));
 		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${policyProblemText(problem)}`, "warning");
 		const [evidence, demos] = await Promise.all([
-			Promise.all(questions.map(question => resolveEvidence(question.brief.evidence, ctx.cwd))),
+			Promise.all(questions.map((question) => resolveEvidence(question.brief.evidence, ctx.cwd))),
 			// Tern plays image bytes itself; the ANSI page draws decoded frames as wide as the page.
 			loadQuestionDemos(questions, ctx.cwd, isNativeRendering() ? "native" : "ansi", (process.stdout.columns ?? 80) - 8, signal),
 		]);
@@ -174,7 +187,9 @@ async function ask(
 		const detail = error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error);
 		ctx.ui.notify?.(`ask-more: ${tr("Could not open the full-screen dialog", "无法打开全屏对话框")}: ${detail}`, "warning");
 		const invoke = ctx.invokeTool;
-		return invoke === undefined ? rejectedResult([`ask could not open its dialog: ${detail}`]) : delegate(invoke, questions, signal, onUpdate);
+		return invoke === undefined
+			? rejectedResult([`ask could not open its dialog: ${detail}`])
+			: delegate(invoke, questions, signal, onUpdate);
 	} finally {
 		asking = false;
 	}
@@ -199,7 +214,7 @@ export default function askMore(pi: ExtensionAPI): void {
 	pi.registerTool(tool);
 	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
 	// place left to carry the rule. Registering costs omp a clone of the history per model call.
-	pi.on("context", event => {
+	pi.on("context", (event) => {
 		if (!pi.getActiveTools().includes("ask")) return undefined;
 		const messages = withSkillAskRule(event.messages);
 		return messages === undefined ? undefined : { messages };

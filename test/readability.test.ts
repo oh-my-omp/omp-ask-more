@@ -73,11 +73,25 @@ const noWarn = (message: string) => {
 
 describe("readability gate", () => {
 	it("passes a call whose every sentence and term reads", async () => {
-		expect(await readabilityGate(scripted(() => ({})), questions, "sheet", undefined, noWarn)).toEqual({ kind: "pass" });
+		expect(
+			await readabilityGate(
+				scripted(() => ({})),
+				questions,
+				"sheet",
+				undefined,
+				noWarn,
+			),
+		).toEqual({ kind: "pass" });
 	});
 
 	it("rejects the question holding one sentence that names no actor, and quotes that sentence", async () => {
-		const gate = await readabilityGate(scripted(subject => (subject.includes("每次失败都立即重发") ? { actor: 0.1 } : {})), questions, "sheet", undefined, noWarn);
+		const gate = await readabilityGate(
+			scripted((subject) => (subject.includes("每次失败都立即重发") ? { actor: 0.1 } : {})),
+			questions,
+			"sheet",
+			undefined,
+			noWarn,
+		);
 		expect(gate.kind).toBe("reject");
 		if (gate.kind !== "reject") return;
 		expect(gate.problems).toHaveLength(1);
@@ -88,7 +102,13 @@ describe("readability gate", () => {
 	});
 
 	it("names every reason one sentence fails", async () => {
-		const gate = await readabilityGate(scripted(subject => (subject.includes("met 语义") ? { unshown: 0.9, jargon: 0.8 } : {})), questions, "sheet", undefined, noWarn);
+		const gate = await readabilityGate(
+			scripted((subject) => (subject.includes("met 语义") ? { unshown: 0.9, jargon: 0.8 } : {})),
+			questions,
+			"sheet",
+			undefined,
+			noWarn,
+		);
 		expect(gate.kind === "reject" && gate.problems[0]).toContain("mentions something the dialog never shows");
 		expect(gate.kind === "reject" && gate.problems[0]).toContain("uses a word, abbreviation, name or number the dialog never explains");
 	});
@@ -107,7 +127,13 @@ describe("readability gate", () => {
 				},
 			],
 		}).questions;
-		const gate = await readabilityGate(scripted(subject => (subject === "K6" ? { known: 0.1, said: 0.2 } : subject === "#592" ? { known: 0.1, said: 0.9 } : {})), coded, "sheet", undefined, noWarn);
+		const gate = await readabilityGate(
+			scripted((subject) => (subject === "K6" ? { known: 0.1, said: 0.2 } : subject === "#592" ? { known: 0.1, said: 0.9 } : {})),
+			coded,
+			"sheet",
+			undefined,
+			noWarn,
+		);
 		expect(gate.kind).toBe("reject");
 		if (gate.kind !== "reject") return;
 		expect(gate.problems[0]).toContain("`K6`: neither common knowledge nor explained");
@@ -117,28 +143,42 @@ describe("readability gate", () => {
 
 	it("judges each question alone: the full sheet, or only the native fields when the native dialog shows the ask", async () => {
 		const sheet: { state: string; asked: string[] }[] = [];
-		await readabilityGate(scripted(() => ({}), sheet), questions, "sheet", undefined, noWarn);
-		expect(sheet.some(call => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
-		expect(sheet.some(call => call.state.includes("met 后要电平还是边沿") && call.state.includes("每次失败都立即重发"))).toBe(false);
+		await readabilityGate(
+			scripted(() => ({}), sheet),
+			questions,
+			"sheet",
+			undefined,
+			noWarn,
+		);
+		expect(sheet.some((call) => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
+		expect(sheet.some((call) => call.state.includes("met 后要电平还是边沿") && call.state.includes("每次失败都立即重发"))).toBe(false);
 		const native: { state: string; asked: string[] }[] = [];
-		const gate = await readabilityGate(scripted(() => ({ actor: 0 }), native), questions, "native", undefined, noWarn);
-		const retry = native.filter(call => call.state.includes("重试应该怎么做"));
+		const gate = await readabilityGate(
+			scripted(() => ({ actor: 0 }), native),
+			questions,
+			"native",
+			undefined,
+			noWarn,
+		);
+		const retry = native.filter((call) => call.state.includes("重试应该怎么做"));
 		expect(retry.length).toBeGreaterThan(0);
-		expect(retry.every(call => !call.state.includes("每次失败都立即重发") && !call.state.includes("不迁移，但重复写继续"))).toBe(true);
+		expect(retry.every((call) => !call.state.includes("每次失败都立即重发") && !call.state.includes("不迁移，但重复写继续"))).toBe(true);
 		expect(gate.kind === "reject" && gate.problems.at(-1)).toContain("the brief and tradeoffs are not shown");
 	});
 
 	it("asks without the check, with a warning, when the judge fails", async () => {
 		const warnings: string[] = [];
 		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("every judge candidate failed")) };
-		expect(await readabilityGate(failing, questions, "sheet", undefined, message => warnings.push(message))).toEqual({ kind: "pass" });
+		expect(await readabilityGate(failing, questions, "sheet", undefined, (message) => warnings.push(message))).toEqual({ kind: "pass" });
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("every judge candidate failed");
 	});
 
 	it("asks without the check when the judge misses its deadline", async () => {
 		const warnings: string[] = [];
-		expect(await readabilityGate(hanging, questions, "sheet", new AbortController().signal, message => warnings.push(message), 20)).toEqual({ kind: "pass" });
+		expect(
+			await readabilityGate(hanging, questions, "sheet", new AbortController().signal, (message) => warnings.push(message), 20),
+		).toEqual({ kind: "pass" });
 		expect(warnings).toHaveLength(1);
 	});
 
@@ -152,11 +192,22 @@ describe("readability gate", () => {
 
 describe("what the gate hands the judge", () => {
 	it("finds codes, hashes and abbreviations but not links or plain words", () => {
-		expect(candidateTerms(["按 #243 和 §3 做，见 https://example.com/pull/265，提交 d685d0d，F106 另开，SSH 入口，VM110 上跑"])).toEqual(["#243", "§3", "d685d0d", "F106", "SSH", "VM110"]);
+		expect(candidateTerms(["按 #243 和 §3 做，见 https://example.com/pull/265，提交 d685d0d，F106 另开，SSH 入口，VM110 上跑"])).toEqual([
+			"#243",
+			"§3",
+			"d685d0d",
+			"F106",
+			"SSH",
+			"VM110",
+		]);
 	});
 
 	it("splits prose at sentence ends and drops fragments too short to be one", () => {
-		expect(sentencesOf(["选 B: 删掉序列化器。然后再复审一遍；合并", "好", "见 https://example.com/x 里的说明"])).toEqual(["选 B: 删掉序列化器", "然后再复审一遍", "见 <link> 里的说明"]);
+		expect(sentencesOf(["选 B: 删掉序列化器。然后再复审一遍；合并", "好", "见 https://example.com/x 里的说明"])).toEqual([
+			"选 B: 删掉序列化器",
+			"然后再复审一遍",
+			"见 <link> 里的说明",
+		]);
 	});
 });
 
@@ -165,18 +216,25 @@ describe("the ask after a rejection", () => {
 
 	/** The session record of an `ask` call and its result. */
 	function askResult(content: string, isError: boolean): BranchEntry {
-		return { type: "message", id: "r", parentId: null, timestamp: "2026-11-08T00:00:00Z", message: { role: "toolResult", toolCallId: "c", toolName: "ask", content: [{ type: "text", text: content }], isError, timestamp: 0 } };
+		return {
+			type: "message",
+			id: "r",
+			parentId: null,
+			timestamp: "2026-11-08T00:00:00Z",
+			message: { role: "toolResult", toolCallId: "c", toolName: "ask", content: [{ type: "text", text: content }], isError, timestamp: 0 },
+		};
 	}
 
 	async function rejection(): Promise<BranchEntry> {
 		const gate = await readabilityGate(unreadable, questions, "sheet", undefined, noWarn);
 		if (gate.kind !== "reject") throw new Error("expected a rejection");
 		const result = rejectedResult(gate.problems);
-		return askResult(result.content.map(part => (part.type === "text" ? part.text : "")).join(""), true);
+		return askResult(result.content.map((part) => (part.type === "text" ? part.text : "")).join(""), true);
 	}
 
 	const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
-	const run = (branch: readonly BranchEntry[], judge: NoulJudge) => gateUnlessRetry(branch, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
+	const run = (branch: readonly BranchEntry[], judge: NoulJudge) =>
+		gateUnlessRetry(branch, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
 
 	it("goes through without asking the judge when the last ask in the session was rejected by the gate", async () => {
 		expect(await run([await rejection()], failing)).toEqual({ kind: "pass" });
@@ -185,6 +243,8 @@ describe("the ask after a rejection", () => {
 	it("is judged when the session has no ask yet, or the last one was answered or rejected for another reason", async () => {
 		expect((await run([], unreadable)).kind).toBe("reject");
 		expect((await run([await rejection(), askResult("User answers:\nretry: 指数退避", false)], unreadable)).kind).toBe("reject");
-		expect((await run([await rejection(), askResult("ask rejected:\n- another ask is open in this session", true)], unreadable)).kind).toBe("reject");
+		expect((await run([await rejection(), askResult("ask rejected:\n- another ask is open in this session", true)], unreadable)).kind).toBe(
+			"reject",
+		);
 	});
 });
