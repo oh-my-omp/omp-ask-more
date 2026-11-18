@@ -6,27 +6,27 @@
 import {
 	type Component,
 	type DescribeContext,
+	Ellipsis,
+	getMarkdownTheme,
 	Input,
 	Markdown,
+	matchesKey,
 	type NativeNode,
 	type NativeUiEvent,
+	type RenderTimer,
 	routeSgrMouseInput,
 	ScrollView,
-	type RenderTimer,
-	getMarkdownTheme,
-	matchesKey,
-	theme,
 	type Theme,
+	theme,
 	truncateToWidth,
 	visibleWidth,
-	Ellipsis,
 } from "@oh-my-pi/pi-tui";
 import { matchesSelectPageDown, matchesSelectPageUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
 import { leafKey } from "@oh-my-pi/pi-tui/native/node";
 import type { TspScrollBy } from "@oh-my-pi/pi-wire";
+import { type Language, language, tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
 import { frameCount, frameInterval, halfBlockRows, type LoadedDemo, type QuestionDemos } from "./demo.ts";
-import { type Lang, language, tr } from "./i18n.ts";
 import {
 	answerLabel,
 	type DemoMove,
@@ -44,7 +44,17 @@ import {
 } from "./nodes.ts";
 import { type Answer, UNANSWERED } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
-import { type ActiveTab, type DemoSlot, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState, type ReviewState, startPlayback } from "./state.ts";
+import {
+	type ActiveTab,
+	type DemoSlot,
+	type NativeScrollRequest,
+	onOther,
+	type PageDemo,
+	pageDemos,
+	type QuestionState,
+	type ReviewState,
+	startPlayback,
+} from "./state.ts";
 import { countdownStatus, type Phase, type TimeoutPolicy } from "./timeout.ts";
 
 /** How the sheet closed: the user's answers, a cancel, or the countdown handing the answers given so far to the model. */
@@ -115,7 +125,7 @@ interface StaticText {
 	readonly width: number;
 	readonly expanded: boolean;
 	readonly theme: Theme;
-	readonly lang: Lang;
+	readonly lang: Language;
 	readonly prefix: readonly string[];
 	readonly suffix: readonly string[];
 }
@@ -137,7 +147,7 @@ function newView(): ScrollView {
 		height: 1,
 		scrollbar: "auto",
 		ellipsis: Ellipsis.Omit,
-		theme: { track: text => theme.fg("dim", text), thumb: text => theme.fg("accent", text) },
+		theme: { track: (text) => theme.fg("dim", text), thumb: (text) => theme.fg("accent", text) },
 	});
 }
 
@@ -210,10 +220,11 @@ export class AskMoreComponent implements Component {
 				view: newView(),
 				nativeScroll: undefined,
 			};
-			input.onSubmit = value => this.#saveOther(index, value);
-			input.onEscape = () => this.#change(() => {
-				state.editing = false;
-			});
+			input.onSubmit = (value) => this.#saveOther(index, value);
+			input.onEscape = () =>
+				this.#change(() => {
+					state.editing = false;
+				});
 			return state;
 		});
 		this.#arm();
@@ -244,7 +255,10 @@ export class AskMoreComponent implements Component {
 		const view = this.#activeView();
 		const key = `${this.#version}|${bodyWidth}|${this.#active.kind === "review" ? "review" : this.#active.index}`;
 		if (this.#body?.key !== key) {
-			const built = this.#active.kind === "review" ? { lines: this.#reviewLines(bodyWidth), focus: undefined, slots: [] } : this.#questionLines(this.#active.index, bodyWidth);
+			const built =
+				this.#active.kind === "review"
+					? { lines: this.#reviewLines(bodyWidth), focus: undefined, slots: [] }
+					: this.#questionLines(this.#active.index, bodyWidth);
 			this.#body = { key, ...built };
 			this.#drawnFrames = -1;
 		}
@@ -257,7 +271,8 @@ export class AskMoreComponent implements Component {
 		const focus = this.#body.focus;
 		if (focus !== undefined && this.#active.kind === "question") {
 			const state = this.#states[this.#active.index];
-			if (state !== undefined) view.revealRange({ id: `${this.#active.index}|${state.cursor}|${state.editing}`, start: focus.start, end: focus.end }, inner);
+			if (state !== undefined)
+				view.revealRange({ id: `${this.#active.index}|${state.cursor}|${state.editing}`, start: focus.start, end: focus.end }, inner);
 		}
 
 		const title = ` ${this.#title} `;
@@ -286,12 +301,16 @@ export class AskMoreComponent implements Component {
 
 	#hints(): string {
 		if (this.#active.kind === "review") {
-			return tr("enter submit · tab/shift+tab questions · pgup/pgdn scroll · esc cancel all", "enter 提交 · tab/shift+tab 切题 · pgup/pgdn 滚动 · esc 全部取消");
+			return tr(
+				"enter submit · tab/shift+tab questions · pgup/pgdn scroll · esc cancel all",
+				"enter 提交 · tab/shift+tab 切题 · pgup/pgdn 滚动 · esc 全部取消",
+			);
 		}
 		const state = this.#states[this.#active.index];
 		if (state?.editing) return tr("enter save · esc back to the options", "enter 保存 · esc 回到选项");
 		const next = this.#states.length > 1 ? tr(" · tab next question", " · tab 下一题") : "";
-		const demo = state !== undefined && pageDemos(state).some(page => frameCount(page.demo) > 1) ? tr(" · p/[ ] demo", " · p/[ ] 演示") : "";
+		const demo =
+			state !== undefined && pageDemos(state).some((page) => frameCount(page.demo) > 1) ? tr(" · p/[ ] demo", " · p/[ ] 演示") : "";
 		return tr(
 			`↑↓ choose · enter answer · o other${next}${demo} · pgup/pgdn scroll · ctrl+o code · esc cancel all`,
 			`↑↓ 选择 · enter 作答 · o 其他${next}${demo} · pgup/pgdn 滚动 · ctrl+o 代码 · esc 全部取消`,
@@ -301,7 +320,11 @@ export class AskMoreComponent implements Component {
 	#questionLines(
 		index: number,
 		width: number,
-	): { lines: string[]; focus: { start: number; end: number } | undefined; slots: readonly { slot: DemoSlot; start: number; height: number }[] } {
+	): {
+		lines: string[];
+		focus: { start: number; end: number } | undefined;
+		slots: readonly { slot: DemoSlot; start: number; height: number }[];
+	} {
 		const state = this.#states[index];
 		if (state === undefined) return { lines: [], focus: undefined, slots: [] };
 		const { question } = state;
@@ -355,11 +378,11 @@ export class AskMoreComponent implements Component {
 				for (const line of wrapLabelled(theme.fg("muted", `${label}  `), value.trim(), width)) rows.push(line);
 			}
 			if (focus !== undefined) focus = { start: focus.start, end: rows.length };
-			reserve(demos.find(page => page.slot === "option"));
+			reserve(demos.find((page) => page.slot === "option"));
 			rows.push("");
 		}
 
-		const questionDemo = demos.find(page => page.slot === "question");
+		const questionDemo = demos.find((page) => page.slot === "question");
 		if (questionDemo !== undefined) {
 			rows.push(accentHeading(tr("Demo", "演示")));
 			reserve(questionDemo);
@@ -378,7 +401,14 @@ export class AskMoreComponent implements Component {
 	#staticText(index: number, width: number, state: QuestionState): StaticText {
 		const lang = language();
 		const cached = this.#static;
-		if (cached !== undefined && cached.index === index && cached.width === width && cached.expanded === state.expanded && cached.theme === theme && cached.lang === lang) {
+		if (
+			cached !== undefined &&
+			cached.index === index &&
+			cached.width === width &&
+			cached.expanded === state.expanded &&
+			cached.theme === theme &&
+			cached.lang === lang
+		) {
 			return cached;
 		}
 		const { question } = state;
@@ -417,7 +447,9 @@ export class AskMoreComponent implements Component {
 						suffix.push(theme.fg("muted", `${entry.path}:${entry.start}-${entry.end}`));
 						break;
 					case "text":
-						suffix.push(`${theme.fg("muted", entry.source)}${theme.fg("warning", tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"))}`);
+						suffix.push(
+							`${theme.fg("muted", entry.source)}${theme.fg("warning", tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"))}`,
+						);
 						break;
 				}
 				if (entry.note) suffix.push(theme.fg("muted", entry.note));
@@ -427,7 +459,15 @@ export class AskMoreComponent implements Component {
 					suffix.push(gutter + cutLine(line, width - visibleWidth(gutter)));
 				});
 				if (visible.length < entry.lines.length) {
-					suffix.push(theme.fg("muted", tr(`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`, `      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`)));
+					suffix.push(
+						theme.fg(
+							"muted",
+							tr(
+								`      … ${entry.lines.length - visible.length} more lines (ctrl+o)`,
+								`      … 还有 ${entry.lines.length - visible.length} 行（ctrl+o）`,
+							),
+						),
+					);
 				}
 			}
 			suffix.push("");
@@ -439,10 +479,10 @@ export class AskMoreComponent implements Component {
 			suffix.push("");
 		}
 
-		const risks = brief.risks?.map(risk => risk.trim()).filter(risk => risk.length > 0) ?? [];
+		const risks = brief.risks?.map((risk) => risk.trim()).filter((risk) => risk.length > 0) ?? [];
 		if (risks.length > 0) {
 			suffix.push(accentHeading(tr("Risks", "风险")));
-			paragraph(suffix, risks.map(risk => `- ${risk}`).join("\n"));
+			paragraph(suffix, risks.map((risk) => `- ${risk}`).join("\n"));
 		}
 
 		const text: StaticText = { index, width, expanded: state.expanded, theme, lang, prefix, suffix };
@@ -457,7 +497,7 @@ export class AskMoreComponent implements Component {
 		if (state === undefined) return;
 		const pages = pageDemos(state);
 		for (const { slot, start, height } of slots) {
-			const page = pages.find(candidate => candidate.slot === slot);
+			const page = pages.find((candidate) => candidate.slot === slot);
 			if (page === undefined) continue;
 			const lines = this.#demoLines(page, width);
 			for (let row = 0; row < height; row++) {
@@ -524,26 +564,32 @@ export class AskMoreComponent implements Component {
 	#renderedFrames(demo: Extract<LoadedDemo, { kind: "frames" }>, width: number): readonly (readonly string[])[] {
 		const cached = this.#frameLines.get(demo);
 		if (cached?.width === width) return cached.frames;
-		const rendered = demo.frames.map(frame => [
+		const rendered = demo.frames.map((frame) => [
 			...new Markdown(frame.body, 0, 0, getMarkdownTheme()).render(width),
 			...(frame.caption ? wrapLabelled("", frame.caption, width) : []),
 		]);
-		const height = Math.max(...rendered.map(lines => lines.length));
-		const frames = rendered.map(lines => [...lines, ...Array.from({ length: height - lines.length }, () => "")]);
+		const height = Math.max(...rendered.map((lines) => lines.length));
+		const frames = rendered.map((lines) => [...lines, ...Array.from({ length: height - lines.length }, () => "")]);
 		this.#frameLines.set(demo, { width, frames });
 		return frames;
 	}
 
 	#reviewLines(width: number): string[] {
 		const rows = [theme.bold(theme.fg("accent", tr("Review your answers", "核对你的答案"))), ""];
-		const unanswered = this.#states.filter(state => state.answer.kind === "unanswered").length;
+		const unanswered = this.#states.filter((state) => state.answer.kind === "unanswered").length;
 		for (const state of this.#states) {
 			const answer = answerLabel(state.question, state.answer);
 			rows.push(theme.bold(tabLabel(state.question)));
 			for (const line of wrapLabelled("  ", answer ?? theme.fg("warning", tr("unanswered", "未回答")), width)) rows.push(line);
 		}
 		rows.push("");
-		if (unanswered > 0) rows.push(theme.fg("warning", tr(`${unanswered} unanswered; enter still submits the rest.`, `${unanswered} 题未回答；enter 仍会提交其余答案。`)));
+		if (unanswered > 0)
+			rows.push(
+				theme.fg(
+					"warning",
+					tr(`${unanswered} unanswered; enter still submits the rest.`, `${unanswered} 题未回答；enter 仍会提交其余答案。`),
+				),
+			);
 		return rows;
 	}
 
@@ -618,7 +664,7 @@ export class AskMoreComponent implements Component {
 		if (this.#closed) return;
 		this.#activity();
 		if (
-			routeSgrMouseInput(data, mouse => {
+			routeSgrMouseInput(data, (mouse) => {
 				if (mouse.wheel === null) return false;
 				this.#activeView().scroll(mouse.wheel * WHEEL_ROWS);
 				return true;
@@ -834,7 +880,7 @@ export class AskMoreComponent implements Component {
 	}
 
 	#submitAll(): void {
-		this.#submit({ kind: "submit", answers: this.#states.map(state => state.answer) });
+		this.#submit({ kind: "submit", answers: this.#states.map((state) => state.answer) });
 	}
 
 	#submit(submission: Submission): void {
@@ -918,7 +964,7 @@ export class AskMoreComponent implements Component {
 	/** The last countdown ran out: the answers given so far go back with the rest left to the model. */
 	#expire(): void {
 		if (this.#closed) return;
-		this.#submit({ kind: "timeout", answers: this.#states.map(state => state.answer) });
+		this.#submit({ kind: "timeout", answers: this.#states.map((state) => state.answer) });
 	}
 
 	// ── Demo playback ─────────────────────────────────────────────────────
@@ -927,7 +973,7 @@ export class AskMoreComponent implements Component {
 	#animatedDemos(): PageDemo[] {
 		if (this.#active.kind !== "question") return [];
 		const state = this.#states[this.#active.index];
-		return state === undefined ? [] : pageDemos(state).filter(page => frameCount(page.demo) > 1);
+		return state === undefined ? [] : pageDemos(state).filter((page) => frameCount(page.demo) > 1);
 	}
 
 	/** One timer for the open page, due at the earliest next frame of a playing demo; none otherwise. */
@@ -969,7 +1015,7 @@ export class AskMoreComponent implements Component {
 
 	/** A demo control: on one demo (a button) or on every animated demo of the page (a key). */
 	#moveDemos(move: DemoMove, slot?: DemoSlot): void {
-		const pages = this.#animatedDemos().filter(page => slot === undefined || page.slot === slot);
+		const pages = this.#animatedDemos().filter((page) => slot === undefined || page.slot === slot);
 		if (pages.length === 0) return;
 		for (const { demo, play } of pages) {
 			const count = frameCount(demo);

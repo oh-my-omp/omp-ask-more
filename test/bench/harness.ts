@@ -5,10 +5,11 @@
 // real entry points, and prints one result line. Every worker runs under `BUN_JSC_logGC=1`; the GC
 // log between the worker's two marks gives the GC count and the JS heap allocated in the measured
 // window (strings and cells; ArrayBuffer contents are not on the JS heap and show in RSS instead).
+
+import { heapSize, heapStats } from "bun:jsc";
 import { writeSync } from "node:fs";
 import { mkdir, rename, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { heapSize, heapStats } from "bun:jsc";
 
 /** The commit the umbrella measures against: origin/main when the tree was opened. */
 export const TREE_BASE = "f065a219980a8769f3ba64cfca58b6af26bddaba";
@@ -126,7 +127,9 @@ export function mallocNow(): { liveMiB: number; committedMiB: number; requestedM
 }
 
 /** Peaks while `run` is pending, sampled every 10 ms and at each end (MiB): RSS, live malloc bytes, mimalloc commit. */
-export async function sampledPeak<T>(run: () => Promise<T>): Promise<{ result: T; peakRssMiB: number; peakLiveMiB: number; peakCommittedMiB: number }> {
+export async function sampledPeak<T>(
+	run: () => Promise<T>,
+): Promise<{ result: T; peakRssMiB: number; peakLiveMiB: number; peakCommittedMiB: number }> {
 	let rss = 0;
 	let live = 0;
 	let committed = 0;
@@ -260,7 +263,10 @@ export function gcWindow(log: string): { gcs: number; allocMiB: number } {
  * How a metric is judged: `lower` — head's median at least `minDrop` (a fraction) below base's;
  * `atMost` — every head run at most `limit`; `report` — shown only.
  */
-export type Expectation = { readonly kind: "lower"; readonly minDrop: number } | { readonly kind: "atMost"; readonly limit: number } | { readonly kind: "report" };
+export type Expectation =
+	| { readonly kind: "lower"; readonly minDrop: number }
+	| { readonly kind: "atMost"; readonly limit: number }
+	| { readonly kind: "report" };
 
 export interface MetricSpec {
 	readonly name: string;
@@ -287,7 +293,11 @@ async function runWorker(script: string, src: string, passthrough: readonly stri
 	}
 }
 
-async function runWorkerOnce(script: string, src: string, passthrough: readonly string[]): Promise<{ kind: "done"; run: Run } | { kind: "retry"; reason: string }> {
+async function runWorkerOnce(
+	script: string,
+	src: string,
+	passthrough: readonly string[],
+): Promise<{ kind: "done"; run: Run } | { kind: "retry"; reason: string }> {
 	const child = Bun.spawn(["bun", script, "--worker", "--src", src, ...passthrough], {
 		cwd: REPO,
 		env: { ...process.env, BUN_JSC_logGC: "1" },
@@ -296,11 +306,11 @@ async function runWorkerOnce(script: string, src: string, passthrough: readonly 
 	});
 	const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
 	if (code === EXIT_RETRY) return { kind: "retry", reason: out.trim().split("\n").at(-1) ?? "" };
-	const line = out.split("\n").find(candidate => candidate.startsWith(RESULT));
+	const line = out.split("\n").find((candidate) => candidate.startsWith(RESULT));
 	if (code !== 0 || line === undefined) {
 		const tail = err
 			.split("\n")
-			.filter(entry => !entry.startsWith("[GC<") && !entry.startsWith("GC END"))
+			.filter((entry) => !entry.startsWith("[GC<") && !entry.startsWith("GC END"))
 			.slice(-20)
 			.join("\n");
 		throw new Error(`worker for ${src} exited ${code}:\n${tail}`);
@@ -345,7 +355,9 @@ export async function compare(script: string, args: Args, title: string, metrics
 	const dirty = (await exec(["git", "status", "--porcelain", "--untracked-files=no"], REPO)).length > 0;
 	const bunVersion = await exec(["bun", "--version"], REPO);
 	console.log(`# ${title}`);
-	console.log(`base ${base.sha} (${args.base})  head ${head.sha}${dirty ? " +uncommitted" : ""}  runs ${args.runs}  bun ${bunVersion}  args ${args.passthrough.join(" ") || "-"}`);
+	console.log(
+		`base ${base.sha} (${args.base})  head ${head.sha}${dirty ? " +uncommitted" : ""}  runs ${args.runs}  bun ${bunVersion}  args ${args.passthrough.join(" ") || "-"}`,
+	);
 	const runs: { base: Run[]; head: Run[] } = { base: [], head: [] };
 	for (let index = 0; index < args.runs; index++) {
 		for (const variant of ["base", "head"] as const) {
@@ -365,18 +377,22 @@ export async function compare(script: string, args: Args, title: string, metrics
 	console.log("");
 	console.log("| metric | unit | base median [min–max] | head median [min–max] | change | expectation |");
 	console.log("|---|---|---|---|---|---|");
-	for (const spec of [...metrics, ...GC_METRICS.filter(gc => !metrics.some(own => own.name === gc.name))]) {
-		const of = (list: readonly Run[]) => list.map(run => run.metrics[spec.name] ?? Number.NaN);
+	for (const spec of [...metrics, ...GC_METRICS.filter((gc) => !metrics.some((own) => own.name === gc.name))]) {
+		const of = (list: readonly Run[]) => list.map((run) => run.metrics[spec.name] ?? Number.NaN);
 		const [b, h] = [of(runs.base), of(runs.head)];
 		const [bm, hm] = [median(b), median(h)];
 		const change = bm === 0 ? 0 : (hm - bm) / bm;
-		const range = (values: readonly number[]) => `${format(median(values))} [${format(Math.min(...values))}–${format(Math.max(...values))}]`;
+		const range = (values: readonly number[]) =>
+			`${format(median(values))} [${format(Math.min(...values))}–${format(Math.max(...values))}]`;
 		let verdict = "report";
 		switch (spec.expect.kind) {
 			case "lower": {
 				const ok = hm <= bm * (1 - spec.expect.minDrop);
 				verdict = `${ok ? "PASS" : "FAIL"}: drop ≥ ${(spec.expect.minDrop * 100).toFixed(0)}%`;
-				if (!ok) failures.push(`${spec.name}: head median ${format(hm)} vs base ${format(bm)} (needs a drop of ${(spec.expect.minDrop * 100).toFixed(0)}%)`);
+				if (!ok)
+					failures.push(
+						`${spec.name}: head median ${format(hm)} vs base ${format(bm)} (needs a drop of ${(spec.expect.minDrop * 100).toFixed(0)}%)`,
+					);
 				break;
 			}
 			case "atMost": {
@@ -391,16 +407,16 @@ export async function compare(script: string, args: Args, title: string, metrics
 		console.log(`| ${spec.name} | ${spec.unit} | ${range(b)} | ${range(h)} | ${(change * 100).toFixed(1)}% | ${verdict} |`);
 	}
 
-	const digests = new Set([...runs.base, ...runs.head].map(run => run.digest));
+	const digests = new Set([...runs.base, ...runs.head].map((run) => run.digest));
 	console.log("");
 	if (digests.size === 1) {
 		console.log(`output digest: identical across every base and head run (${[...digests][0]})`);
 	} else {
-		const listed = (list: readonly Run[]) => list.map(run => run.digest.slice(0, 16)).join(",");
+		const listed = (list: readonly Run[]) => list.map((run) => run.digest.slice(0, 16)).join(",");
 		failures.push(`output digests differ: base ${listed(runs.base)} head ${listed(runs.head)}`);
 	}
 	if (failures.length > 0) {
-		console.log(`RESULT: FAIL\n${failures.map(failure => `- ${failure}`).join("\n")}`);
+		console.log(`RESULT: FAIL\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
 		process.exit(1);
 	}
 	console.log("RESULT: PASS");

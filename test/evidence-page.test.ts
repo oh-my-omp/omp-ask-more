@@ -9,6 +9,7 @@ import { questionSchema } from "../src/schema.ts";
 initThemeSync();
 
 const HOST: SheetHost = { scheduleAfter: () => ({ cancel() {} }), requestComponentRender() {}, terminal: { rows: 200 } };
+// biome-ignore lint/suspicious/noControlCharactersInRegex: strips the ANSI styles the sheet renders
 const plain = (row: string) => row.replace(/\x1b\[[0-9;]*m/g, "");
 
 function page(evidence: readonly ResolvedEvidence[], width: number): string[] {
@@ -21,7 +22,15 @@ function page(evidence: readonly ResolvedEvidence[], width: number): string[] {
 			{ label: "B", tradeoff: "b" },
 		],
 	});
-	const component = new AskMoreComponent({ tui: HOST, questions: [question], evidence: [evidence], demos: [{ question: undefined, options: [] }], finish() {}, timeout: { kind: "off" }, notify() {} });
+	const component = new AskMoreComponent({
+		tui: HOST,
+		questions: [question],
+		evidence: [evidence],
+		demos: [{ question: undefined, options: [] }],
+		finish() {},
+		timeout: { kind: "off" },
+		notify() {},
+	});
 	return component.render(width).map(plain);
 }
 
@@ -31,7 +40,7 @@ describe("ANSI evidence lines", () => {
 		const rows = page([{ kind: "text", source: "minified.js", lines: ["short", long] }], 100);
 		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(100);
 		const marker = /^│\s+(const LONG = "x*) … (?:(\d+) more characters|还有 (\d+) 个字符)\s*│/u;
-		const cut = rows.map(row => marker.exec(row)).find(match => match !== null);
+		const cut = rows.map((row) => marker.exec(row)).find((match) => match !== null);
 		expect(cut).toBeDefined();
 		const kept = cut![1]!;
 		const left = Number(cut![2] ?? cut![3]);
@@ -51,7 +60,15 @@ describe("ANSI evidence lines", () => {
 					{ label: "B", tradeoff: "b" },
 				],
 			});
-			const component = new AskMoreComponent({ tui: HOST, questions: [question], evidence: [[]], demos: [{ question: undefined, options: [] }], finish() {}, timeout: { kind: "off" }, notify() {} });
+			const component = new AskMoreComponent({
+				tui: HOST,
+				questions: [question],
+				evidence: [[]],
+				demos: [{ question: undefined, options: [] }],
+				finish() {},
+				timeout: { kind: "off" },
+				notify() {},
+			});
 			process.env.OMOMP_LANG = "en";
 			expect(component.render(100).map(plain).join("\n")).toContain("Risks");
 			process.env.OMOMP_LANG = "zh";

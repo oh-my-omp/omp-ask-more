@@ -2,7 +2,7 @@
 // session and never changes the ask, which keeps waiting or hands over on its own clock.
 import { Shell } from "@oh-my-pi/pi-natives";
 import { TERMINAL } from "@oh-my-pi/pi-tui";
-import { tr } from "./i18n.ts";
+import { tr } from "../omomp-shared/i18n.ts";
 import { type Channel, clock } from "./timeout.ts";
 
 /** What the notification says; never the question text, evidence or answers. */
@@ -21,7 +21,10 @@ const COMMAND_TIMEOUT_MS = 30_000;
 function noticeBody(event: NoticeEvent): string {
 	return event.due === undefined
 		? tr(`${event.title}: waiting for your answer`, `${event.title}：等待你的回答`)
-		: tr(`${event.title}: waiting for your answer; the model decides at ${clock(event.due)}`, `${event.title}：等待你的回答；${clock(event.due)} 交给模型决定`);
+		: tr(
+				`${event.title}: waiting for your answer; the model decides at ${clock(event.due)}`,
+				`${event.title}：等待你的回答；${clock(event.due)} 交给模型决定`,
+			);
 }
 
 /** The variables a notify command reads; its own environment (and secrets) come through unchanged. */
@@ -50,10 +53,17 @@ async function runCommand(command: string, event: NoticeEvent, warn: (message: s
 			timeoutMs: COMMAND_TIMEOUT_MS,
 		});
 		// The command text may carry a token, so the warning names only the outcome.
-		if (result.timedOut) warn(tr(`notify command killed after ${COMMAND_TIMEOUT_MS / 1000} s`, `通知命令运行超过 ${COMMAND_TIMEOUT_MS / 1000} 秒，已终止`));
-		else if (result.exitCode !== 0) warn(tr(`notify command exited with ${result.exitCode ?? "no status"}`, `通知命令退出码 ${result.exitCode ?? "未知"}`));
+		if (result.timedOut)
+			warn(tr(`notify command killed after ${COMMAND_TIMEOUT_MS / 1000} s`, `通知命令运行超过 ${COMMAND_TIMEOUT_MS / 1000} 秒，已终止`));
+		else if (result.exitCode !== 0)
+			warn(tr(`notify command exited with ${result.exitCode ?? "no status"}`, `通知命令退出码 ${result.exitCode ?? "未知"}`));
 	} catch (error) {
-		warn(tr(`notify command could not start: ${error instanceof Error ? error.message : String(error)}`, `通知命令无法启动：${error instanceof Error ? error.message : String(error)}`));
+		warn(
+			tr(
+				`notify command could not start: ${error instanceof Error ? error.message : String(error)}`,
+				`通知命令无法启动：${error instanceof Error ? error.message : String(error)}`,
+			),
+		);
 	}
 }
 

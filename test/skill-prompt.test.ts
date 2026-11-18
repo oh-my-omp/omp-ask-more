@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { SKILL_ASK_RULE, withSkillAskRule } from "../src/skill-prompt.ts";
 
-const skillText = '[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]\n\nAsk in chat.\n\nUser: grill me';
+const skillText =
+	'[IMPORTANT: User invoked the "grilling" skill; follow its instructions. Full skill below.]\n\nAsk in chat.\n\nUser: grill me';
 
 function skillPrompt(content: Extract<AgentMessage, { role: "custom" }>["content"], attribution: "user" | "agent" = "user"): AgentMessage {
 	return { role: "custom", customType: "skill-prompt", content, display: true, attribution, timestamp: 1 };

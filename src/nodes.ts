@@ -2,11 +2,24 @@
 // declares `nativeOverlay`, so the backend wraps it in Tern's sheet (the frame and the title row);
 // `describe()` returns only the content. The sheet body scrolls as one column: the question tabs,
 // the question and its short brief, the decision with its buttons, then the long material.
-import { card, code, col, item, md, nativeImageNode, node, span, text, type NativeChild, type NativeNode, type TspSpan } from "@oh-my-pi/pi-tui";
+import {
+	card,
+	code,
+	col,
+	item,
+	md,
+	type NativeChild,
+	type NativeNode,
+	nativeImageNode,
+	node,
+	span,
+	type TspSpan,
+	text,
+} from "@oh-my-pi/pi-tui";
 import { actionBar, actionButton, selectList } from "@oh-my-pi/pi-tui/native/overlay";
+import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
 import { frameCount } from "./demo.ts";
-import { tr } from "./i18n.ts";
 import type { Answer } from "./result.ts";
 import type { AskQuestion } from "./schema.ts";
 import { type ActiveTab, type NativeScrollRequest, onOther, type PageDemo, pageDemos, type QuestionState } from "./state.ts";
@@ -51,7 +64,9 @@ export function encodeAct(act: SheetAct): string {
 		case "saveOther":
 			return `save:${act.page}`;
 		case "demo":
-			return act.target.slot === "question" ? `demo:${act.page}:question:${act.move}` : `demo:${act.page}:option:${act.target.option}:${act.move}`;
+			return act.target.slot === "question"
+				? `demo:${act.page}:question:${act.move}`
+				: `demo:${act.page}:option:${act.target.option}:${act.move}`;
 	}
 }
 
@@ -132,7 +147,12 @@ function demoNode(demoPage: PageDemo, page: number): NativeNode {
 				"controls",
 			);
 			const frameCaption = frame?.caption ? [text([span(frame.caption)], { wrap: "word" })] : [];
-			return node("col", { gap: "sm", role: "omp.ask.demo" }, [node("md", { text: frame?.body ?? "" }, undefined, "frame"), ...frameCaption, ...caption, controls], `demo-${slot}`);
+			return node(
+				"col",
+				{ gap: "sm", role: "omp.ask.demo" },
+				[node("md", { text: frame?.body ?? "" }, undefined, "frame"), ...frameCaption, ...caption, controls],
+				`demo-${slot}`,
+			);
 		}
 		case "image":
 			return node(
@@ -145,7 +165,12 @@ function demoNode(demoPage: PageDemo, page: number): NativeNode {
 			// Decoded for the ANSI page; the sheet never loads this kind.
 			return node("col", { gap: "sm" }, [text([span(demo.path, "muted")]), ...caption], `demo-${slot}`);
 		case "error":
-			return node("card", { head: [span(demo.path, "muted")], tone: "error" }, [text([span(demo.error, "error")], { wrap: "word" }), ...caption], `demo-${slot}`);
+			return node(
+				"card",
+				{ head: [span(demo.path, "muted")], tone: "error" },
+				[text([span(demo.error, "error")], { wrap: "word" }), ...caption],
+				`demo-${slot}`,
+			);
 	}
 }
 
@@ -200,7 +225,12 @@ function evidenceCards(evidence: readonly ResolvedEvidence[], expanded: boolean)
 		const note = entry.note ? [text([span(entry.note, "muted")], { wrap: "word" })] : [];
 		switch (entry.kind) {
 			case "unreadable":
-				return node("card", { head: [span(entry.path, "muted")], tone: "error" }, [text([span(entry.error, "error")], { wrap: "word" }), ...note], `ev${index}`);
+				return node(
+					"card",
+					{ head: [span(entry.path, "muted")], tone: "error" },
+					[text([span(entry.error, "error")], { wrap: "word" }), ...note],
+					`ev${index}`,
+				);
 			case "directory":
 				return node("card", { head: [span(entry.path, "muted")] }, [text([span(tr("directory", "目录"), "muted")]), ...note], `ev${index}`);
 			case "file":
@@ -213,11 +243,17 @@ function evidenceCards(evidence: readonly ResolvedEvidence[], expanded: boolean)
 			case "text":
 				return node(
 					"card",
-					{ head: [span(entry.source, "muted"), span(tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"), "warning")] },
+					{
+						head: [
+							span(entry.source, "muted"),
+							span(tr("  · quoted by the model, not read by ask-more", "  · 模型引用，ask-more 未读取核对"), "warning"),
+						],
+					},
 					[code(entry.lines.join("\n"), { ...(entry.lang ? { lang: entry.lang } : {}), ...preview }), ...note],
 					`ev${index}`,
 				);
 		}
+		return entry satisfies never;
 	});
 }
 
@@ -244,8 +280,8 @@ function appendix(state: QuestionState): NativeNode[] {
 	if (state.evidence.length > 0) children.push(block("evidence", tr("Evidence", "证据"), evidenceCards(state.evidence, state.expanded)));
 	const diagram = brief.diagram?.trim();
 	if (diagram) children.push(block("diagram", tr("Diagram", "图"), [md(`\`\`\`mermaid\n${diagram}\n\`\`\``)]));
-	const risks = brief.risks?.map(risk => risk.trim()).filter(risk => risk.length > 0) ?? [];
-	if (risks.length > 0) children.push(block("risks", tr("Risks", "风险"), [md(risks.map(risk => `- ${risk}`).join("\n"))]));
+	const risks = brief.risks?.map((risk) => risk.trim()).filter((risk) => risk.length > 0) ?? [];
+	if (risks.length > 0) children.push(block("risks", tr("Risks", "风险"), [md(risks.map((risk) => `- ${risk}`).join("\n"))]));
 	return children;
 }
 
@@ -268,7 +304,10 @@ function options(state: QuestionState, index: number): NativeNode {
 			...(answer.kind === "custom" ? { tone: "accent" as const } : {}),
 		}),
 	);
-	return selectList(questionListKey(index), rows, { role: "omp.ask.options", selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor) });
+	return selectList(questionListKey(index), rows, {
+		role: "omp.ask.options",
+		selected: onOther(state) ? OTHER_ITEM : optionItem(state.cursor),
+	});
 }
 
 /** The focused option's tradeoff rows, under the options; the layout appends the demo of picking it. */
@@ -284,7 +323,9 @@ function tradeoff(state: QuestionState): NativeNode | undefined {
 		] as const
 	)
 		.filter((pair): pair is readonly [string, string] => pair[1] !== undefined && pair[1].trim().length > 0)
-		.map(([label, value], index) => node("text", { spans: [span(label, "muted"), span("  "), span(value.trim())], wrap: "word" }, undefined, `t${index}`));
+		.map(([label, value], index) =>
+			node("text", { spans: [span(label, "muted"), span("  "), span(value.trim())], wrap: "word" }, undefined, `t${index}`),
+		);
 	return { ...card({ role: "omp.ask.tradeoff", tone: "accent", head: [span(option.label)] }, rows), key: "tradeoff" };
 }
 
@@ -292,7 +333,8 @@ function tradeoff(state: QuestionState): NativeNode | undefined {
 function tabs(states: readonly QuestionState[], active: ActiveTab): NativeNode | undefined {
 	if (states.length < 2) return undefined;
 	const items = states.map((state, index) => {
-		const label: TspSpan[] = state.answer.kind === "unanswered" ? [span(tabLabel(state.question))] : [span("✓ ", "success"), span(tabLabel(state.question))];
+		const label: TspSpan[] =
+			state.answer.kind === "unanswered" ? [span(tabLabel(state.question))] : [span("✓ ", "success"), span(tabLabel(state.question))];
 		return { id: String(index), label };
 	});
 	items.push({ id: REVIEW_TAB, label: [span(tr("Review", "汇总"))] });
@@ -322,7 +364,11 @@ function actions(primary: { readonly label: string; readonly act: SheetAct }, st
 }
 
 /** The page's primary act, as Enter would do it now: save the Other text, open the field, or answer the row. */
-function primaryAct(states: readonly QuestionState[], state: QuestionState, page: number): { readonly label: string; readonly act: SheetAct } {
+function primaryAct(
+	states: readonly QuestionState[],
+	state: QuestionState,
+	page: number,
+): { readonly label: string; readonly act: SheetAct } {
 	if (state.editing) return { label: tr("Save answer", "保存答案"), act: { kind: "saveOther", page } };
 	const label = states.length === 1 ? tr("Submit", "提交") : tr("Next", "下一题");
 	return { label, act: onOther(state) ? { kind: "openOther", page } : { kind: "answer", page, option: state.cursor } };
@@ -330,21 +376,31 @@ function primaryAct(states: readonly QuestionState[], state: QuestionState, page
 
 /** The review: the native ask's notice of unanswered questions, then each question's answer. */
 function reviewPage(states: readonly QuestionState[], status: string | undefined): NativeChild[] {
-	const unanswered = states.filter(state => state.answer.kind === "unanswered").length;
+	const unanswered = states.filter((state) => state.answer.kind === "unanswered").length;
 	// Label then answer per row, not the native `kv` (`omp.ask.answers`): Reader gives that grid a
 	// fixed key column, and a long CJK chip runs into its answer.
 	const rows = states.map((state, index) => {
 		const answer = answerLabel(state.question, state.answer);
 		return node(
 			"text",
-			{ spans: [span(tabLabel(state.question), "strong"), span("  "), answer === undefined ? span(tr("Unanswered", "未回答"), "warning") : span(answer)], wrap: "word" },
+			{
+				spans: [
+					span(tabLabel(state.question), "strong"),
+					span("  "),
+					answer === undefined ? span(tr("Unanswered", "未回答"), "warning") : span(answer),
+				],
+				wrap: "word",
+			},
 			undefined,
 			`answer${index}`,
 		);
 	});
 	const notice =
 		unanswered > 0
-			? [span(tr(`${unanswered} unanswered`, `${unanswered} 题未回答`), "warning"), span(tr(" · Submit still sends the rest", " · 提交仍会发送其余答案"))]
+			? [
+					span(tr(`${unanswered} unanswered`, `${unanswered} 题未回答`), "warning"),
+					span(tr(" · Submit still sends the rest", " · 提交仍会发送其余答案")),
+				]
 			: [span(tr("All answered · Submit sends them", "全部已答 · 提交即发送"))];
 	return [
 		node("text", { role: "omp.ask.notice", spans: notice, wrap: "word" }, undefined, "notice"),
@@ -390,8 +446,8 @@ function questionLayout(
 	const state = states[index];
 	if (state === undefined) return staticLayout(scrolled(root([]), scroll));
 	const demos = pageDemos(state);
-	const optionDemo = demos.find(demo => demo.slot === "option");
-	const questionDemo = demos.find(demo => demo.slot === "question");
+	const optionDemo = demos.find((demo) => demo.slot === "option");
+	const questionDemo = demos.find((demo) => demo.slot === "question");
 
 	const leadNodes = lead(state.question);
 	const optionList = options(state, index);
@@ -409,7 +465,8 @@ function questionLayout(
 
 	const page = (optionNode: NativeChild | undefined, questionNode: NativeChild | undefined): NativeChild[] => {
 		const decision: NativeChild[] = [optionList];
-		if (tradeoffCard !== undefined) decision.push(optionNode === undefined ? tradeoffCard : { ...tradeoffCard, c: [...(tradeoffCard.c ?? []), optionNode] });
+		if (tradeoffCard !== undefined)
+			decision.push(optionNode === undefined ? tradeoffCard : { ...tradeoffCard, c: [...(tradeoffCard.c ?? []), optionNode] });
 		if (otherField !== undefined) decision.push(otherField);
 		decision.push(bar);
 		const demo = demoBlock === undefined || questionNode === undefined ? [] : [{ ...demoBlock, c: [...(demoBlock.c ?? []), questionNode] }];
@@ -420,15 +477,10 @@ function questionLayout(
 	return {
 		withDemos: () => {
 			const current = pageDemos(state);
-			const option = current.find(demo => demo.slot === "option");
-			const own = current.find(demo => demo.slot === "question");
+			const option = current.find((demo) => demo.slot === "option");
+			const own = current.find((demo) => demo.slot === "question");
 			return scrolled(
-				root(
-					page(
-						option === undefined ? undefined : demoNode(option, index),
-						own === undefined ? undefined : demoNode(own, index),
-					),
-				),
+				root(page(option === undefined ? undefined : demoNode(option, index), own === undefined ? undefined : demoNode(own, index))),
 				scroll,
 			);
 		},
@@ -436,7 +488,12 @@ function questionLayout(
 }
 
 /** The sheet content for the active page, built once per version; `status` is the countdown line, if the ask has one. */
-export function sheetLayout(states: readonly QuestionState[], active: ActiveTab, scroll: NativeScrollRequest | undefined, status: string | undefined): SheetLayout {
+export function sheetLayout(
+	states: readonly QuestionState[],
+	active: ActiveTab,
+	scroll: NativeScrollRequest | undefined,
+	status: string | undefined,
+): SheetLayout {
 	const head = tabs(states, active);
 	const root = (page: readonly NativeChild[]): NativeNode => col([...(head === undefined ? [] : [head]), ...page], { gap: "md" });
 	if (active.kind === "review") return staticLayout(scrolled(root(reviewPage(states, status)), scroll));

@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tr } from "../omomp-shared/i18n.ts";
 import { halfBlockRows, loadDemo, loadQuestionDemos, rasterSize } from "../src/demo.ts";
-import { tr } from "../src/i18n.ts";
 import { demoSchema } from "../src/schema.ts";
 
 describe("halfBlockRows", () => {
@@ -37,9 +37,9 @@ describe("halfBlockRows", () => {
 		// Equal neighbours keep their color: drop codes that repeat the previous cell's.
 		let previous = ["", ""];
 		const line = expected
-			.map(cell => {
+			.map((cell) => {
 				const [, fg = "", bg = ""] = /38;2;([\d;]+);48;2;([\d;]+)m/.exec(cell) ?? [];
-				const parts = [fg === previous[0] ? "" : `38;2;${fg}`, bg === previous[1] ? "" : `48;2;${bg}`].filter(part => part !== "");
+				const parts = [fg === previous[0] ? "" : `38;2;${fg}`, bg === previous[1] ? "" : `48;2;${bg}`].filter((part) => part !== "");
 				previous = [fg, bg];
 				return `${parts.length > 0 ? `\x1b[${parts.join(";")}m` : ""}▀`;
 			})
@@ -100,8 +100,9 @@ describe("loadDemo", () => {
 			64,
 			undefined,
 		);
-		const slot = (demo: (typeof loaded)[number]["question"]) => (demo === undefined ? "-" : demo.kind === "frames" ? (demo.frames[0]?.body ?? "") : demo.kind === "error" ? demo.path : demo.kind);
-		expect(loaded.map(question => [slot(question.question), ...question.options.map(slot)])).toEqual([
+		const slot = (demo: (typeof loaded)[number]["question"]) =>
+			demo === undefined ? "-" : demo.kind === "frames" ? (demo.frames[0]?.body ?? "") : demo.kind === "error" ? demo.path : demo.kind;
+		expect(loaded.map((question) => [slot(question.question), ...question.options.map(slot)])).toEqual([
 			["q0.gif", "o0", "-", "o2.mp4"],
 			["-", "p0.png", "p1"],
 			["q2", "-", "r1.webp"],
@@ -109,7 +110,15 @@ describe("loadDemo", () => {
 	});
 
 	it("plays frames at the default interval when none is given", async () => {
-		expect(await loadDemo(demoSchema.parse({ kind: "frames", frames: [{ body: "a" }, { body: "b", caption: " " }] }), dir, "ansi", 64, undefined)).toEqual({
+		expect(
+			await loadDemo(
+				demoSchema.parse({ kind: "frames", frames: [{ body: "a" }, { body: "b", caption: " " }] }),
+				dir,
+				"ansi",
+				64,
+				undefined,
+			),
+		).toEqual({
 			kind: "frames",
 			frames: [{ body: "a" }, { body: "b" }],
 			intervalMs: 1200,
