@@ -1,217 +1,113 @@
 # Design
 
-English | [简体中文](design.zh-CN.md)
-
-How omp-ask-more is built. What a user sees and configures is in the [README](../README.md); what ran against it is in [verification](verification.md). Source references of the form `packages/<package>/src/…` point into the oh-my-pi monorepo as published at 18.22.0 (installed under `node_modules/@oh-my-pi/pi-<package>`).
+How omp-ask-more is built. What a user sees and configures is in the [README](../README.md); what ran against it is in [verification](verification.md). Source references of the form `packages/<package>/src/…` point into the oh-my-pi monorepo as published at 19.0.0 (installed under `node_modules/@oh-my-pi/pi-<package>`).
 
 ## Why the native ask falls short
 
-Since 18.18.3 the native `ask` takes one HTML `<form>` (`packages/coding-agent/src/tools/ask.ts`) and renders it natively — a whole-form dialog on hosts with `formDialog`, one `select`/`input`/`editor` prompt per named field elsewhere. Two things still stop it from being used to say things plainly:
+The native `ask` takes one HTML `<form>` (`packages/coding-agent/src/tools/ask.ts`) and draws it in every session with a UI: a whole-form dialog where the host has `formDialog`, one prompt per named field elsewhere. What it lacks is not a surface but the content to put on it. Its prompt asks the model for short questions with the context a field needs (`packages/coding-agent/src/prompts/tools/ask.md`), so the reader gets a title, a question and bare option labels: no situation, no cited file lines, no tradeoff per option.
 
-1. The model is told to keep it terse. The native prompt asks for short questions with the context a field needs and nothing like a brief, evidence or demos (`packages/coding-agent/src/prompts/tools/ask.md`).
-2. The surface is small. A field-by-field prompt shows one field's context at a time; the dialog carries a form and its Other answers but no place for a brief, cited file lines or an animation.
+## Division of work
 
-## Flow
+ask-more owns what the model writes and what the model reads back; the host owns everything the user touches.
+
+| ask-more | host `ask` |
+|---|---|
+| the parameter schema and the model-facing description and topics | drawing the form, keys, the Other answer, option notes |
+| validation of every question at once | its timeout (`ask.timeout`) and notification (`ask.notify`), off in plan mode |
+| the readability check | closing the form when the user sends a message instead, with the answers given so far |
+| reading file evidence from disk | field-by-field prompts where no form dialog exists |
+| compiling the batch into one form | the transcript card (`askToolRenderer`) and `/tree` re-answer |
+| the result text the model reads | `details: {answers, notes?, timedOut?}` |
 
 ```mermaid
 flowchart LR
   m[model] --> t["ask (plugin tool)"]
   t --> v{validate}
-  v -- invalid --> e[structured error back to model]
-  v -- ok --> u{"hasUI and mode tui"}
-  u -- "no" --> rn{"readability check (native fields)"}
-  u -- "yes" --> rs{"readability check (sheet)"}
-  rn -- "hard to read" --> e
-  rs -- "hard to read" --> e
-  rn -- "readable, off or no judge" --> n["ctx.invokeTool(native ask) with html or a rejection"]
-  rs -- "readable, off or no judge" --> o["ui.custom fullscreen overlay"]
-  o -- "plain terminal" --> c["ANSI page on the alternate screen"]
-  o -- "Tern" --> p["full-pane native sheet (nativeOverlay)"]
-  p --> a["AskToolDetails {answers}"]
-  c --> a
-  n --> a
+  v -- invalid --> e[rejection back to model]
+  v -- ok --> i{"ctx.invokeTool present"}
+  i -- no --> e
+  i -- yes --> r{readability check}
+  r -- "hard to read" --> e
+  r -- "readable, off, no judge or retry" --> f[read evidence, compile form]
+  f --> h["ctx.invokeTool({html})"]
+  h --> a[host AskToolDetails]
+  a --> x[result text rewritten for the model]
 ```
 
-The plugin entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. It registers the tool under the native name `ask` (`approval: "read"`, matching `packages/coding-agent/src/tools/ask.ts`), so the model reads this plugin's description (`src/description.ts`) instead of `prompts/tools/ask.md`, and the result renderer stays the native `askToolRenderer`, since renderers are keyed by tool name (`packages/tui/src/tools/index.ts:36-38`). It sets `strict: true`: the provider holds the arguments to the schema's grammar, and omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `enforceStrictSchema`; `packages/ai/src/utils/validation.ts`, `normalizeOptionalNullsForSchema`). OpenAI-family backends apply strict mode even when the flag is absent, so the schema is written for it either way (see Schema).
+The entry is the package-root `index.ts`, declared by `omp.extensions` in `package.json`. It registers the tool under the native name `ask`, so the model reads this plugin's description (`src/description.ts`) instead of `prompts/tools/ask.md`, and the transcript card stays the native renderer, which the tool hands the host's `details` to. It declares `approval: "read"` and `concurrency: "exclusive"`, as the native `AskTool` does: the host has one ask slot over the composer, and a second form would take it from the first.
 
-One pi-tui component (`src/component.ts`) is mounted with `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` (`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts`). Per-question state (`src/state.ts`) holds the cursor, the answer (a cursor resting on an option is not an answer), the Other field, evidence folding, scrolling and demo playback, so switching questions loses nothing. The component holds the overlay focus and hands keys to an open Other field itself. One ask is in flight at a time, from the readability check until the sheet closes: a second call is rejected instead of opening a second sheet and orphaning the first one's promise.
+**Why `ctx.invokeTool` and not `ctx.ui.formDialog`.** The host's `ask` closes its form when the user sends a message, through the tool call's steering signal, and tells the user so. The extension context passes no steering signal (`packages/coding-agent/src/extensibility/extensions/runner.ts`), so a plugin calling `formDialog` itself would show a form that ignores the message the host says will skip it. Invoking the host's tool also brings its timeout, notification, plan-mode rule and field-by-field fallback without a second copy. `ctx.invokeTool` exists only where the host built its own `ask`, which it does only for sessions that can prompt the user; without it the call is rejected before any check, so print mode never hangs.
+
+## The compiled form
+
+`src/form.ts#compileForm` turns the batch into one `<form>`, a `<fieldset>` per question in the order a reader needs it: the header as the `<legend>`, Where / What / How, the evidence, the diagram, the risks, the question's demo, the options with their tradeoffs, the option demos, then the question and its radios. The host takes the paragraph right before a radio group as the field's question (`packages/tui/src/html-form/data.ts#fieldQuestions`) and every block above it as the field's context (`#fieldContexts`), so a field-by-field prompt carries the whole brief too.
+
+- **Nothing is preselected.** The host reports a choice by its label text (`formAnswers`) and its timeout submits the form's current values. A preselected recommendation would come back indistinguishable from the user's choice, so the recommendation is a marker on the option's line and a question still blank when the timeout fires is the model's to decide.
+- **Radio values are the option labels.** The host returns the label as the answer, so a label must survive the parser unchanged: one line, single spaces. A label starting with "Other" is refused, because the parser then withholds the host's own free-text answer for that group (`packages/tui/src/html-form/parse.ts`) and a typed answer, reported as `Other: <text>`, would be ambiguous.
+- **Evidence is read by ask-more.** File evidence is resolved against the session's working directory and read when the ask opens, so the reader sees the real lines with their numbers rather than code the model typed. Text evidence is a quote ask-more cannot check, and its head says so.
+- **The diagram is text art.** Mermaid is drawn by the host's own renderer (`packages/tui/src/theme/mermaid-cache.ts#resolveMermaidAscii`) into a `<pre>`, since a form has no diagram element; source the renderer cannot draw is shown as source.
+- **Demos are pictures.** A form shows `<img>`; GIF, APNG and WebP animate there. The image path goes in absolute, because the host resolves a relative one against a directory of its own choosing.
+
+## Result
+
+The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces only its first text block with one line per question in input order, the contract `xd://ask/results` describes, then the option notes. `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
 
 ## The rule in an invoked skill
 
-omp renders `/skill:<name>` from a fixed template (`packages/coding-agent/src/prompts/skills/user-invocation.md`, imported by `extensibility/skills.ts`): the `IMPORTANT` header, the skill body, the skill directory and the user's words, sent as a custom message with `customType: "skill-prompt"` and `attribution: "user"` (`modes/skill-command.ts`). Nothing lets a plugin change the template. A skill that shows how its questions look in the reply sits closer to generation than the tool description, and on kimi it won.
+omp renders `/skill:<name>` from a fixed template (`packages/coding-agent/src/prompts/skills/user-invocation.md`): the `IMPORTANT` header, the skill body, the skill directory and the user's words, sent as a custom message with `customType: "skill-prompt"` and `attribution: "user"`. Nothing lets a plugin change the template. A skill that shows how its questions look in the reply sits closer to generation than the tool description, and on kimi it won.
 
-While `ask` is active (`pi.getActiveTools()`), a `context` handler (`index.ts`) passes the history to `withSkillAskRule` (`src/skill-prompt.ts`), which appends one `[IMPORTANT: …]` paragraph to every user-invoked skill prompt: after the whole message, so it is the last thing the model reads before it answers; to a string, or to the first text block ahead of attached images. Messages are copied with object spread, which keeps the symbol-keyed history index omp uses to pair a copy with its persisted message (`extensibility/extensions/runner.ts#emitContext`); a message that already ends with the paragraph, and a history without a skill prompt, come back unchanged and allocate nothing. Autoloaded skills are not user-attributed and stay as they are.
+While `ask` is active, a `context` handler (`index.ts`) passes the history to `src/skill-prompt.ts#withSkillAskRule`, which appends one `[IMPORTANT: …]` paragraph to every user-invoked skill prompt, after the whole message, so it is the last thing the model reads before it answers. Messages are copied with object spread, which keeps the symbol-keyed history index omp uses to pair a copy with its persisted message (`extensibility/extensions/runner.ts#emitContext`). Autoloaded skills are not user-attributed and stay as they are.
 
-The change exists only on the way to the model: the session file, `/tree` and transcripts show omp's message. Registering a `context` handler makes omp clone the history before every model call (`runner.ts#emitContext`), and omp marks the changed skill message as per-call context, which Anthropic's explicit cache breakpoints skip (`packages/ai/src/providers/anthropic.ts`); the paragraph is the same on every call, so automatic prefix caching still matches it.
+The change exists only on the way to the model: the session file, `/tree` and transcripts show omp's message. Registering a `context` handler makes omp clone the history before every model call, and omp marks the changed skill message as per-call context, which Anthropic's explicit cache breakpoints skip (`packages/ai/src/providers/anthropic.ts`); the paragraph is the same on every call, so automatic prefix caching still matches it.
 
 ## Schema
 
-The model's parameters are a batch of decisions in `questions[]` — a shape of the plugin's own, since the native `ask` now takes `{html}` — extended the way `omp-todo-more` extends `todo`:
+The model's parameters are a batch of decisions in `questions[]`, a shape of the plugin's own, extended the way `omp-todo-more` extends `todo`:
 
 | Per question | Added |
 |---|---|
 | `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?`; not `multi`, since every question takes one answer | `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
 
-The persisted call keeps these arguments. The host's `/tree` re-answer recovers the `html` of a persisted `ask` call (`packages/coding-agent/src/session/agent-session.ts#recoverAskReanswerHtml`); a `questions[]` call carries none, so landing on an ask-more result is an ordinary leaf move.
+The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry is a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated union, attaching every evidence entry and demo to its target.
 
-The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry or a demo is a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated unions the dialog consumes, rejecting a field of the other kind, a missing required one, and a reference to a question or option the call does not hold.
+The shapes are chosen for strict mode, where the model has to produce every field: omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `packages/ai/src/utils/validation.ts`). Each field a `kind` does not use stays optional, and required-with-kind is checked in `parseParams`, not the schema, because two optional fields under an "exactly one" rule once made strict models send both. Every optional string rejects `""`, so an empty placeholder is dropped the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
-The shapes are also chosen for strict mode, where the model has to produce every field. Each field a `kind` does not use stays optional, so a strict model sends it as `null`, which omp drops; two optional fields under an "exactly one" rule once made strict models send `{frames: […], path: ""}`, so required-with-kind is checked in `parseParams`, not the schema. Every optional string rejects `""`, so an empty placeholder is dropped before validation the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
+omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`, so each field's description opens with the value it expects and then says what the value is for. A description holds at most one " or "; with more, the check rewrites it as a list of alternatives.
 
-omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`, so each field's description opens with the value it expects (`an array of …`, `non-empty text …`, `a 1-based line number …`, `a demo tagged by kind: …`) and then says what the value is for: a model that sent `questions` as a string reads "questions must be an array of independent decisions, … (was a string)". A description holds at most one " or "; with more, the check rewrites it as a list of alternatives.
-
-How the fields are drawn:
-
-- `brief.where/what/how` are drawn above the options and never collapsed.
-- `evidence[]` is one of two kinds, each drawn as a card whose first 10 rows (ANSI page, all unfolded together by `ctrl+o`) or 12 lines (Tern, a `code` node with `preview`, each card unfolded by its own `N more lines`) show before the rest. Neither surface caps how many entries or lines there are.
-  - `{kind: "file", path, start?, end?}` is resolved against the session's working directory and read when the ask opens, so the page shows the real lines (in Tern a `code` node with `path`, `start` and line numbers, `packages/wire/src/tsp.ts`) instead of model-typed code. With neither `start` nor `end` it shows the file's first 40 lines, with `start` alone one line, with both an inclusive window. The file is read line by line through `readline` and the read stops at the window's last line, so a few lines out of a large file cost what they would in a small one; a window past the end of the file is cut there, and one starting past it is an error. Lines that are not adjacent are separate entries. A path that is missing or unreadable is drawn in an error tone with the reason and never blocks the ask; a directory is drawn as one.
-  - `{kind: "text", source, text, lang?}` is text the model quotes from elsewhere — a command's output, a page, a log. ask-more cannot check it, so the card's head is the `source` the model names followed by "quoted by the model, not read by ask-more", the lines carry no numbers, and in Tern `lang` picks the highlighting.
-  - Tabs become two spaces and trailing whitespace is dropped in both kinds. On the ANSI page a line wider than the body ends in `… N more characters` instead of being cut at the box edge without a trace; Tern draws about 4,000 characters of a line, then its own count, and scrolls a long line sideways.
-- `diagram` is Mermaid source: the `md` node draws it natively in Tern, and the TUI Markdown renderer draws it as ASCII (`packages/tui/src/theme/mermaid-cache.ts:66,100`).
-- `tradeoff` / `holds_when` / `cost` are one line each and are drawn under the focused option.
-- `demo` is one of two kinds. `{kind: "frames", frames[{body, caption?}], interval_ms?}` are Markdown frames the sheet steps through in a loop (text, a ` ```mermaid ` diagram, a fenced text drawing), every frame padded to the tallest so nothing below moves. `{kind: "file", path}` names an animation (GIF, APNG, WebP) or a video (mp4, mov, webm, mkv, m4v), resolved against the session's working directory like file evidence. A question's demo sits under the decision; an option's demo sits in its tradeoff card and restarts whenever the cursor moves onto that option. `caption` says what to watch.
-
-## Validation
-
-Validation runs at the tool boundary, before any UI opens, checks every question, returns every problem at once, and never degrades into a thinner ask. `parseParams` attaches every evidence entry and demo to its target while it maps the call, so an entry that misses its mark is a problem of that entry, named by field:
-
-| Rule | Rejection |
-|---|---|
-| at least one question | `questions: empty` |
-| an evidence entry or demo names a `question` id the call does not hold | `evidence[i].question: "<id>" is not the id of any question in this call` |
-| an option demo names an `option` label its question does not hold | `demos[i].option: "<label>" is not a label of an option of question "<id>"` |
-| an entry carries a field of the other `kind`, or lacks one its `kind` requires | names each field and the `kind` it belongs to |
-| a second demo on the same brief or option | names the slot and its one-demo rule |
-| ids non-empty and unique in the call | `questions[i].id: duplicate "<id>"` |
-| `brief.where/what/how` non-empty | `questions[i].brief.<field>: empty` |
-| every option has a non-empty `tradeoff` | `questions[i].options[j].tradeoff: empty` |
-| ≥ 2 options | a decision needs at least two options |
-| labels unique within a question, one line with single spaces (the form returns the label text as the answer), and not reserved (`Other`, `Other…` — added by the surfaces) | named per option |
-| `recommended` is an index into the options | names the bad value |
-| file evidence: `end` only with `start`, not before it | names the entry and the lines |
-| text evidence: `source` one non-empty line, `text` non-empty | names the entry and the field |
-| 2–12 frames, none blank; `interval_ms` from 300 to 5000 | names the count, the frame or the interval |
-| a file demo's `path` ends in `.gif`, `.png`, `.apng`, `.webp`, `.mp4`, `.mov`, `.webm`, `.mkv` or `.m4v` | names the path and the accepted extensions |
+Validation runs before any judge or form, checks every question, and returns every problem at once, named by field; it never degrades into a thinner ask.
 
 ## Readability check
 
-After validation and before either dialog, `index.ts#screen` reads `readability.judge` and, when it is on and a judge resolves, runs `src/readability.ts#readabilityGate`; the questions, the rule that rejects and the deadline live there.
+After validation and before the form, `index.ts#screen` reads `readability.judge` and, when it is on and a judge resolves, runs `src/readability.ts#readabilityGate`.
 
-- **One call per question, as its surface shows it.** Each question is judged alone (the authored question on the sheet, or the header, question, option labels and `label: tradeoff` lines the delegated form shows), because the reader sees one question per page. One state for the whole call with questions pointing at `questions[i]` made the scores follow the index: a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone.
-- **What is judged.** Code splits the shown prose into sentences and picks the candidate terms (issue and section numbers, codes such as `F106`, `K6`, `VM110`, commit hashes, long numbers, upper-case abbreviations; a model does not list reliably). Each sentence is one request with the state `{dialog, sentence}` and three yes/no questions: does it say who or what acts, does it mention a test, review round, result, set of items or earlier decision only by a name or number, does it hold a word, abbreviation, name or number a reader who has seen only `dialog` could not explain. Each term is one request with the state `{dialog}` and two yes/no questions, named in the instruction: would an engineer who has never worked on the project know it, could a reader who has seen only `dialog` say what it is. The jargon question works on the sentence, so it also reaches words no pattern finds (`leaf-dense`, `owner`).
-- **Zero tolerance.** One failing sentence (no actor, or an unshown reference, or unexplained jargon) or one failing term (neither known nor said) rejects the question, and one rejected question rejects the call. A wrongly rejected ask costs one rewrite; a missed one costs the reader's decision, so the gate does not trade recall for fewer rejections.
-- **Fixed rejection text.** The model reads, per failing question, its `id`, one fixed instruction, and the sentences and terms that failed with one fixed reason each. The words are the model's own and the reasons fixed; no judge output reaches it. It asks again, and that second call goes through unjudged (`gateUnlessRetry`: the last `ask` result in the session's own branch is a readability rejection, so no flag is kept anywhere and a restart, fork or `/tree` sees what its history holds), so a judge that rejects clear text cannot keep the ask from the reader; the call after it is judged afresh.
-- **Which judge.** OMP's own `resolveJudge` with the session model, the same chain OMP's judgments use: the plugin adds no model choice of its own, so the `judge` role decides and the session model answers only when OMP itself falls back to it (no native judgment model in the chain). The session's settings, registry, ledger and cost gate come from the `AgentSession` registered in `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings.
-- **Failure.** A judge that fails or does not answer lets the ask through with a warning, since the check must never stand between the user and a decision; the caller's own abort still cancels the ask. A failed request stops the rest of the call's requests.
+- **One call per question.** Each question is judged alone, with its header, brief, options and tradeoffs as the form shows them. One state for the whole call made the scores follow the index: a question full of unexplained codes scored 0.91 inside its seven-question call and 0.05 alone.
+- **Sentences and terms, chosen by code.** Code splits the prose into sentences and picks the candidate terms (issue and section numbers, codes such as `F106` or `K6`, commit hashes, long numbers, upper-case abbreviations), because a model does not list them reliably. Each sentence is asked whether it says who or what acts, whether it mentions something only by a name or number, and whether it holds a word a reader of this section alone could not explain; each term whether an outside engineer would know it and whether the section says what it is.
+- **Zero tolerance.** One failing sentence or term rejects its question, and one rejected question rejects the call. A wrongly rejected ask costs one rewrite; a missed one costs the reader's decision.
+- **Fixed rejection text.** The model reads its own failing sentences and terms with fixed reasons; no judge output reaches it. The next call goes through unjudged: the gate reads the last `ask` result in the session's own branch, whether the model called `ask` directly or through omp's `xd://ask` device, so no flag is kept and a restart, fork or `/tree` sees what its history holds. A judge that rejects clear text cannot keep the ask from the reader.
+- **Which judge.** OMP's own `resolveJudge` over the calling session's settings, registry, ledger and cost gate, found through `AgentRegistry.global()` for the context's `sessionManager`, since the extension context carries no settings. The `judge` role decides; the session model answers only when OMP itself falls back to it.
+- **Failure.** A judge that fails or misses its deadline lets the ask through with a warning; the caller's own abort cancels the ask.
 
-`eval/readability.ts` runs the same chain (`--session-model provider/id` standing in for the session model) over `eval/readability-labelled.json` — 44 questions in 15 recorded calls, 16 of them labelled — and prints how many questions the gate rejects, how many labelled `hard` ones it misses and how many labelled `readable` ones it rejects.
-
-## ANSI page
-
-`fullscreen` puts the page on the alternate screen. The title and, for a batch, a tab row (`✓` on answered questions, then `Review`) stay at the top; the key hints, and above them the countdown line when the ask has one, stay at the bottom; the body between them is a pi-tui `ScrollView` sized from the live terminal height, with a scrollbar, scrolled by `PgUp`/`PgDn`/`Home`/`End`/`Shift+↑↓` and the mouse wheel, and pulled to the focused option when `↑↓` moves it.
-
-## Tern sheet
-
-The component declares `nativeOverlay` (`role: "omp.askMore"`, `size: "full"`, `head`: the question's `header`, or "N decisions" for a batch), so the backend wraps it in one opaque sheet filling the pane (`packages/tui/src/native/backend.ts`), and `describe()` returns the content in the native ask's roles, which Tern's color themes and its Reader, Spine and Console chat styles already style: for a batch an `omp.ask.head` row holding the `omp.ask.questions` tabs (positional ids, `✓` on answered questions, `Review` last; click switches), the question (`omp.ask.question`) and Where/What/How, then the decision — the options as an `omp.ask.options` list keyed `qN` per question, rows `omp.ask.option` and a last `omp.ask.other` (`click` selects, `dblclick` answers; the answered row carries the accent tone, which Tern draws as the filled radio mark, `(•)` in Console, while the cursor is the list's highlighted row), the focused option's tradeoff card, the Other field and the action bar (the countdown line on its left when the ask has one, then `Cancel all`, and `Next` / `Submit` / `Save answer`) — then the evidence `code` nodes (folded to 12 lines behind Tern's own "more lines" control), the Mermaid `md` and the risks. The Review page is an `omp.ask.notice` line and one row per question, label then answer: Reader gives the native answers grid (`omp.ask.answers`) a fixed key column, and a long CJK chip runs into its answer there. The sheet role stays outside `omp.overlay.*` on purpose: Tern's list rule for those overlays (`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`) outranks the ask list styling and draws each option's mark over its label. Tern scrolls a sheet body as one column and brings a list's selection into view against the body's bottom edge, so the action bar sits right after the decision and reveals itself when a page opens: after a long brief the whole decision is in view. Keyboard scrolling reaches Tern as `scroll` requests on the body.
-
-Every button's action id names the page and the state it was drawn for (`answer:<page>:<option>`, `other:<page>`, `save:<page>`, `demo:<page>:question:<move>`, `demo:<page>:option:<option>:<move>`, `submit`, `cancel`; `src/nodes.ts#SheetAct`). Tern keeps routing a click to a node the sheet has since redrawn, so a click that arrives after its page, its cursor row or the Other field changed — a second click on `Next`, a demo control of an option the cursor left, `Submit` after leaving Review — is dropped instead of acting on the new state. The options list is keyed per question for the same reason.
-
-**Stylesheet.** Outside `omp.overlay.*` the sheet keeps Tern's base overlay face. `tern/` is a styles-only Tern plugin (`plugin.toml`, `ask-more.css`, and a one-comment `window.luau` because a manifest needs one entry) whose three rules match only `omp.askMore`: the sans text face of omp's overlays, and in Console its terminal face plus the three-cell gutter the question's `?` marker hangs in.
-
-## Other field
-
-The Other field is a pi-tui `Input`, one per question: its value is the only copy of the text, edited by the keys the component forwards and, in Tern, by the terminal's own edit/undo events (the field is a child component, so the reconciler routes them to it).
-
-## Demos
-
-Files are loaded with the evidence, before the surface opens, for the surface in use (`src/demo.ts`):
-
-| Source | Tern | ANSI page |
-|---|---|---|
-| `frames` | an `md` node per frame plus the frame's caption, a `1/3` counter and `Previous` / `Pause` / `Next` buttons; the component steps the frame and Tern receives only the changed text | the frame's Markdown rows in a slot as tall as the tallest frame, with the counter and the key hints under it |
-| GIF, APNG, WebP | the file's bytes as an `image` node (a content-addressed blob, sent once); Tern plays the animation itself at the file's own timing, so there are no buttons | decoded by ffmpeg to 10 frames per second, at most 64 × 20 cells, and drawn as `▀` half-blocks in 24-bit color (upper pixel as foreground, lower as background); stepped like frames |
-| mp4, mov, webm, mkv, m4v | converted by ffmpeg to a GIF (12 frames per second, at most 720 px wide, a palette per frame) and shown as an image; every container goes through the same ffmpeg call, of which mp4 was exercised | decoded like an animation |
-
-One timer, scheduled on the TUI's render clock, steps the playing demos of the open page, each at its own interval; it runs only while that page is open, the Other field is closed and something plays, and it stops when the ask closes. ffmpeg and ffprobe run without a shell, under a 20-second timeout, killed on abort, and stop as soon as their output passes its bound (the decoded frames, or 16 MB for a converted GIF). A file that is missing, unreadable, not an image the sheet can play, too large, or needs ffmpeg that is not on `PATH` becomes an error row with the reason; the ask still opens.
-
-## Delegation
-
-When `ctx.hasUI` is false or the mode is not `tui`, the tool calls `ctx.invokeTool` with `{html}` — one HTML form built by `src/schema.ts#askFormHtml` — once the readability check has passed on the text that form shows; without a native resolver — print mode, for instance — it returns a structured rejection before any check instead of hanging. A failure inside the full-screen surface becomes a `ui.notify` warning and the same form takes the whole batch, without a second check.
-
-The form mirrors the host's own idiom (`packages/coding-agent/src/prompts/tools/ask.md`): a `<fieldset>` per question, its `header` as the `<legend>`; a `<ul>` with one `label: tradeoff` line per option; the question in a `<p>` right before the group, which `fieldQuestions` picks as the field's question and `fieldContexts` leaves out of its context, so a field-by-field prompt reads the section title and the tradeoffs, then the question. Each option is a `<label>`-wrapped radio whose `value` is the label itself, so `formAnswers` returns the picked label as the `answer` — matching what the plugin's own page reports — and a timeout submits the `recommended` option's `checked`. `& < >` in a label are escaped and come back through the parser unchanged, which is why labels must be one line with single spaces. Radio groups automatically get the host's "Other" free-text answer (`packages/tui/src/html-form/parse.ts`); its typed text answers as `Other: <text>`.
-
-The delegated result passes through untouched: the host's `details` (`answers[]`, plus `notes?` and `timedOut?` when the deadline submitted the form's preselected values) and its own result text reach the model as they came.
-
-## Timeout
-
-```mermaid
-sequenceDiagram
-  participant I as index.ts
-  participant S as native plugin settings
-  participant C as AskMoreComponent
-  participant N as notify.ts
-  I->>S: await readTimeoutSettings (snapshot)
-  I->>I: timeoutPolicy → off / decide / notify
-  I->>C: mount with policy and notify callback
-  C->>C: idle timer (timeout), restarted by any input
-  C->>N: notify(due) when idle ends under notify
-  N-->>N: terminal notification, command in background
-  C->>C: return timer (returnTimeout)
-  C->>I: Submission timeout with the answers so far
-  I->>I: timedOutResult, no ctx.abort()
-```
-
-- **Settings.** `package.json` declares `timeout`, `returnTimeout`, `onExpiry`, `notify.terminal` and `notify.command` in `omp.settings`, next to `readability.judge` (read on its own when the ask is called, see Readability check); manifest defaults are the single source of truth. `src/settings.ts` awaits `getPluginSettings("omp-ask-more", ctx.cwd)` from `@oh-my-pi/pi-coding-agent/extensibility/plugins/loader`, then validates whole seconds and setting types into one snapshot, after question validation and before evidence loads. The API merges global plugin settings and project `.omp/plugin-overrides.json`, but applies neither defaults nor environment variables. The plugin applies manifest defaults and reads `OMP_ASK_MORE_NOTIFY_COMMAND` itself; an explicitly set environment variable wins, including an empty value. Reading settings needs no session registry lookup or process-global settings slot.
-- **Command trust.** The host exposes merged values but not provenance. The plugin reads the same API at the working directory and at `/`: root-level override files are machine-admin files and form part of the trusted global baseline. A command differing from that baseline is treated as project-sourced and refused. An identical command is already the user's global choice, so it remains trusted. A trusted environment command wins without a baseline read. This uses only the mapped host API; no plugin-side file selection or parsing is duplicated. Settings errors carry structured variants and are rendered in the resolved UI language at the notification boundary.
-- **Policy.** `src/timeout.ts` parses that snapshot into `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`. `timeout: 0` is `off`; no channel with `decide` is `decide`, with `wait` is `off`. A project-sourced command is left out and becomes a structured problem that `index.ts` renders as a localized warning, without discarding the allowed project timeout settings.
-- **Clock.** The countdown belongs to the component, on the render clock's `scheduleAfter`, so it starts once the sheet is built (loading evidence and demos does not count) and every timer is cancelled on a phase change, on submit and on dispose. `handleInput`, `handleNativeEvent` and the Other field's own `handleNativeEvent` (`OtherInput`, since Tern sends its edit/undo events to the field, not the sheet) restart the idle phase. The phases are `stopped | idle | notified{at, due, timer}`. A change made by a timer calls `requestComponentRender`, because no input follows to redraw the sheet. Expiry goes through the same single completion gate as submit and cancel, as `Submission { kind: "timeout", answers }`; `index.ts` returns `timedOutResult` and does not call `ctx.abort()`.
-- **Notification.** `index.ts` builds the callback; `src/notify.ts` sends `TERMINAL.sendNotification({ title: "omp", body, type: "ask", urgency: "normal", actions: "focus" })` (`@oh-my-pi/pi-tui`, which picks OSC 99, OSC 9 or BEL per terminal and writes through the active terminal, so it reaches the terminal under the alternate screen and in Tern) and runs the command in omp's own POSIX shell inside the process (`new Shell().run` from `@oh-my-pi/pi-natives`, the same on every platform) with the process environment plus the `OMP_ASK_MORE_*` variables, a 30-second timeout, and no await: the ask's clock never waits for a channel. A failure is a warning naming only the outcome.
-- **Native settings.** The native `ask.timeout` (`packages/coding-agent/src/modes/settings.ts#cfgAskTimeout`) submits the form's current values — the model's preselected ones — after its seconds and also bounds `cfg://` approvals; the native `ask.notify` (`#cfgAskNotify`) fires when the dialog opens (`packages/coding-agent/src/tools/ask.ts#sendAskNotification`). Neither matches this behaviour, so neither is read; the native ask still applies both when ask-more delegates to it.
-- **Wait accounting.** omp counts a `ui.custom` wait as user time unless one of its arguments carries a positive `timeout` (`packages/coding-agent/src/extensibility/extensions/user-wait.ts`), and `ExtensionCustomOptions` has no such field; native timed dialogs count as agent time. The plugin does not add an undeclared field to change that, so an ask with a timeout stays user time.
-
-## Answer and lifecycle
-
-| Concern | Behavior |
-|---|---|
-| Answer | the host's `AskToolDetails`: `details.answers[{name, question, answer}]`, one entry per question in input order, `answer` the picked label, the typed text or `""` (`src/result.ts`); text `User answers:` then `id: label`, `id: "own text"`, `id: (cancelled)` or `id: (timed out: …)` per line; a delegated call returns the host's result unchanged |
-| Unanswered questions | the Review page lists them; submitting still sends the rest, an unanswered question reads `id: (cancelled)` and its `answer` is `""`, which the card draws as `(no answer)` |
-| Cancel (`esc`, `Cancel all`, abort signal) | `ctx.abort()`, then every question as `(cancelled)`; nothing already answered is submitted |
-| Concurrent asks | one in flight, readability check included; a second call is rejected instead of opening a second sheet |
-| Hard to read | `ask rejected:` with each failing question before anything opens; the model asks again |
-| Timeout | the answers given so far, the rest as `(timed out: …)` for the model to decide; no `ctx.abort()` |
-| Approval | `approval: "read"`, matching the native `AskTool` |
-| Failure inside the surface | `ui.notify` warning, then delegation of the whole batch to the native dialog |
-| Demo playback | starts when its page opens; an option's demo restarts when the cursor moves onto that option; nothing plays while the Other field is open; no timer outlives the ask |
+`eval/readability.ts` runs the same chain over `eval/readability-labelled.json` (recorded calls with human labels) and prints how many questions the gate rejects, how many labelled `hard` ones it misses and how many labelled `readable` ones it rejects.
 
 ## Host constraints behind the known limitations
 
-- **`/tree` re-answer** recovers `html` from the persisted call's arguments (`recoverAskHtml` in `packages/coding-agent/src/tools/ask.ts`, called by `agent-session.ts#recoverAskReanswerHtml`) and reopens it with a fresh `AskTool` (`selector-controller.ts#reanswerAsk`). The persisted arguments are the model's `questions[]`, which carry no `html`, so recovery finds nothing and the entry moves as an ordinary leaf.
-- **Collaborator guests** answer through the native mirroring channel (`extension-ui-controller.ts:923-1025`), which has no representation for a `ui.custom` surface.
-- **The transcript card** comes from the native renderer (`packages/tui/src/tools/ask.ts#askToolRenderer`), which draws each `details.answers` entry as its question and answer, `(no answer)` for an empty one; it has no state for "unanswered, left to the model".
-- **Plan mode.** The native ask turns its timeout off in plan mode (`packages/coding-agent/src/tools/ask.ts`); this plugin's countdown does not look at plan mode.
+- **`/tree` re-answer** reopens a persisted `ask` call through the host's own `AskTool` (`packages/coding-agent/src/tools/ask.ts#recoverAskHtml`), not through this plugin. The persisted arguments are the model's `questions[]`, from which the host builds a plain form of questions and labels with the recommended option preselected; the brief, evidence and tradeoffs are not in it, and the answer comes back in the host's own result text.
 
 ## Files
 
 ```
-index.ts           plugin entry: registers ask, validates, runs the readability check, mounts the fullscreen overlay, delegates; adds the rule to invoked skills
-src/schema.ts      wire and internal zod shapes, entry map, the delegated HTML form generator, per-question validation
-src/brief.ts       evidence: file windows read up to their last line against the working directory, quoted text as lines
-src/demo.ts        demo specs, file loading and ffmpeg decoding per surface, half-block rows
-src/state.ts       per-question state (cursor, answer, Other field, folding, scroll, demo playback) and the active tab
-src/component.ts   one component: the ANSI page (render) and the Tern content (describe), keys and events, the countdown
-src/nodes.ts       the Tern content in the native ask roles, and the sheet's button acts (SheetAct)
-src/result.ts      Answer variants, `details.answers` construction, cancelled, timed-out and rejected results
-src/settings.ts    native plugin settings and command provenance, validated and snapshotted once per ask
-src/readability.ts the readability check: per-question dialog per surface, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
-src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
-src/notify.ts      timeout notifications: the terminal one and the notify command
-omomp-shared/i18n.ts UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English (copy of shared src/i18n.ts)
+index.ts            plugin entry: registers ask, validates, runs the readability check, compiles the form, invokes the host ask; adds the rule to invoked skills
+src/schema.ts       wire and internal zod shapes, entry map, per-question validation
+src/brief.ts        evidence: file windows read up to their last line against the working directory, quoted text as lines
+src/form.ts         the batch compiled into one HTML form for the host ask
+src/result.ts       the host result with the model's answer text, and rejected results
+src/settings.ts     the readability.judge plugin setting
+src/readability.ts  the readability check: per-question dialog, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
-src/description.ts model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
-src/topics/        shipped routing, rounds and results markdown bodies
-tern/              styles-only Tern plugin: the sheet's text face and Console gutter
-eval/              the readability judge over labelled recorded asks (bun run eval:readability)
-test/              validation, native projection, evidence windows and quoted text, the ANSI long-line cut, demo loading,
-                   half-block rows, the timeout policy and result, the skill rule, the readability check and its setting,
-                   and the Tern sheet driven through pi-tui's reconciler and the reference TSP applier, countdown included (bun test)
+src/description.ts  model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
+src/topics/         shipped routing, rounds and results markdown bodies
+omomp-shared/i18n.ts UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English (copy of shared src/i18n.ts)
+eval/               the readability judge over labelled recorded asks (bun run eval:readability)
+test/               validation, evidence windows and quoted text, the compiled form read back through the host's form parser,
+                    the result text, the skill rule, the readability check and its setting (bun test)
 ```

@@ -1,17 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { defaultFormData, fieldContexts, fieldQuestions, formAnswers } from "@oh-my-pi/pi-tui/html-form/data";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
-import {
-	type AskParams,
-	type AskParamsWire,
-	askFormHtml,
-	demoSchema,
-	evidenceSchema,
-	parametersSchema,
-	parseParams,
-	validate,
-} from "../src/schema.ts";
+import { type AskParams, type AskParamsWire, demoSchema, evidenceSchema, parametersSchema, parseParams, validate } from "../src/schema.ts";
 
 /** A wire call: one question, two options, nothing extended. */
 function wire(overrides: Partial<AskParamsWire> = {}): AskParamsWire {
@@ -49,30 +38,14 @@ describe("parseParams", () => {
 		expect(params.questions[0]!.brief.evidence).toEqual([{ kind: "text", source: "bun test", text: "3 pass", lang: "text" }]);
 	});
 
-	it("maps a frames demo in the brief position onto the question's brief", () => {
-		const params = parsed({
-			demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 }],
-		});
-		expect(params.questions[0]!.brief.demo).toEqual({
-			kind: "frames",
-			frames: [{ body: "a" }, { body: "b", caption: "second" }],
-			interval_ms: 800,
-		});
+	it("maps a demo without an option onto the question's brief", () => {
+		const params = parsed({ demos: [{ question: "retry", path: "docs/retry.gif", caption: "两次失败后退避" }] });
+		expect(params.questions[0]!.brief.demo).toEqual({ path: "docs/retry.gif", caption: "两次失败后退避" });
 	});
 
-	it("maps a file demo in the brief position onto the question's brief", () => {
-		const params = parsed({ demos: [{ question: "retry", kind: "file", path: "docs/retry.gif", caption: "两次失败后退避" }] });
-		expect(params.questions[0]!.brief.demo).toEqual({ kind: "file", path: "docs/retry.gif", caption: "两次失败后退避" });
-	});
-
-	it("maps a frames demo in the option position onto the option its label names", () => {
-		const params = parsed({ demos: [{ question: "retry", option: "固定 3 次", kind: "frames", frames: [{ body: "a" }, { body: "b" }] }] });
-		expect(params.questions[0]!.options[1]!.demo).toEqual({ kind: "frames", frames: [{ body: "a" }, { body: "b" }] });
-	});
-
-	it("maps a file demo in the option position onto the option its label names", () => {
-		const params = parsed({ demos: [{ question: "retry", option: "指数退避", kind: "file", path: "docs/retry.gif" }] });
-		expect(params.questions[0]!.options[0]!.demo).toEqual({ kind: "file", path: "docs/retry.gif" });
+	it("maps a demo with an option onto the option its label names", () => {
+		const params = parsed({ demos: [{ question: "retry", option: "指数退避", path: "docs/retry.gif" }] });
+		expect(params.questions[0]!.options[0]!.demo).toEqual({ path: "docs/retry.gif" });
 	});
 
 	it("rejects evidence naming a question the call does not hold, naming the field", () => {
@@ -82,13 +55,13 @@ describe("parseParams", () => {
 	});
 
 	it("rejects a demo naming an option its question does not hold, naming the field", () => {
-		const checked = parseParams(wire({ demos: [{ question: "retry", option: "加缓存", kind: "file", path: "docs/retry.gif" }] }));
+		const checked = parseParams(wire({ demos: [{ question: "retry", option: "加缓存", path: "docs/retry.gif" }] }));
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) expect(checked.problems).toEqual(['demos[0].option: "加缓存" is not a label of an option of question "retry"']);
 	});
 
 	it("rejects a demo naming a question the call does not hold, naming the field", () => {
-		const checked = parseParams(wire({ demos: [{ question: "missing", kind: "file", path: "docs/retry.gif" }] }));
+		const checked = parseParams(wire({ demos: [{ question: "missing", path: "docs/retry.gif" }] }));
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) expect(checked.problems).toEqual(['demos[0].question: "missing" is not the id of any question in this call']);
 	});
@@ -97,7 +70,6 @@ describe("parseParams", () => {
 		const checked = parseParams(
 			wire({
 				evidence: [{ question: "retry", kind: "file", path: "README.md", source: "bun test", text: "3 pass" }],
-				demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b" }], path: "docs/retry.gif" }],
 			}),
 		);
 		expect(checked.ok).toBe(false);
@@ -105,7 +77,6 @@ describe("parseParams", () => {
 			expect(checked.problems).toEqual([
 				"evidence[0].source: only with kind text; this entry has kind file",
 				"evidence[0].text: only with kind text; this entry has kind file",
-				"demos[0].path: only with kind file; this entry has kind frames",
 			]);
 		}
 	});
@@ -117,16 +88,11 @@ describe("parseParams", () => {
 					{ question: "retry", kind: "file" },
 					{ question: "retry", kind: "text", source: "bun test" },
 				],
-				demos: [{ question: "retry", kind: "frames" }],
 			}),
 		);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) {
-			expect(checked.problems).toEqual([
-				"evidence[0].path: required with kind file",
-				"evidence[1].text: required with kind text",
-				"demos[0].frames: required with kind frames",
-			]);
+			expect(checked.problems).toEqual(["evidence[0].path: required with kind file", "evidence[1].text: required with kind text"]);
 		}
 	});
 
@@ -134,8 +100,8 @@ describe("parseParams", () => {
 		const checked = parseParams(
 			wire({
 				demos: [
-					{ question: "retry", option: "指数退避", kind: "file", path: "docs/a.gif" },
-					{ question: "retry", option: "指数退避", kind: "file", path: "docs/b.gif" },
+					{ question: "retry", option: "指数退避", path: "docs/a.gif" },
+					{ question: "retry", option: "指数退避", path: "docs/b.gif" },
 				],
 			}),
 		);
@@ -219,14 +185,18 @@ describe("validate", () => {
 		if (!checked.ok) expect(checked.problems.join("\n")).toContain("questions[0].options[1].tradeoff");
 	});
 
-	it("rejects a reserved label", () => {
-		for (const label of ["Other", "Other…"]) {
+	it("rejects a label the form takes for the user's own answer", () => {
+		// A label starting with "other" turns off the form's own free-text answer, and a typed answer comes back as `Other: …`.
+		for (const label of ["Other", "other approach", "Other…"]) {
 			const params = parsed();
 			params.questions[0]!.options[0]!.label = label;
 			const checked = validate(params);
 			expect(checked.ok).toBe(false);
-			if (!checked.ok) expect(checked.problems.join("\n")).toContain("added by the UI");
+			if (!checked.ok) expect(checked.problems.join("\n")).toContain("starts with Other");
 		}
+		const params = parsed();
+		params.questions[0]!.options[0]!.label = "Otherwise retry";
+		expect(validate(params).ok).toBe(true);
 	});
 
 	it("rejects a recommended index outside the options", () => {
@@ -285,23 +255,16 @@ describe("validate", () => {
 		expect(evidenceSchema.safeParse({ kind: "file", source: "bun test", text: "ok" }).success).toBe(false);
 	});
 
-	it("does not parse a demo without its kind, or one carrying the other kind's source", () => {
-		expect(demoSchema.safeParse({ frames: [{ body: "a" }, { body: "b" }] }).success).toBe(false);
-		expect(demoSchema.safeParse({ kind: "file", frames: [{ body: "a" }, { body: "b" }] }).success).toBe(false);
-		expect(demoSchema.safeParse({ kind: "frames", path: "a.gif" }).success).toBe(false);
-	});
-
-	it("rejects a frame count, an interval or a file type the sheet cannot play", () => {
+	it("rejects a demo file the form cannot show as a picture", () => {
 		const params = parsed();
-		params.questions[0]!.brief.demo = demoSchema.parse({ kind: "frames", frames: [{ body: "only one" }], interval_ms: 100 });
-		params.questions[0]!.options[0]!.demo = demoSchema.parse({ kind: "file", path: "notes/plan.pdf" });
+		params.questions[0]!.brief.demo = demoSchema.parse({ path: "docs/retry.mp4" });
+		params.questions[0]!.options[0]!.demo = demoSchema.parse({ path: "notes/plan.pdf" });
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
 		if (!checked.ok) {
 			expect(checked.problems).toEqual([
-				'questions[0].options[0].demo.path: "notes/plan.pdf" is not one of .gif, .png, .apng, .webp, .mp4, .mov, .webm, .mkv, .m4v',
-				"questions[0].brief.demo.frames: 1 frames; a demo plays 2 to 12",
-				"questions[0].brief.demo.interval_ms: 100 is not from 300 to 5000 ms",
+				'questions[0].options[0].demo.path: "notes/plan.pdf" is not one of .gif, .png, .apng, .webp',
+				'questions[0].brief.demo.path: "docs/retry.mp4" is not one of .gif, .png, .apng, .webp',
 			]);
 		}
 	});
@@ -315,28 +278,5 @@ describe("strict tool calling", () => {
 			typeof toolWireSchema
 		>[0]);
 		expect(tryEnforceStrictSchema(wireSchema as Record<string, unknown>).strict).toBe(true);
-	});
-});
-
-describe("askFormHtml", () => {
-	it("builds one form the native ask reads as the batch: header, tradeoffs, question, options, recommendation", () => {
-		const questions = parsed().questions;
-		questions[0]!.header = "重试上限";
-		questions[0]!.recommended = 1;
-		const form = parseHtmlForm(askFormHtml(questions));
-		expect(form.fields).toHaveLength(1);
-		const field = form.fields[0]!;
-		expect(field.name).toBe("retry");
-		expect(fieldQuestions(form).get(field)).toBe("重试应该怎么做？");
-		const context = fieldContexts(form).get(field) ?? "";
-		expect(context).toContain("重试上限");
-		expect(context).toContain("指数退避: 安全，但要迁移");
-		if (field.kind !== "choice") throw new Error("expected a choice field");
-		expect(field.options.map((option) => [option.value, option.checked])).toEqual([
-			["指数退避", false],
-			["固定 3 次", true],
-		]);
-		expect(defaultFormData(form)).toEqual({ retry: "固定 3 次" });
-		expect(formAnswers(form, { retry: "指数退避" })).toEqual([{ name: "retry", question: "重试应该怎么做？", answer: "指数退避" }]);
 	});
 });

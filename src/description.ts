@@ -2,7 +2,7 @@
 // are shipped as markdown bodies and served through the host's native topic channel.
 import { readFileSync } from "node:fs";
 
-export const DESCRIPTION = `Opens a full-screen dialog that puts your questions to the user and blocks until they answer.
+export const DESCRIPTION = `Puts your questions to the user as one form, each with its brief, evidence and the tradeoff of every option, and blocks until they answer.
 
 Topics — read the one a call needs before making it:
 - \`xd://ask/routing\` — before putting a question, choice or confirmation to the user, including questions required by a skill or workflow

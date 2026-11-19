@@ -17,7 +17,6 @@ const corpusSchema = z.object({
 	calls: z.array(
 		z.object({
 			id: z.string().min(1),
-			surface: z.enum(["sheet", "native"]),
 			questions: z.array(questionParamSchema).min(1),
 			evidence: z.array(evidenceParamSchema).optional(),
 			demos: z.array(demoParamSchema).optional(),
@@ -31,7 +30,6 @@ type CorpusCall = z.infer<typeof corpusSchema>["calls"][number];
 
 interface RecordedCall {
 	readonly id: string;
-	readonly surface: CorpusCall["surface"];
 	readonly questions: readonly AskQuestion[];
 	readonly labels?: CorpusCall["labels"];
 }
@@ -114,14 +112,13 @@ async function main(): Promise<void> {
 				}
 				const recorded: RecordedCall = {
 					id: call.id,
-					surface: call.surface,
 					questions: checked.questions,
 					...(call.labels === undefined ? {} : { labels: call.labels }),
 				};
 				try {
 					scored.push({
 						call: recorded,
-						findings: await judgeReadability(judge, recorded.questions, recorded.surface, AbortSignal.timeout(120_000)),
+						findings: await judgeReadability(judge, recorded.questions, AbortSignal.timeout(120_000)),
 					});
 				} catch (error) {
 					failed.push(`${call.id}: ${error instanceof Error ? error.message : String(error)}`);

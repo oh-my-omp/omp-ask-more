@@ -9,7 +9,6 @@
         "@oh-my-pi/pi-agent-core": "latest",
         "@oh-my-pi/pi-ai": "latest",
         "@oh-my-pi/pi-coding-agent": "latest",
-        "@oh-my-pi/pi-natives": "latest",
         "@oh-my-pi/pi-tui": "latest",
         "@types/bun": "latest",
         "typescript": "latest",
@@ -17,7 +16,6 @@
       "peerDependencies": {
         "@oh-my-pi/pi-agent-core": "*",
         "@oh-my-pi/pi-coding-agent": "*",
-        "@oh-my-pi/pi-natives": "*",
         "@oh-my-pi/pi-tui": "*",
       },
     },

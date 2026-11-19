@@ -1,5 +1,10 @@
-The result text depends on which surface answered.
+The result starts with `User answers:` and has one line per question, in the order you asked:
 
-On the full-screen page, each result line is `id: label` (a choice), `id: "text"` (the user's own answer), `id: (cancelled)` (unanswered), or `id: (timed out: …)`: no answer in time, so decide it yourself, state what you chose, and continue.
+- `id: label`: the user picked that option.
+- `id: "text"`: the user typed their own answer.
+- `id: (no answer)`: the user submitted the form without answering this question.
+- `id: (timed out: …)`: the form closed at its timeout before the user answered this question; decide it yourself, say what you chose, and continue. Lines with an answer still stand.
 
-When the call delegates to the host's `ask`, the result is the host's own wording: `User answers:` followed by the submitted form data as JSON — `{"id": "label"}` per question, or the typed text for the form's free-text answer — or `No answer before the timeout; submitted the form's current values:` plus that JSON, where the submitted values are your preselected options, not the user's answers; decide the undecided questions yourself and say so.
+`Option notes:` lines follow when the user wrote a note on a chosen option; images pasted into a note come with the result.
+
+If the user sends a message while the form is open, the form closes and the call ends as interrupted, listing the answers they gave so far as JSON; their message reaches you next. If they cancel, the turn stops.

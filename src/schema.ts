@@ -1,17 +1,15 @@
 // The tool's parameters: the questions of one decision batch — id, question, header, options and a
 // recommendation — plus the extension fields that carry the decision (brief, tradeoffs, evidence,
-// demos). The plugin's own page renders all of it; when a session cannot host that page, the batch
-// delegates to the host's `ask` as the HTML form `askFormHtml` builds. See
+// image demos). `src/form.ts` compiles all of it into the HTML form the host's `ask` draws. See
 // README.md#what-the-model-sends-and-gets.
 //
 // The model sees `parametersSchema`, whose shape follows the plugin rule (工具参数「形状」): one
-// root object and no object union anywhere. An evidence entry and a demo are single objects whose
-// `kind` enum picks the form, and the entries of a call sit beside the questions, keyed back by
-// question id and option label, so an object never nests deeper than two levels (a demo's frames
-// are the second level). `parseParams` maps that into the internal shapes below — the
-// discriminated unions the dialog, the readability check and the form generator consume — and
-// rejects a field that does not belong to its `kind` or names a question or option the call does
-// not hold, before any UI opens.
+// root object and no object union anywhere. An evidence entry is a single object whose `kind` enum
+// picks the form, and the evidence and demos of a call sit beside the questions, keyed back by
+// question id and option label, so an object never nests deeper than two levels. `parseParams`
+// maps that into the internal shapes below — the discriminated union the form compiler and the
+// readability check consume — and rejects a field that does not belong to its `kind` or names a
+// question or option the call does not hold, before any UI opens.
 //
 // The shapes are written for strict tool calling (index.ts registers `strict: true`): omp makes
 // every optional field nullable and drops null placeholders before validation, and every optional
@@ -22,21 +20,15 @@
 // more, the check rewrites the text as a list of alternatives.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
-/** Labels a surface adds itself: the delegated form's `Other` answer, the sheet's `Other…` row. */
-export const RESERVED_LABELS: Readonly<Record<string, true>> = {
-	Other: true,
-	"Other…": true,
-};
+/**
+ * Labels the host form takes as its own free-text answer: it adds an `Other` answer to a radio
+ * group unless one option's label starts with "other" (`html-form/parse.ts`), and reports a typed
+ * answer as `Other: <text>`.
+ */
+const RESERVED_LABEL = /^\s*other\b/i;
 
-/** Demo bounds: enough frames to show a change over time, slow enough to read each one. */
-export const MIN_DEMO_FRAMES = 2;
-export const MAX_DEMO_FRAMES = 12;
-export const MIN_FRAME_MS = 300;
-export const MAX_FRAME_MS = 5000;
-export const DEFAULT_FRAME_MS = 1200;
-/** File extensions a demo `path` may name: animations the sheet shows as images, and videos it converts. */
+/** File extensions a demo `path` may name: pictures and animations the host form shows. */
 export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const;
-export const DEMO_VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v"] as const;
 
 export const fileEvidenceSchema = z.object({
 	kind: z.literal("file"),
@@ -74,26 +66,11 @@ export const textEvidenceSchema = z.object({
 /** Lines ask-more reads from a file itself, or text the model quotes from elsewhere. */
 export const evidenceSchema = z.union([fileEvidenceSchema, textEvidenceSchema]);
 
-export const demoFrameSchema = z.object({
-	body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
-	caption: z.string().min(1).describe("one line under this frame").optional(),
-});
-
-export const framesDemoSchema = z.object({
-	kind: z.literal("frames"),
-	frames: z.array(demoFrameSchema).describe("an array of frames played in a loop"),
-	interval_ms: z.number().int().describe("an integer: milliseconds per frame").optional(),
+/** A picture or animation file shown in the form. */
+export const demoSchema = z.object({
+	path: z.string().min(1).describe("a non-empty path to an image or animation file, relative to the working directory unless absolute"),
 	caption: z.string().min(1).describe("one line saying what to watch").optional(),
 });
-
-export const fileDemoSchema = z.object({
-	kind: z.literal("file"),
-	path: z.string().min(1).describe("a non-empty path to an animation or video file, relative to the working directory unless absolute"),
-	caption: z.string().min(1).describe("one line saying what to watch").optional(),
-});
-
-/** An animation the model writes, or a file it names. */
-export const demoSchema = z.union([framesDemoSchema, fileDemoSchema]);
 
 export const briefSchema = z.object({
 	where: z.string().min(1).describe("non-empty text saying what exists now: paths, symbols, the observation that forces the decision"),
@@ -104,33 +81,28 @@ export const briefSchema = z.object({
 		.describe("an array of evidence tagged by kind: file lines ask-more reads itself, or text you quote")
 		.optional(),
 	diagram: z.string().min(1).describe("Mermaid source of a flowchart, sequence diagram or state diagram").optional(),
-	demo: demoSchema.describe("a demo tagged by kind: an animation of how things behave now").optional(),
+	demo: demoSchema.describe("an image of how things behave now").optional(),
 	risks: z.array(z.string().min(1)).describe("one risk per line: what could go wrong with the decision itself").optional(),
 });
 
 export const optionSchema = z.object({
-	label: z.string().min(1).describe("the option's short title, shown on its row; unique within the question and not one the UI adds"),
+	label: z
+		.string()
+		.min(1)
+		.describe("the option's short title, shown on its row; one line, unique within the question, and not starting with Other"),
 	description: z.string().min(1).describe("one line that disambiguates the option; never the tradeoff").optional(),
 	tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 	holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 	cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
-	demo: demoSchema.describe("a demo tagged by kind: an animation of the result of picking this option").optional(),
+	demo: demoSchema.describe("an image of the result of picking this option").optional(),
 });
 
 export const questionSchema = z.object({
 	id: z.string().min(1).describe("a non-empty string, unique within the call; the answer is reported under it"),
 	question: z.string().min(1).describe("non-empty text of one or two sentences; the brief carries the context"),
-	header: z.string().min(1).describe("a short tab label").optional(),
-	options: z
-		.array(optionSchema)
-		.min(2)
-		.max(5)
-		.describe("an array of 2 to 5 options, each a choice the user can pick; the cursor starts on the recommended one"),
-	recommended: z
-		.number()
-		.int()
-		.describe("an integer: the 0-based index of the option you would pick; the cursor starts there, so Enter accepts it")
-		.optional(),
+	header: z.string().min(1).describe("a short section title").optional(),
+	options: z.array(optionSchema).min(2).max(5).describe("an array of 2 to 5 options, each a choice the user can pick"),
+	recommended: z.number().int().describe("an integer: the 0-based index of the option you would pick; marked as recommended").optional(),
 	brief: briefSchema,
 });
 
@@ -154,13 +126,16 @@ export const briefParamSchema = z
 
 export const optionParamSchema = z
 	.object({
-		label: z.string().min(1).describe("the option's short title, shown on its row; unique within the question and not one the UI adds"),
+		label: z
+			.string()
+			.min(1)
+			.describe("the option's short title, shown on its row; one line, unique within the question, and not starting with Other"),
 		description: z.string().min(1).describe("one line that disambiguates the option; never the tradeoff").optional(),
 		tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 		holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 		cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
 	})
-	.describe("one option: its short title and the tradeoff, condition and cost the dialog draws under it");
+	.describe("one option: its short title and the tradeoff, condition and cost the form shows beside it");
 
 export const questionParamSchema = z
 	.object({
@@ -169,16 +144,12 @@ export const questionParamSchema = z
 			.min(1)
 			.describe("a non-empty string, unique within the call; the answer is reported under it, and an evidence entry or demo names it"),
 		question: z.string().min(1).describe("non-empty text of one or two sentences; the brief carries the context"),
-		header: z.string().min(1).describe("a short tab label").optional(),
-		options: z
-			.array(optionParamSchema)
-			.min(2)
-			.max(5)
-			.describe("an array of 2 to 5 options, each a choice the user can pick; the cursor starts on the recommended one"),
+		header: z.string().min(1).describe("a short section title").optional(),
+		options: z.array(optionParamSchema).min(2).max(5).describe("an array of 2 to 5 options, each a choice the user can pick"),
 		recommended: z
 			.number()
 			.int()
-			.describe("an integer: the 0-based index of the option you would pick; the cursor starts there, so Enter accepts it")
+			.describe("an integer: the 0-based index of the option you would pick; marked as recommended, never preselected")
 			.optional(),
 		brief: briefParamSchema,
 	})
@@ -222,13 +193,6 @@ export const evidenceParamSchema = z
 	})
 	.describe("one evidence entry, attached to a question by its id");
 
-export const demoFrameParamSchema = z
-	.object({
-		body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, or a fenced text drawing"),
-		caption: z.string().min(1).describe("one line under this frame").optional(),
-	})
-	.describe("one frame of a frames demo");
-
 export const demoParamSchema = z
 	.object({
 		question: z.string().min(1).describe("the id of the question this demo belongs to, from the questions of the same call"),
@@ -237,25 +201,19 @@ export const demoParamSchema = z
 			.min(1)
 			.describe("the label of the option this demo illustrates; omit it for the question's own demo, and give at most one demo per option")
 			.optional(),
-		kind: z
-			.enum(["frames", "file"])
-			.describe("frames: Markdown frames you write, played in a loop; file: an animation or video file the surface plays"),
 		path: z
 			.string()
 			.min(1)
-			.describe("a non-empty path to an animation or video file, relative to the working directory unless absolute; only with kind file")
-			.optional(),
+			.describe("a non-empty path to a .gif, .png, .apng or .webp file, relative to the working directory unless absolute"),
 		caption: z.string().min(1).describe("one line saying what to watch").optional(),
-		interval_ms: z.number().int().describe("an integer: milliseconds per frame; only with kind frames").optional(),
-		frames: z.array(demoFrameParamSchema).describe("an array of frames played in a loop; only with kind frames").optional(),
 	})
-	.describe("one demo, attached to a question by its id and, for an option's demo, to the option's label");
+	.describe("one image demo, attached to a question by its id and, for an option's demo, to the option's label");
 
 export const parametersSchema = z.object({
 	questions: z
 		.array(questionParamSchema)
 		.min(1)
-		.describe("an array of independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
+		.describe("an array of independent decisions, one section each; a decision that depends on another answer goes in a later call"),
 	evidence: z
 		.array(evidenceParamSchema)
 		.describe("an array of evidence entries, each naming the question it belongs to with question")
@@ -269,7 +227,7 @@ export const parametersSchema = z.object({
 export type EvidenceRef = z.infer<typeof evidenceSchema>;
 export type FileEvidence = z.infer<typeof fileEvidenceSchema>;
 export type TextEvidence = z.infer<typeof textEvidenceSchema>;
-export type DemoParams = z.infer<typeof demoSchema>;
+export type Demo = z.infer<typeof demoSchema>;
 export type Brief = z.infer<typeof briefSchema>;
 export type AskOption = z.infer<typeof optionSchema>;
 export type AskQuestion = z.infer<typeof questionSchema>;
@@ -282,9 +240,6 @@ export type DemoParam = z.infer<typeof demoParamSchema>;
 export type Validated =
 	| { readonly ok: true; readonly questions: readonly AskQuestion[] }
 	| { readonly ok: false; readonly problems: readonly string[] };
-
-export type FramesDemo = z.infer<typeof framesDemoSchema>;
-export type FileDemo = z.infer<typeof fileDemoSchema>;
 
 /** One evidence entry of the wire shape as an internal one; the fields of the other `kind` are problems. */
 function parseEvidenceParam(entry: EvidenceParam, at: string): { value?: EvidenceRef; problems: string[] } {
@@ -319,35 +274,6 @@ function parseEvidenceParam(entry: EvidenceParam, at: string): { value?: Evidenc
 		value: { kind: "text", source: entry.source, text: entry.text, ...(entry.lang === undefined ? {} : { lang: entry.lang }), ...note },
 		problems,
 	};
-}
-
-/** One demo of the wire shape as an internal one; the fields of the other `kind` are problems. */
-function parseDemoParam(entry: DemoParam, at: string): { value?: DemoParams; problems: string[] } {
-	const problems: string[] = [];
-	const caption = entry.caption === undefined ? {} : { caption: entry.caption };
-	if (entry.kind === "frames") {
-		if (entry.path !== undefined) problems.push(`${at}.path: only with kind file; this entry has kind frames`);
-		if (entry.frames === undefined) {
-			problems.push(`${at}.frames: required with kind frames`);
-			return { problems };
-		}
-		return {
-			value: {
-				kind: "frames",
-				frames: entry.frames.map((frame) => ({ body: frame.body, ...(frame.caption === undefined ? {} : { caption: frame.caption }) })),
-				...(entry.interval_ms === undefined ? {} : { interval_ms: entry.interval_ms }),
-				...caption,
-			},
-			problems,
-		};
-	}
-	if (entry.frames !== undefined) problems.push(`${at}.frames: only with kind frames; this entry has kind file`);
-	if (entry.interval_ms !== undefined) problems.push(`${at}.interval_ms: only with kind frames; this entry has kind file`);
-	if (entry.path === undefined) {
-		problems.push(`${at}.path: required with kind file`);
-		return { problems };
-	}
-	return { value: { kind: "file", path: entry.path, ...caption }, problems };
 }
 
 function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
@@ -403,9 +329,7 @@ export function parseParams(params: AskParamsWire): Validated {
 
 	for (const [index, entry] of (params.demos ?? []).entries()) {
 		const at = `demos[${index}]`;
-		const parsed = parseDemoParam(entry, at);
-		problems.push(...parsed.problems);
-		if (parsed.value === undefined) continue;
+		const demo: Demo = { path: entry.path, ...(entry.caption === undefined ? {} : { caption: entry.caption }) };
 		const question = byId.get(entry.question.trim());
 		if (question === undefined) {
 			problems.push(`${at}.question: "${entry.question}" is not the id of any question in this call`);
@@ -416,7 +340,7 @@ export function parseParams(params: AskParamsWire): Validated {
 				problems.push(`${at}.option: the brief of question "${entry.question}" already has a demo; one demo per brief`);
 				continue;
 			}
-			question.brief.demo = parsed.value;
+			question.brief.demo = demo;
 			continue;
 		}
 		const option = question.options.find((candidate) => candidate.label === entry.option);
@@ -428,7 +352,7 @@ export function parseParams(params: AskParamsWire): Validated {
 			problems.push(`${at}.option: option "${entry.option}" of question "${entry.question}" already has a demo; one demo per option`);
 			continue;
 		}
-		option.demo = parsed.value;
+		option.demo = demo;
 	}
 
 	const checked = validate({ questions });
@@ -472,8 +396,10 @@ function validateQuestion(question: AskQuestion, at: string): string[] {
 		if (label.length === 0) problems.push(`${optionAt}.label: empty`);
 		else if (option.label !== option.label.replace(/\s+/g, " ").trim())
 			problems.push(`${optionAt}.label: one line with single spaces, so the form returns it unchanged`);
-		else if (RESERVED_LABELS[label] === true)
-			problems.push(`${optionAt}.label: "${option.label}" is added by the UI; give the option its own label`);
+		else if (RESERVED_LABEL.test(label))
+			problems.push(
+				`${optionAt}.label: "${option.label}" starts with Other, which the form keeps for the user's own answer; give the option another label`,
+			);
 		else if (seen.has(label)) problems.push(`${optionAt}.label: duplicate "${option.label}"`);
 		else seen.add(label);
 		if (option.tradeoff.trim().length === 0) problems.push(`${optionAt}.tradeoff: empty; say what the option buys and what it costs`);
@@ -526,63 +452,10 @@ export function extensionOf(path: string): string {
 	return dot <= 0 ? "" : name.slice(dot).toLowerCase();
 }
 
-function validateDemo(demo: DemoParams, at: string): string[] {
-	switch (demo.kind) {
-		case "frames":
-			return validateFrames(demo, at);
-		case "file":
-			return validateFile(demo, at);
-	}
-}
-
-function validateFrames(demo: FramesDemo, at: string): string[] {
-	const problems: string[] = [];
-	if (demo.frames.length < MIN_DEMO_FRAMES || demo.frames.length > MAX_DEMO_FRAMES) {
-		problems.push(`${at}.frames: ${demo.frames.length} frames; a demo plays ${MIN_DEMO_FRAMES} to ${MAX_DEMO_FRAMES}`);
-	}
-	demo.frames.forEach((frame, index) => {
-		if (frame.body.trim().length === 0) problems.push(`${at}.frames[${index}].body: empty`);
-	});
-	const interval = demo.interval_ms;
-	if (interval !== undefined && (interval < MIN_FRAME_MS || interval > MAX_FRAME_MS)) {
-		problems.push(`${at}.interval_ms: ${interval} is not from ${MIN_FRAME_MS} to ${MAX_FRAME_MS} ms`);
-	}
-	return problems;
-}
-
-function validateFile(demo: FileDemo, at: string): string[] {
+function validateDemo(demo: Demo, at: string): string[] {
 	const path = demo.path.trim();
-	const known = [...DEMO_IMAGE_EXTENSIONS, ...DEMO_VIDEO_EXTENSIONS] as readonly string[];
+	const known: readonly string[] = DEMO_IMAGE_EXTENSIONS;
 	if (path.length === 0) return [`${at}.path: empty`];
 	if (!known.includes(extensionOf(path))) return [`${at}.path: "${demo.path}" is not one of ${known.join(", ")}`];
 	return [];
-}
-
-/** Text or an attribute value as HTML. */
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-/**
- * The batch as one HTML form for the host's `ask` ({@link ExtensionContext.invokeTool} takes
- * `{html}`): a `<fieldset>` per question — its `header` as the legend, one `label: tradeoff`
- * line per option, then the question as the text right before the group so the host's field
- * questions read it — and a radio per option whose `value` is the label itself, with the
- * `recommended` one checked. Radio groups get the host's own "Other" free-text answer; its
- * prompt forbids a form-written one.
- */
-export function askFormHtml(questions: readonly AskQuestion[]): string {
-	const sections = questions.map((question) => {
-		const name = escapeHtml(question.id);
-		const legend = question.header === undefined ? "" : `<legend>${escapeHtml(question.header)}</legend>`;
-		const tradeoffs = `<ul>${question.options.map((option) => `<li>${escapeHtml(option.label)}: ${escapeHtml(option.tradeoff)}</li>`).join("")}</ul>`;
-		const options = question.options
-			.map((option, index) => {
-				const label = escapeHtml(option.label);
-				return `<label><input type="radio" name="${name}" value="${label}"${index === question.recommended ? " checked" : ""}>${label}</label>`;
-			})
-			.join("\n");
-		return `<fieldset>${legend}${tradeoffs}<p>${escapeHtml(question.question)}</p>${options}</fieldset>`;
-	});
-	return `<form>\n${sections.join("\n")}\n</form>`;
 }

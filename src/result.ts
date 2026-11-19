@@ -1,70 +1,45 @@
-// Results carry the host's `AskToolDetails` shape: `details.answers` (one `{name, question,
-// answer}` per question, in input order) feeds the host's `askToolRenderer`, so the transcript
-// card draws each question and its answer. The content text is this plugin's own wording —
-// `User answers:` then `id: …` per line — the contract `xd://ask/results` describes to the model.
-// `timedOut` never appears: a resting cursor is not a preselection, so the host's "submitted
-// preselected values" meaning would be a lie here; it survives only in delegated results.
+// The host's `ask` answers the compiled form; this module rewrites the text the model reads and keeps
+// everything else of the host's result: `details` (`{answers, notes?, timedOut?}`, which the host's
+// ask card draws), and the image blocks of pasted option notes with their source notices.
+//
+// The text is one line per question in input order, the contract `xd://ask/results` describes:
+// `id: label` for an option, `id: "text"` for the user's own answer (the host reports it as
+// `Other: text`; no option label may start with Other, `src/schema.ts`), and for a question left
+// blank `id: (no answer)`, or `id: (timed out: …)` when the host's timeout closed the form. Nothing
+// is preselected, so a blank answer after a timeout is a question the user never reached, and the
+// model decides it. The option notes follow, as the host words them.
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent";
-import type { FormAnswer } from "@oh-my-pi/pi-tui/html-form/data";
+import { OTHER_LABEL } from "@oh-my-pi/pi-tui/html-form/data";
 import type { AskQuestion } from "./schema.ts";
 
-/** What the user gave one question. A cursor resting on an option is not an answer. */
-export type Answer =
-	| { readonly kind: "unanswered" }
-	| { readonly kind: "option"; readonly index: number }
-	| { readonly kind: "custom"; readonly text: string };
+const NO_ANSWER = "(no answer)";
+const TIMED_OUT = "(timed out: the user did not answer; decide it yourself with your best judgment and say what you chose)";
+const OTHER_PREFIX = `${OTHER_LABEL}: `;
 
-export const UNANSWERED: Answer = { kind: "unanswered" };
-
-/** What the model reads for a question left without an answer when the whole ask was submitted or cancelled. */
-const CANCELLED = "(cancelled)";
-/** What the model reads for a question left without an answer when the ask timed out. */
-const TIMED_OUT = "(timed out: the user did not answer; decide it yourself with your best judgment)";
-
-function batchResult(questions: readonly AskQuestion[], answers: readonly Answer[], unanswered: string): AgentToolResult<AskToolDetails> {
-	const lines: string[] = [];
-	const formAnswers: FormAnswer[] = [];
-	for (const [index, question] of questions.entries()) {
-		const answer = answers[index] ?? UNANSWERED;
-		const name = question.id;
-		const stem = question.question;
-		switch (answer.kind) {
-			case "unanswered":
-				lines.push(`${name}: ${unanswered}`);
-				formAnswers.push({ name, question: stem, answer: "" });
-				break;
-			case "option": {
-				const label = question.options[answer.index]?.label;
-				lines.push(`${name}: ${label ?? unanswered}`);
-				formAnswers.push({ name, question: stem, answer: label ?? "" });
-				break;
-			}
-			case "custom":
-				lines.push(`${name}: "${answer.text}"`);
-				formAnswers.push({ name, question: stem, answer: answer.text });
-				break;
-		}
-	}
-	return {
-		content: [{ type: "text", text: `User answers:\n${lines.join("\n")}` }],
-		details: { answers: formAnswers },
-	};
+/** One host answer as the model reads it. */
+function answerLine(id: string, answer: string | undefined, blank: string): string {
+	if (answer === undefined || answer.length === 0) return `${id}: ${blank}`;
+	if (answer.startsWith(OTHER_PREFIX)) return `${id}: ${JSON.stringify(answer.slice(OTHER_PREFIX.length))}`;
+	return `${id}: ${answer}`;
 }
 
-/** The submitted batch: every question in input order, unanswered ones included. */
-export function answerResult(questions: readonly AskQuestion[], answers: readonly Answer[]): AgentToolResult<AskToolDetails> {
-	return batchResult(questions, answers, CANCELLED);
-}
-
-/** The ask timed out: the answers given so far stand, and the model decides the rest. */
-export function timedOutResult(questions: readonly AskQuestion[], answers: readonly Answer[]): AgentToolResult<AskToolDetails> {
-	return batchResult(questions, answers, TIMED_OUT);
-}
-
-/** The whole ask was cancelled: no question carries an answer. */
-export function cancelledResult(questions: readonly AskQuestion[]): AgentToolResult<AskToolDetails> {
-	return answerResult(questions, []);
+/** The host's result with the model's text in this plugin's wording; `details` and image blocks unchanged. */
+export function answeredResult(
+	questions: readonly AskQuestion[],
+	result: AgentToolResult<AskToolDetails>,
+): AgentToolResult<AskToolDetails> {
+	const { details } = result;
+	// A host error (an unparsable form) carries no answers: the model reads it as the host wrote it.
+	if (result.isError === true || details === undefined) return result;
+	const byName = new Map(details.answers.map((answer) => [answer.name, answer.answer]));
+	const blank = details.timedOut === true ? TIMED_OUT : NO_ANSWER;
+	const lines = questions.map((question) => answerLine(question.id, byName.get(question.id), blank));
+	const notes = (details.notes ?? []).map((note) => `- ${note.name}: ${note.option} — ${note.text.replace(/\s+/g, " ").trim()}`);
+	const text = [`User answers:`, ...lines, ...(notes.length > 0 ? ["Option notes:", ...notes] : [])].join("\n");
+	// The host's first block is its own answer text; the rest are the notes' images and their notices.
+	const [, ...rest] = result.content;
+	return { ...result, content: [{ type: "text", text }, ...rest] };
 }
 
 /** A refused ask: the model gets every problem at once and calls again. */
