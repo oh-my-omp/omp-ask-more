@@ -2,14 +2,14 @@
 
 [English](design.md) | 简体中文
 
-omp-ask-more 是怎么搭起来的。使用者看到和配置的内容见 [README](../README.zh-CN.md)，跑过的验证见[验证](verification.zh-CN.md)。形如 `packages/<包>/src/…:<行>` 的源码引用指向 oh-my-pi monorepo 的 18.14.0 版本（安装在 `node_modules/@oh-my-pi/pi-<包>` 下）。
+omp-ask-more 是怎么搭起来的。使用者看到和配置的内容见 [README](../README.zh-CN.md)，跑过的验证见[验证](verification.zh-CN.md)。形如 `packages/<包>/src/…` 的源码引用指向 oh-my-pi monorepo 的 18.22.0 版本（安装在 `node_modules/@oh-my-pi/pi-<包>` 下）。
 
 ## 原生 ask 为什么不够用
 
-原生 `ask` 其实已有承载更多内容的字段——`question` 按 Markdown 渲染（Tern 是 `md` 节点，`packages/tui/src/overlays/ask-dialog.ts:884`；TUI 走带代码高亮的 Markdown，`:298-311`），每个选项都有自由文本 `preview`（`:939`、`:501-503`）——但两件事让它们用不起来：
+18.18.3 起，原生 `ask` 只收一张 HTML `<form>`（`packages/coding-agent/src/tools/ask.ts`），由宿主原生渲染——有 `formDialog` 的宿主画整表单对话框，其余逐字段走 `select`/`input`/`editor`。两件事仍然让它没法把话说清楚：
 
-1. 模型被要求不要用。原生工具 prompt 只有七行，写着 "short labels, tradeoffs in `description`"（`packages/coding-agent/src/prompts/tools/ask.md:1-7`）；`preview` 一次都没出现。
-2. 表面太小。对话框挂在 composer 容器里（`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts:887-905`），标题最多四行、整块最多占终端 70%（`packages/tui/src/overlays/ask-dialog.ts:116-123`），在 Tern 里 describe 成 `omp.editor.ask`——dock 里的 `col`：`md` 问题、选项 `list`、以及只有一个选项的 `preview`（`:762-940`）。
+1. 模型被要求写短。原生 prompt 只要求短问题加每个字段需要的上下文，没有简报、证据或演示这类东西（`packages/coding-agent/src/prompts/tools/ask.md`）。
+2. 表面太小。逐字段的提示一次只显示一个字段的上下文；整表单对话框能画表单和它的 Other 答案，但没有放简报、引用文件行或动画的地方。
 
 ## 流程
 
@@ -23,36 +23,36 @@ flowchart LR
   u -- 是 --> rs{"可读性检查（面板）"}
   rn -- 难懂 --> e
   rs -- 难懂 --> e
-  rn -- "可读、关闭或无判断模型" --> n["ctx.invokeTool（原生 ask）或直接拒绝"]
+  rn -- "可读、关闭或无判断模型" --> n["ctx.invokeTool（原生 ask）传 html 或直接拒绝"]
   rs -- "可读、关闭或无判断模型" --> o["ui.custom 全屏 overlay"]
   o -- "普通终端" --> c["alternate screen 上的 ANSI 页面"]
   o -- "Tern" --> p["铺满窗格的原生面板（nativeOverlay）"]
-  p --> a[AskToolDetails]
+  p --> a["AskToolDetails {answers}"]
   c --> a
   n --> a
 ```
 
-插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts:544-551` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:37`）。它设了 `strict: true`：provider 按 schema 的语法约束参数，omp 把每个可选字段改成可为 null，并在校验前去掉 null（`packages/ai/src/utils/schema/normalize.ts` 的 `enforceStrictSchema`；`packages/ai/src/utils/validation.ts` 的 `normalizeOptionalNullsForSchema`）。OpenAI 系后端在没有这个标志时也按严格模式处理，所以 schema 无论如何都按严格模式来写（见 Schema 一节）。
+插件入口是包根 `index.ts`，由 `package.json` 的 `omp.extensions` 声明。它以原生名 `ask` 注册工具（`approval: "read"`，与 `packages/coding-agent/src/tools/ask.ts` 一致），所以模型读到的是本插件的描述（`src/description.ts`），而不是 `prompts/tools/ask.md`；结果渲染器仍是原生的 `askToolRenderer`，因为渲染器按工具名选取（`packages/tui/src/tools/index.ts:36-38`）。它设了 `strict: true`：provider 按 schema 的语法约束参数，omp 把每个可选字段改成可为 null，并在校验前去掉 null（`packages/ai/src/utils/schema/normalize.ts` 的 `enforceStrictSchema`；`packages/ai/src/utils/validation.ts` 的 `normalizeOptionalNullsForSchema`）。OpenAI 系后端在没有这个标志时也按严格模式处理，所以 schema 无论如何都按严格模式来写（见 Schema 一节）。
 
-一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`extension-ui-controller.ts:1283-1369`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask，从可读性检查开始直到面板关闭：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
+一个 pi-tui 组件（`src/component.ts`）经 `ui.custom(factory, { overlay: true, overlayOptions: { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0 } })` 挂载（`packages/coding-agent/src/modes/controllers/extension-ui-controller.ts`）。每题状态（`src/state.ts`）保存光标、答案（光标停在某个选项上不等于作答）、Other 输入框、证据折叠、滚动与演示播放进度，切换题目不丢任何东西。组件持有 overlay 焦点，Other 输入框打开时由它把按键转交给输入框。同时只允许一个 ask，从可读性检查开始直到面板关闭：第二次调用被拒绝，而不是再开一张面板、让第一次的 promise 无人收尾。
 
 ## 调用 skill 时附加的规则
 
-omp 用固定模板渲染 `/skill:<name>`（`packages/coding-agent/src/prompts/skills/user-invocation.md`，由 `extensibility/skills.ts:36` 导入、在 `:885-928` 渲染）：`IMPORTANT` 开头一行、skill 正文、skill 目录和用户的话，作为 `customType: "skill-prompt"`、`attribution: "user"` 的自定义消息发出（`modes/skill-command.ts:74-85`）。插件没有办法改这个模板。规定问题在回复里长什么样的 skill 比工具说明离生成位置更近，在 kimi 上它赢了。
+omp 用固定模板渲染 `/skill:<name>`（`packages/coding-agent/src/prompts/skills/user-invocation.md`，由 `extensibility/skills.ts` 导入）：`IMPORTANT` 开头一行、skill 正文、skill 目录和用户的话，作为 `customType: "skill-prompt"`、`attribution: "user"` 的自定义消息发出（`modes/skill-command.ts`）。插件没有办法改这个模板。规定问题在回复里长什么样的 skill 比工具说明离生成位置更近，在 kimi 上它赢了。
 
-`ask` 启用时（`pi.getActiveTools()`），一个 `context` 处理器（`index.ts`）把历史交给 `withSkillAskRule`（`src/skill-prompt.ts`），给每条用户调用的 skill 消息追加一段 `[IMPORTANT: …]`：加在整条消息之后，让它成为模型作答前读到的最后一段；内容是字符串就接在后面，是数组就接在附图之前的第一个文本块里。消息用对象展开复制，保留 omp 用来把副本和落盘消息配对的 symbol 键历史索引（`extensibility/extensions/runner.ts:2249-2295`）；已经以这段结尾的消息、以及没有 skill 消息的历史原样返回，不额外分配。自动加载的 skill 不是用户发出的，保持原样。
+`ask` 启用时（`pi.getActiveTools()`），一个 `context` 处理器（`index.ts`）把历史交给 `withSkillAskRule`（`src/skill-prompt.ts`），给每条用户调用的 skill 消息追加一段 `[IMPORTANT: …]`：加在整条消息之后，让它成为模型作答前读到的最后一段；内容是字符串就接在后面，是数组就接在附图之前的第一个文本块里。消息用对象展开复制，保留 omp 用来把副本和落盘消息配对的 symbol 键历史索引（`extensibility/extensions/runner.ts#emitContext`）；已经以这段结尾的消息、以及没有 skill 消息的历史原样返回，不额外分配。自动加载的 skill 不是用户发出的，保持原样。
 
-改动只存在于发往模型的途中：会话文件、`/tree` 和对话记录里是 omp 原来的消息。注册 `context` 处理器后，omp 每次调用模型前都会克隆一遍历史（`runner.ts:2240-2248`），并把改过的 skill 消息标为单次调用的上下文，Anthropic 的显式缓存断点会跳过它（`packages/ai/src/providers/anthropic.ts:4264-4279`）；这段话每次都一样，自动前缀缓存仍能命中。
+改动只存在于发往模型的途中：会话文件、`/tree` 和对话记录里是 omp 原来的消息。注册 `context` 处理器后，omp 每次调用模型前都会克隆一遍历史（`runner.ts#emitContext`），并把改过的 skill 消息标为单次调用的上下文，Anthropic 的显式缓存断点会跳过它（`packages/ai/src/providers/anthropic.ts`）；这段话每次都一样，自动前缀缓存仍能命中。
 
 ## Schema
 
-schema 是原生参数按 omp-todo-more 扩展 `todo` 的方式加上扩展字段：
+模型的参数是 `questions[]` 里的一批决定——这是插件自己的形状，因为原生 `ask` 现在只收 `{html}`——再按 omp-todo-more 扩展 `todo` 的方式加上扩展字段：
 
-| 保持 | 新增 |
+| 每题 | 新增 |
 |---|---|
-| 工具名 `ask`；`questions[]`，每题 `id`、`question`、`header?`、`options[{label, description?, preview?}]`、`recommended?`（`packages/coding-agent/src/tools/ask.ts:52-88`）；不含 `multi`，每题只取一个答案 | 每题 `brief {where, what, how, diagram?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`；问题旁边另有 `evidence[]` 与 `demos[]`，都用 `id` 指明属于哪个问题，选项的演示另用 `label` 指明属于哪个选项 |
+| `id`、`question`、`header?`、`options[{label, description?}]`、`recommended?`；不含 `multi`，每题只取一个答案 | `brief {where, what, how, diagram?, risks?}`；每选项 `tradeoff`、`holds_when?`、`cost?`；问题旁边另有 `evidence[]` 与 `demos[]`，都用 `id` 指明属于哪个问题，选项的演示另用 `label` 指明属于哪个选项 |
 
-`arktype` 保留未声明键，因此持久化的扩展调用仍能通过 `recoverAskQuestions`（`ask.ts:94-109`），`/tree` 重答会重新打开它；那里原生对话框只渲染原生字段。
+持久化的调用保留这些参数。宿主的 `/tree` 重答从持久化的 `ask` 参数里取回 `html`（`packages/coding-agent/src/session/agent-session.ts#recoverAskReanswerHtml`）；`questions[]` 调用里没有 `html`，所以落在一条 ask-more 结果上只做普通的叶移动。
 
 参数定义按插件 rule 要求的形状写：单个根对象，任何层级都没有对象联合，嵌套最深到问题的 `brief` 与 `options`。证据条目或演示是单个对象，由 `kind` 枚举选形状，另一形状的字段留空；`src/schema.ts#parseParams` 把调用映射成界面消费的内部判别联合，拒绝属于另一 `kind` 的字段、本 `kind` 缺的必填字段，以及指向本次调用不存在的问题或选项的引用。
 
@@ -64,7 +64,7 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 - `brief.where/what/how` 画在选项上方，不折叠。
 - `evidence[]` 是两种之一，每条画成一张卡片，先显示前 10 行（ANSI 页面，`ctrl+o` 一次展开全部）或前 12 行（Tern，带 `preview` 的 `code` 节点，每张卡片由自己的 `N more lines` 展开）。两个界面都不限制条数和行数。
-  - `{kind: "file", path, start?, end?}` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path`、`start` 和行号的 `code` 节点，`packages/wire/src/tsp.ts:225-237`），而不是模型敲进去的代码。`start`、`end` 都不给显示文件前 40 行，只给 `start` 是一行，都给是一段闭区间。文件经 `readline` 逐行读取，读到行段最后一行就停，所以大文件里的几行和小文件一样便宜；超出文件末尾的部分被截掉，起点就在文件之外则报错。不相邻的几段各写一条。路径不存在或读不了时用错误色画出原因，不阻塞这次 ask；目录画成目录。
+  - `{kind: "file", path, start?, end?}` 由工具按会话工作目录解析、在 ask 打开时读取，因此页面画的是**真实行**（Tern 中为带 `path`、`start` 和行号的 `code` 节点，`packages/wire/src/tsp.ts`），而不是模型敲进去的代码。`start`、`end` 都不给显示文件前 40 行，只给 `start` 是一行，都给是一段闭区间。文件经 `readline` 逐行读取，读到行段最后一行就停，所以大文件里的几行和小文件一样便宜；超出文件末尾的部分被截掉，起点就在文件之外则报错。不相邻的几段各写一条。路径不存在或读不了时用错误色画出原因，不阻塞这次 ask；目录画成目录。
   - `{kind: "text", source, text, lang?}` 是模型从别处引用的文字——命令输出、网页、日志。ask-more 无法核对，所以卡片标题是模型写的 `source`，后面跟着“模型引用，ask-more 未读取核对”，各行不带行号；Tern 里由 `lang` 决定高亮。
   - 两种证据里的制表符都换成两个空格，并去掉行尾空白。ANSI 页面上比正文宽的行末尾显示 `… 还有 N 个字符`，而不是在边框处无声截断；Tern 一行最多画约 4000 个字符，后面是它自己的计数，长行可横向滚动。
 - `diagram` 是 Mermaid 源码：Tern 由 `md` 节点原生绘制，TUI 由 Markdown 渲染器画成 ASCII（`packages/tui/src/theme/mermaid-cache.ts:66,100`）。
@@ -86,7 +86,7 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 | `brief.where/what/how` 非空 | `questions[i].brief.<field>: empty` |
 | 每个选项 `tradeoff` 非空 | `questions[i].options[j].tradeoff: empty` |
 | 至少两个选项 | 决定至少需要两个选项 |
-| 同一题内标签唯一且不是保留标签（`Other (type your own)`、`Chat about this`、`Next →`） | 逐项指明 |
+| 同一题内标签唯一、是只含单个空格的单行（表单把标签文本原样返回为答案），且不是保留标签（`Other`、`Other…`——由界面自己添加） | 逐项指明 |
 | `recommended` 是选项下标 | 指明非法值 |
 | 文件证据：`end` 只能配 `start`、不能在它之前 | 指明第几条与行号 |
 | 文字证据：`source` 是一行且非空，`text` 非空 | 指明第几条与字段 |
@@ -97,7 +97,7 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 校验之后、任何对话框之前，`index.ts#screen` 读取 `readability.judge`；开启且能解析出判断模型时，运行 `src/readability.ts#readabilityGate`；要问的问题、拒绝的规则和截止时间都在那里。
 
-- **每题单独一次，按所在界面显示的内容。** 每题单独判断（面板上是原题，原生对话框上是 `nativeQuestion` 的字段），因为读者一页只看到一题。整次调用放进一个 state、让问题指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
+- **每题单独一次，按所在界面显示的内容。** 每题单独判断（面板上是原题，委托表单上是 `header`、题干、各选项 `label` 与 `label: 取舍` 行），因为读者一页只看到一题。整次调用放进一个 state、让问题指向 `questions[i]` 时，分数跟的是下标：一题满是未解释编号的问题，在七题的调用里得 0.91，单独判断只得 0.05。
 - **判断什么。** 代码把显示出来的正文切成句子，并挑出候选术语（议题号和章节号、`F106`、`K6`、`VM110` 这类编号、提交哈希、长数字、大写缩写；模型列不全）。每个句子一次请求，state 是 `{dialog, sentence}`，三个是非问题：这句是否说了谁或什么在做；是否只用名称或编号提到某个测试、审查轮次、结果、一组东西或以前的决定，却没说它是什么；是否含有只看过 `dialog`、没见过这个项目的读者解释不了的词、缩写、名称或数字。每个术语一次请求，state 是 `{dialog}`，两个是非问题，术语写在指令里：没做过这个项目的工程师是否知道它；只看过 `dialog` 的读者能否说出它是什么。“解释不了的词”这一问针对句子，所以也能抓到正则找不到的词（`leaf-dense`、`owner`）。
 - **零容忍。** 一个不合格的句子（没有主语，或引用了没展示的东西，或有没解释的行话）或一个不合格的术语（既不是常识、对话框里也没说），就拒绝这一题；一题被拒，整次调用被拒。多拦一次只多花一次改写，漏掉一次是让读者在看不懂的情况下做决定，所以不拿召回换少拒。
 - **固定的拒绝文字。** 模型读到每个不合格题的 `id`、一条固定说明，以及不合格的句子和术语，每条各附一个固定原因。句子是模型自己写的，原因是固定的，判断模型的输出不会出现在里面；然后重新提问，这第二次调用不再判断、直接通过（`gateUnlessRetry`：会话自己的分支里最近一次 `ask` 的结果是可读性拒绝；不在任何地方另存标记，重启、fork 或 `/tree` 看到的都是各自历史里的内容），所以把清楚的文字也拒掉的判断模型挡不住 ask；再下一次调用重新判断。
@@ -112,7 +112,7 @@ omp 的参数检查把拒绝写成 `<路径> must be <该字段的说明> (was �
 
 ## Tern 面板
 
-组件声明 `nativeOverlay`（`role: "omp.askMore"`、`size: "full"`，`head` 为该题的 `header`，多题时为“N 个决定”），后端把它包进一张铺满窗格的不透明面板（`packages/tui/src/native/backend.ts:873-900`），`describe()` 只返回内容，并使用原生 ask 的 role，Tern 的配色主题与 Reader、Spine、Console 三种聊天风格本就为这些 role 写了样式：多题时一个 `omp.ask.head` 行，内含 `omp.ask.questions` 标签（按位置编号，已答题带 `✓`，最后是 `汇总`，点击切换）；问题（`omp.ask.question`）与 Where/What/How；然后是决定区——每题一个以 `qN` 为 key 的 `omp.ask.options` 选项列表，各行为 `omp.ask.option`、最后一行为 `omp.ask.other`（单击选中、双击作答；已作答的行带强调色，Tern 把它画成实心单选标记，Console 下为 `(•)`，光标则是列表的高亮行）、聚焦选项的取舍卡、Other 输入框和动作条（ask 有倒计时时左侧是倒计时那一行，然后是 `全部取消`，以及 `下一题` / `提交` / `保存答案`）；最后是证据 `code` 节点（折叠到 12 行，由 Tern 自带的 "more lines" 展开）、Mermaid 的 `md` 和风险。汇总页是一行 `omp.ask.notice`，加上每题一行“标签 答案”：Reader 给原生答案网格（`omp.ask.answers`）设了固定宽度的键列，较长的 CJK 标签会压到答案上。面板 role 有意不放在 `omp.overlay.*` 下：Tern 给这类 overlay 写的列表规则（`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`）优先级高于 ask 列表样式，会把每个选项的标记画在文字上。Tern 把面板正文当作一列整体滚动，并按正文底边把列表选中项滚进视野，因此动作条紧跟决定区，并在每页打开时把自己滚进视野：简报再长，打开时整个决定区也在视野内。键盘滚动以正文上的 `scroll` 请求交给 Tern。
+组件声明 `nativeOverlay`（`role: "omp.askMore"`、`size: "full"`，`head` 为该题的 `header`，多题时为“N 个决定”），后端把它包进一张铺满窗格的不透明面板（`packages/tui/src/native/backend.ts`），`describe()` 只返回内容，并使用原生 ask 的 role，Tern 的配色主题与 Reader、Spine、Console 三种聊天风格本就为这些 role 写了样式：多题时一个 `omp.ask.head` 行，内含 `omp.ask.questions` 标签（按位置编号，已答题带 `✓`，最后是 `汇总`，点击切换）；问题（`omp.ask.question`）与 Where/What/How；然后是决定区——每题一个以 `qN` 为 key 的 `omp.ask.options` 选项列表，各行为 `omp.ask.option`、最后一行为 `omp.ask.other`（单击选中、双击作答；已作答的行带强调色，Tern 把它画成实心单选标记，Console 下为 `(•)`，光标则是列表的高亮行）、聚焦选项的取舍卡、Other 输入框和动作条（ask 有倒计时时左侧是倒计时那一行，然后是 `全部取消`，以及 `下一题` / `提交` / `保存答案`）；最后是证据 `code` 节点（折叠到 12 行，由 Tern 自带的 "more lines" 展开）、Mermaid 的 `md` 和风险。汇总页是一行 `omp.ask.notice`，加上每题一行“标签 答案”：Reader 给原生答案网格（`omp.ask.answers`）设了固定宽度的键列，较长的 CJK 标签会压到答案上。面板 role 有意不放在 `omp.overlay.*` 下：Tern 给这类 overlay 写的列表规则（`.sf-overlay[data-role^='omp.overlay.'] .sf-ov-card .sf-list .sf-item`）优先级高于 ask 列表样式，会把每个选项的标记画在文字上。Tern 把面板正文当作一列整体滚动，并按正文底边把列表选中项滚进视野，因此动作条紧跟决定区，并在每页打开时把自己滚进视野：简报再长，打开时整个决定区也在视野内。键盘滚动以正文上的 `scroll` 请求交给 Tern。
 
 每个按钮的动作 id 都写明它绘制时所属的页面与状态（`answer:<page>:<option>`、`other:<page>`、`save:<page>`、`demo:<page>:question:<move>`、`demo:<page>:option:<option>:<move>`、`submit`、`cancel`；见 `src/nodes.ts#SheetAct`）。面板重画后，Tern 仍会把点击路由到已被替换的节点，因此在页面、光标所在行或 Other 输入框变化之后才到达的点击——再点一次 `下一题`、光标已离开的选项的演示控件、离开汇总后的 `提交`——会被丢弃，而不是作用在新状态上。选项列表按题目编 key 也是出于同一原因。
 
@@ -136,7 +136,11 @@ Other 输入框是 pi-tui `Input`，每题一个：它的值是文本的唯一�
 
 ## 委托
 
-`ctx.hasUI` 为假或模式不是 `tui` 时，工具把每一题的原生子集交给 `ctx.invokeTool`（`src/schema.ts#nativeQuestion`），由原生对话框渲染原生字段，前提是可读性检查在这份子集上通过；没有原生解析器时（例如 print 模式），在任何检查之前返回结构化拒绝，而不是挂住。全屏表面内部出错时，先显示一条 `ui.notify` 警告，再以同样方式把整批交给原生对话框，不再对原生子集检查一次。
+`ctx.hasUI` 为假或模式不是 `tui` 时，工具把 `{html}`——`src/schema.ts#askFormHtml` 生成的一张 HTML 表单——交给 `ctx.invokeTool`，前提是可读性检查按这张表单显示的文字通过；没有原生解析器时（例如 print 模式），在任何检查之前返回结构化拒绝，而不是挂住。全屏表面内部出错时，先显示一条 `ui.notify` 警告，再以同一张表单接过整批，不再检查一次。
+
+表单沿用宿主自己的写法（`packages/coding-agent/src/prompts/tools/ask.md`）：每题一个 `<fieldset>`，`header` 作 `<legend>`；一个 `<ul>`，每个选项一行 `label: 取舍`；题干放在紧邻选项组的 `<p>` 里，`fieldQuestions` 把它当作该字段的题干，`fieldContexts` 又把它排除在 context 之外，所以逐字段的提示先读节标题和取舍，再读题干。每个选项是 `<label>` 包着的单选项，`value` 就是 `label`，于是 `formAnswers` 把所选 `label` 原样返回为 `answer`——与插件自己页面的报告一致——超时则提交 `recommended` 那一项的 `checked`。`label` 里的 `& < >` 经转义往返后原样回来，这也是标签必须是单行的原因。单选组自动获得宿主的 “Other” 自由文本答案（`packages/tui/src/html-form/parse.ts`）；自填文本的答案显示为 `Other: <文本>`。
+
+委托结果整份透传：宿主的 `details`（`answers[]`，以及存在时的 `notes?` 和 `timedOut?`——超时按表单预选值提交时才出现）和它自己的结果文本原样到达模型。
 
 ## 超时
 
@@ -162,41 +166,41 @@ sequenceDiagram
 - **策略。** `src/timeout.ts` 把这份快照解析成 `off | decide{idleMs} | notify{idleMs, channels, then: decide{returnMs} | wait}`。`timeout: 0` 为 `off`；没有渠道时，`decide` 为 `decide`，`wait` 为 `off`。项目来源的命令不进入渠道，而成为结构化问题，由 `index.ts` 生成本地化警告，其余允许的项目超时设置不会被丢弃。
 - **时钟。** 倒计时属于组件，挂在渲染时钟的 `scheduleAfter` 上，所以面板建好才开始计时（加载证据和演示的时间不算），每次切换阶段、提交和销毁时都取消它持有的全部计时器。`handleInput`、`handleNativeEvent`，以及 Other 输入框自己的 `handleNativeEvent`（`OtherInput`：Tern 把 edit/undo 事件直接发给输入框，而不是发给面板）都会让空闲阶段重新开始。阶段为 `stopped | idle | notified{at, due, timer}`。由计时器引起的变化会调用 `requestComponentRender`，因为之后没有输入来触发重画。到期走与提交、取消同一个唯一的收尾入口，即 `Submission { kind: "timeout", answers }`；`index.ts` 返回 `timedOutResult`，不调用 `ctx.abort()`。
 - **通知。** 回调由 `index.ts` 构造；`src/notify.ts` 发出 `TERMINAL.sendNotification({ title: "omp", body, type: "ask", urgency: "normal", actions: "focus" })`（`@oh-my-pi/pi-tui`，它按终端选择 OSC 99、OSC 9 或 BEL，并经当前终端写出，所以在 alternate screen 下和 Tern 里都能到达终端），并在进程内用 omp 自带的 POSIX shell 运行命令（`@oh-my-pi/pi-natives` 的 `new Shell().run`，各平台相同），环境是进程环境加上 `OMP_ASK_MORE_*` 变量，带 30 秒超时，且不等待它结束：ask 的时钟从不等任何渠道。失败只产生一条只写结果的警告。
-- **原生设置。** 原生 `ask.timeout`（`packages/coding-agent/src/modes/settings.ts:1266-1294`）会自动选推荐项，还限制 `cfg://` 审批；原生 `ask.notify`（`:1296-1307`）在对话框打开时发通知（`packages/coding-agent/src/tools/ask.ts:592-604`）。两者都不符合这里的行为，所以都不读取；ask-more 委托给原生 ask 时，原生 ask 仍按它们执行。
-- **等待计时。** omp 把 `ui.custom` 的等待算作用户时间，除非某个参数带正数 `timeout`（`packages/coding-agent/src/extensibility/extensions/user-wait.ts:34-38`），而 `ExtensionCustomOptions` 没有这个字段；原生带超时的对话框算作代理时间。插件不为改变这一点而塞进未声明的字段，所以带超时的 ask 仍算用户时间。
+- **原生设置。** 原生 `ask.timeout`（`packages/coding-agent/src/modes/settings.ts#cfgAskTimeout`）到秒数后按表单当前值——模型预选的值——提交，还限制 `cfg://` 审批；原生 `ask.notify`（`#cfgAskNotify`）在对话框打开时发通知（`packages/coding-agent/src/tools/ask.ts#sendAskNotification`）。两者都不符合这里的行为，所以都不读取；ask-more 委托给原生 ask 时，原生 ask 仍按它们执行。
+- **等待计时。** omp 把 `ui.custom` 的等待算作用户时间，除非某个参数带正数 `timeout`（`packages/coding-agent/src/extensibility/extensions/user-wait.ts`），而 `ExtensionCustomOptions` 没有这个字段；原生带超时的对话框算作代理时间。插件不为改变这一点而塞进未声明的字段，所以带超时的 ask 仍算用户时间。
 
 ## 答案与生命周期
 
 | 关注点 | 行为 |
 |---|---|
-| 答案 | 原生 `AskToolDetails`：`results[{id, question, options, multi, selectedOptions, customInput}]`，每题一项、按输入顺序；文本为 `User answers:` 加每行 `id: 选项`、`id: "自填文字"`、`id: (cancelled)` 或 `id: (timed out: …)`，与原生多题措辞一致（`src/result.ts`） |
-| 未作答的题 | 汇总页列出；提交仍会发送其余答案，未作答的题为 `id: (cancelled)`（与原生对话框一致） |
+| 答案 | 宿主的 `AskToolDetails`：`details.answers[{name, question, answer}]`，每题一项、按输入顺序，`answer` 是所选 `label`、自填文本或 `""`（`src/result.ts`）；文本为 `User answers:` 加每行 `id: 选项`、`id: "自填文字"`、`id: (cancelled)` 或 `id: (timed out: …)`；委托调用整份返回宿主结果 |
+| 未作答的题 | 汇总页列出；提交仍会发送其余答案，未作答的题为 `id: (cancelled)`，其 `answer` 为 `""`，卡片画成 `(no answer)` |
 | 取消（`esc`、`全部取消`、abort signal） | `ctx.abort()`，然后所有题都为 `(cancelled)`；已作答的部分不提交 |
 | 并发 | 同时只允许一个，可读性检查也算在内；第二次调用被拒绝，而不是再开一张面板 |
 | 难懂 | 任何界面打开前返回 `ask rejected:`，列出每道不合格的题；模型重新调用 |
 | 超时 | 返回已给出的答案，其余为 `(timed out: …)` 由模型决定；不调用 `ctx.abort()` |
-| 审批 | `approval: "read"`，与 `ask.ts:544-551` 一致 |
+| 审批 | `approval: "read"`，与原生 `AskTool` 一致 |
 | 表面内部失败 | `ui.notify` 警告，然后把整批委托给原生对话框 |
 | 演示播放 | 所在页打开时开始；光标移到某个选项时它的演示从头播放；Other 输入框打开时不播放；计时器不会比 ask 活得更久 |
 
 ## 已知限制背后的宿主约束
 
-- **`/tree` 重答**直接 `new AskTool()`（`packages/coding-agent/src/modes/controllers/selector-controller.ts:1723-1748`）。扩展参数能通过它的 schema 检查，所以 ask 会重新打开——用原生 dock，只画原生字段。
-- **协作 guest** 走原生镜像通道（`extension-ui-controller.ts:923-1025`），该通道没有 `ui.custom` 表面的表示。
-- **对话记录里的卡片**来自原生渲染器，它把既没有选项也没有自填答案的题画成 `Cancelled`（`packages/tui/src/tools/ask.ts:333-335`），没有“交给模型”这种状态。
-- **plan mode。** 原生 ask 在 plan mode 下关闭超时（`packages/coding-agent/src/tools/ask.ts:755-758`）；本插件的倒计时不看 plan mode。
+- **`/tree` 重答**从持久化参数里取 `html`（`packages/coding-agent/src/tools/ask.ts` 的 `recoverAskHtml`，由 `agent-session.ts#recoverAskReanswerHtml` 调用），再用新的 `AskTool` 重新打开（`selector-controller.ts#reanswerAsk`）。持久化的参数是模型的 `questions[]`，里面没有 `html`，所以取不到，该条目只做普通的叶移动。
+- **协作 guest** 走原生镜像通道（`extension-ui-controller.ts`），该通道没有 `ui.custom` 表面的表示。
+- **对话记录里的卡片**来自原生渲染器（`packages/tui/src/tools/ask.ts#askToolRenderer`），它把 `details.answers` 逐项画成题干和答案，空答案画成 `(no answer)`；没有“未作答、交给模型”这种状态。
+- **plan mode。** 原生 ask 在 plan mode 下关闭超时（`packages/coding-agent/src/tools/ask.ts`）；本插件的倒计时不看 plan mode。
 
 ## 文件
 
 ```
 index.ts           插件入口：注册 ask、校验、运行可读性检查、挂载全屏 overlay、委托；给调用的 skill 加上规则
-src/schema.ts      wire 与内部 zod 形状、入口映射、原生投影、逐题校验
+src/schema.ts      wire 与内部 zod 形状、入口映射、委托用 HTML 表单生成器、逐题校验
 src/brief.ts       证据：按工作目录读取文件行段、读到最后一行即停，文字证据切成行
 src/demo.ts        演示规格、按界面加载文件与 ffmpeg 解码、半块画面
 src/state.ts       每题状态（光标、答案、Other 输入框、折叠、滚动、演示播放）与当前标签
 src/component.ts   单个组件：ANSI 页面（render）与 Tern 内容（describe）、按键与事件、倒计时
 src/nodes.ts       使用原生 ask role 的 Tern 内容，以及面板按钮动作（SheetAct）
-src/result.ts      Answer 变体、AskToolDetails 构造、取消、超时与拒绝结果
+src/result.ts      Answer 变体、`details.answers` 构造、取消、超时与拒绝结果
 src/settings.ts    原生插件设置与命令来源，每次 ask 校验并生成一次快照
 src/readability.ts 可读性检查：按界面构造的逐题 dialog、句子与术语、是非问题、拒绝规则、拒绝文字、截止时间
 src/timeout.ts     由该快照解析出的超时策略，以及倒计时那一行
@@ -207,6 +211,6 @@ src/description.ts 面向模型的用途、topic 指针与正文加载；index.t
 src/topics/        随包分发的 routing、rounds 与 results markdown 正文
 tern/              纯样式 Tern 插件：面板字体与 Console 左侧空白
 eval/              在已标注的真实 ask 上评测可读性判断模型（bun run eval:readability）
-test/              校验、原生投影、证据行段与文字证据、ANSI 长行截断、演示加载、半块画面、超时策略与结果、
+test/              校验、委托表单生成、证据行段与文字证据、ANSI 长行截断、演示加载、半块画面、超时策略与结果、
                    skill 规则、可读性检查及其设置，以及经 pi-tui reconciler 与参考 TSP applier 驱动的 Tern 面板（含倒计时）（bun test）
 ```

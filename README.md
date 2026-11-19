@@ -4,11 +4,11 @@ English | [简体中文](README.zh-CN.md)
 
 An OMP plugin that replaces the native `ask` tool and makes it the one place where the agent puts a decision to you. Every question comes with what exists now, what is being decided and what follows; every option with its tradeoff; and the answer page fills the screen — the alternate screen in a plain terminal, a sheet over the transcript in Tern. The answer reaches the model in the native shape, so tools that read the session work unchanged.
 
-Status: **implemented, v0.1.0**, verified on omp 18.14.0 with Tern 0.9.6 ([verification](docs/verification.md)). How it is built: [design](docs/design.md).
+Status: **implemented, v0.1.0**, verified on omp 18.22.0 with Tern 0.9.6 ([verification](docs/verification.md)). How it is built: [design](docs/design.md).
 
 ## Why
 
-The native `ask` is weak and models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool. The native tool already has fields for richer questions — `question` is Markdown and every option has a free-form `preview` — but its prompt tells the model to keep labels short and never mentions `preview`, and its dialog sits in the composer, capped at four header rows and 70% of the terminal.
+The native `ask` asks the model for one HTML form, but its prompt keeps questions terse — short labels, one line of context — and its surface is small: a form walked field by field, or a dialog in the composer capped at four header rows and 70% of the terminal. Models do not use it to say things plainly, so decisions get made in chat: skills that "grill" the user ask in prose because they cannot count on an ask tool.
 
 This plugin requires every question to carry where/what/how and every option its tradeoff, invites real file lines, quoted output, diagrams and demo animations, and draws the answer surface full screen. Its `xd://ask/routing` topic tells the model to put every question it needs the user to answer through `ask`, including the ones a skill tells it to ask in chat, and a skill the user invokes reaches the model with the same rule at its end; whether a model follows it depends on the model ([Known limitations](#known-limitations)).
 
@@ -175,11 +175,11 @@ stateDiagram-v2
 
 ## What the model sends and gets
 
-The parameters are the native ones, without `multi`, plus extension fields:
+The parameters are one object holding `questions[]`, plus extension fields:
 
-| Kept from the native `ask` | Added |
+| Per question | Added |
 |---|---|
-| tool name `ask`; `questions[]` with `id`, `question`, `header?`, `options[{label, description?, preview?}]`, `recommended?` | per question `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
+| `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?` | `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
 
 The tool is registered for strict tool calling, so the provider holds the model's arguments to the schema. The schema is one root object, with no union of objects at any depth and no nesting past a question's `brief` and `options`: a `kind` field picks the form of an evidence entry (`file`, whose lines are numbers and never text, or `text`) and of a demo (`frames` or `file`), and the fields of the other kind are left out. The evidence and demos of a call sit beside its questions and name the question `id` they belong to, an option's demo also naming the option's `label`. In strict mode the model fills every optional field it does not use with `null`, which omp removes before the call is checked.
 
@@ -248,7 +248,7 @@ ask({
 
 Limits: 2–5 options per question; no `multi`. Every evidence entry and demo names the question it belongs to by `id`, and an option's demo its option by `label`; one naming a question or option the call does not hold, carrying a field of the other `kind`, or a second demo on the same brief or option is rejected with that field named. Evidence has no count or length limit: a file entry's window is read up to its `end` and no further, so a few lines of a large file cost no more than a small file; `start` alone is one line, neither shows the file's first 40, and lines that are not adjacent are separate entries. A text entry's `source` is one line. Demos: 2–12 frames at 300–5000 ms each (default 1200); files up to 16 MB, of which the first 15 seconds play. A call that breaks a rule is rejected with every problem listed before anything opens, and the model calls again.
 
-The result is the native one: `User answers:` and one line per question, in the order asked:
+On the full-screen page the result text is `User answers:` and one line per question, in the order asked:
 
 | Line | Meaning |
 |---|---|
@@ -257,13 +257,15 @@ The result is the native one: `User answers:` and one line per question, in the 
 | `id: (cancelled)` | left unanswered when you submitted from Review, or every question after `esc` / `Cancel all`, which also ends the turn |
 | `id: (timed out: …)` | left unanswered when the ask timed out; the model decides it and the turn goes on |
 
+In a session without the TUI the answer comes back through the native `ask` instead: `User answers:` followed by the submitted form data as JSON (after a timeout, its own "No answer before the timeout; submitted the form's current values:" wording). Either way `details` is the host's `AskToolDetails` — `answers[]` with each question's `name`, `question` and `answer` — so the transcript card draws every question and its answer, `(no answer)` where nothing was given.
+
 One ask is open at a time; a second call is rejected instead of opening a second sheet.
 
 ## Readability check
 
 Before you see an ask, OMP's `judge` role checks each question on its own, exactly as its page (or, without the TUI, the native dialog) will show it, for a software engineer who sees only that dialog and has never seen the project's tracker, documents or code or the agent's work. It answers yes/no questions about every sentence (does it say who or what acts; does it mention a test, review round, result, set of items or earlier decision only by a name or number; does it hold a word, abbreviation, name or number that reader could not explain) and about every code or abbreviation found in the text, such as `F106`, `#243`, `§3`, a commit hash or `VM110` (would an engineer who never worked on the project know it; could that reader say what it is from the dialog alone).
 
-One failing sentence or one code that is neither common knowledge nor explained rejects the whole call before anything opens; a wrongly rejected ask costs one rewrite, a missed one costs your decision. The rejection quotes each failing sentence with the reason and lists each failing code, and tells the model to write sentences that say who does what, spell out abbreviations and say in plain words what each name, number or earlier decision is; on the native dialog it adds that the brief and tradeoffs are not shown there. The model rewrites and calls again; that second call goes through without being judged, because the session's last `ask` result is this rejection, so a rejection costs one rewrite at most and a judge that rejects clear text cannot keep the ask from you. The call after that is judged again.
+One failing sentence or one code that is neither common knowledge nor explained rejects the whole call before anything opens; a wrongly rejected ask costs one rewrite, a missed one costs your decision. The rejection quotes each failing sentence with the reason and lists each failing code, and tells the model to write sentences that say who does what, spell out abbreviations and say in plain words what each name, number or earlier decision is; on the delegated form it adds that the brief is not shown there. The model rewrites and calls again; that second call goes through without being judged, because the session's last `ask` result is this rejection, so a rejection costs one rewrite at most and a judge that rejects clear text cannot keep the ask from you. The call after that is judged again.
 
 The judge is OMP's `judge` role chain, resolved the way OMP resolves it for its own judgments: the models of `modelRoles.judge` and its fallbacks, then, only when that chain holds no native judgment model, the session model as OMP's fallback. Every sentence and code is one request, at most sixteen at a time, billed to the session as `ask-readability`. The questions were chosen on `typesafe/jev-1.14.0`; on 44 recorded asks it rejected all of them, among them the PR #265 ask on 18 sentences and 5 codes, and passed a rewrite of that ask with a subject in every sentence ([verification](docs/verification.md#readability-check)). `futureppo-jev/decision-model-preview` answered the same questions wrongly against the text. Set `retry.fallbackChains.judge: []` in the omp config so a failing judge fails visibly instead of passing to another model.
 
@@ -275,7 +277,7 @@ It is a native plugin setting like the [timeout settings](#timeout-and-notificat
 
 ## Sessions without the TUI
 
-When the session has no UI or is not in TUI mode, ask-more hands every question's native fields to the native `ask`, which renders them in its own dialog with its own `ask.timeout` and `ask.notify`; the [readability check](#readability-check) reads those native fields only. Without a native ask to hand to — print mode, for instance — the model gets a rejection instead of a hang. If the full-screen surface fails while opening, a warning shows and the native dialog takes the whole batch.
+When the session has no UI or is not in TUI mode, ask-more hands the native `ask` one HTML form: a section per question titled by its `header`, a line `label: tradeoff` per option, then the question, with each option a radio whose value is its label and the `recommended` one preselected — the host adds its own "Other" free-text answer to every radio group. The host renders that form its own way (a whole-form dialog, or one prompt per field with the section's text as context) with its own `ask.timeout` and `ask.notify`, and the result — the host's `details` and wording — reaches the model unchanged. The [readability check](#readability-check) judges the text that form shows. Without a native ask to hand to — print mode, for instance — the model gets a rejection instead of a hang. If the full-screen surface fails while opening, a warning shows and the same form takes the whole batch.
 
 ## Observers
 
@@ -285,17 +287,17 @@ Answers in `ask` are tool results, not user messages, so tools that read the ses
 - omp-config `user-prompt-inject` renders `{{ask_answers}}`, so `mentor:default` and `discuss:*` see the decisions the user made in `ask` next to the typed requests.
 - [omp-todo-more](https://github.com/oh-my-omp/omp-todo-more) leaves time spent waiting on the user in `ask` out of in-progress time, so a long discussion does not raise an overtime warning, and runs no deadline while an ask is open.
 
-They read the native result shape, so they work the same with the native `ask`.
+They read the `details.answers[]` result shape, so they work the same with the native `ask`.
 
 ## Known limitations
 
 - **A skill that prescribes chat questions can still win on some models.** With the `grilling` skill invoked as `/skill:grilling`, `opencode-go/kimi-k2.7-code` put its first round into `ask` in 15 of 15 runs with the rule appended to the invoked skill, against 11 of 15 with the same code without it, eleven different requests across the runs. With the tool description alone, before the rule was added, `opencode-go/deepseek-v4.1-flash` (9 of 9 runs), `qwen3.8-flash` and `glm-5.3-flash` and the `openai-codex` models `gpt-5.6-luna`, `gpt-6-luna` and `gpt-6.1-terra` put their first round into `ask`, and `opencode-go/minimax-m3.1-flash` wrote the round in its reply and then put the same questions into `ask`. Without this plugin deepseek and kimi asked in chat, native `ask` included. Runs, transcripts, the earlier descriptions and the changes tried: [verification](docs/verification.md#a-skill-that-asks-in-chat).
 - **The readability check has no measured precision.** The questions were chosen on `typesafe/jev-1.14.0` against 44 recorded asks, 16 of them labelled by the agent itself and none by a person; the check rejected every one, including the 10 labelled readable, and it passes 28 of 575 sentences that were read only in the eval output, some doubtful. A rewrite of the PR #265 ask passed. It was not run through `resolveJudge` inside a session, and the sentence and code questions have not been measured on any other judge model.
-- **`/tree` re-answer** reopens an extended ask in the native dialog, with the native fields only.
+- **`/tree` does not re-answer.** The host's re-answer recovers the `html` of a persisted `ask` call; this plugin's persisted arguments are the model's `questions[]`, which carry no `html`, so `/tree` landing on an ask-more result moves the leaf like any other entry and reopens nothing.
 - **Collaborator guests** cannot answer while the ask-more sheet is open.
 - **Print and RPC without a native ask** get a rejection; the native tool would abort the operation instead.
 - **The timeout runs in plan mode too**; the native ask turns its own timeout off there. No `multi`, no notes.
-- **The transcript card shows a timed-out question as `Cancelled`**: every `ask` result is drawn by the native renderer, which has no state for "unanswered, left to the model". The model reads `(timed out: …)`.
+- **The transcript card does not say "timed out"**: the native renderer draws each question's `answer` or `(no answer)` from `details.answers`, so a question left unanswered at the timeout and a cancelled one look the same. The model reads `id: (timed out: …)` on the page's own result line, or the host's timeout wording on a delegated call.
 - **In sessions without the TUI** the native `ask.timeout` and `ask.notify` apply and this plugin's timeout settings do nothing.
 - **A terminal notification shows only where the terminal turns OSC 99, OSC 9 or BEL into one**; the notify command needs a POSIX `sh`.
 - **Plain-terminal demos are coarse.** A file plays at 64 × 20 cells, two pixels per cell: motion reads, small text inside a recording does not, so the caption says what to watch. Each frame rewrites up to 20 rows of 24-bit color (about 16–17 KB for a busy picture), noticeable over a slow SSH link. The picture's width is fixed when the ask opens and does not follow a resize.

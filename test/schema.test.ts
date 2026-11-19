@@ -1,12 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { recoverAskQuestions } from "@oh-my-pi/pi-coding-agent";
+import { defaultFormData, fieldContexts, fieldQuestions, formAnswers } from "@oh-my-pi/pi-tui/html-form/data";
+import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import {
 	type AskParams,
 	type AskParamsWire,
+	askFormHtml,
 	demoSchema,
 	evidenceSchema,
-	nativeQuestion,
 	parametersSchema,
 	parseParams,
 	validate,
@@ -143,15 +144,37 @@ describe("parseParams", () => {
 			expect(checked.problems).toEqual(['demos[1].option: option "指数退避" of question "retry" already has a demo; one demo per option']);
 	});
 
-	it("keeps the new shape valid for the native ask schema", () => {
-		// `/tree` re-answer validates the persisted arguments with the host's native schema.
-		const args = wire({
-			evidence: [{ question: "retry", kind: "file", path: "README.md", start: 1, end: 5 }],
-			demos: [{ question: "retry", option: "固定 3 次", kind: "file", path: "docs/retry.gif" }],
-		});
-		const recovered = recoverAskQuestions(args);
-		expect(recovered?.map((question) => question.id)).toEqual(["retry"]);
-		expect(recovered?.[0]?.options.map((option) => option.label)).toEqual(["指数退避", "固定 3 次"]);
+	it("rejects a label the form would not return unchanged", () => {
+		expect(
+			parseParams(
+				wire({
+					questions: [
+						{
+							...wire().questions[0]!,
+							options: [
+								{ label: "指数\n退避", tradeoff: "t" },
+								{ label: "固定 3 次", tradeoff: "t" },
+							],
+						},
+					],
+				}),
+			),
+		).toMatchObject({ ok: false });
+		expect(
+			parseParams(
+				wire({
+					questions: [
+						{
+							...wire().questions[0]!,
+							options: [
+								{ label: "指数  退避", tradeoff: "t" },
+								{ label: "固定 3 次", tradeoff: "t" },
+							],
+						},
+					],
+				}),
+			),
+		).toMatchObject({ ok: false });
 	});
 });
 
@@ -197,11 +220,13 @@ describe("validate", () => {
 	});
 
 	it("rejects a reserved label", () => {
-		const params = parsed();
-		params.questions[0]!.options[0]!.label = "Other (type your own)";
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("added by the UI");
+		for (const label of ["Other", "Other…"]) {
+			const params = parsed();
+			params.questions[0]!.options[0]!.label = label;
+			const checked = validate(params);
+			expect(checked.ok).toBe(false);
+			if (!checked.ok) expect(checked.problems.join("\n")).toContain("added by the UI");
+		}
 	});
 
 	it("rejects a recommended index outside the options", () => {
@@ -293,16 +318,25 @@ describe("strict tool calling", () => {
 	});
 });
 
-describe("nativeQuestion", () => {
-	it("drops the extension fields and keeps the native ones", () => {
-		const question = parsed({ demos: [{ question: "retry", kind: "file", path: "docs/retry.gif" }] }).questions[0]!;
-		question.recommended = 1;
-		question.options[0]!.preview = "preview text";
-		expect(nativeQuestion(question)).toEqual({
-			id: "retry",
-			question: "重试应该怎么做？",
-			options: [{ label: "指数退避", preview: "preview text" }, { label: "固定 3 次" }],
-			recommended: 1,
-		});
+describe("askFormHtml", () => {
+	it("builds one form the native ask reads as the batch: header, tradeoffs, question, options, recommendation", () => {
+		const questions = parsed().questions;
+		questions[0]!.header = "重试上限";
+		questions[0]!.recommended = 1;
+		const form = parseHtmlForm(askFormHtml(questions));
+		expect(form.fields).toHaveLength(1);
+		const field = form.fields[0]!;
+		expect(field.name).toBe("retry");
+		expect(fieldQuestions(form).get(field)).toBe("重试应该怎么做？");
+		const context = fieldContexts(form).get(field) ?? "";
+		expect(context).toContain("重试上限");
+		expect(context).toContain("指数退避: 安全，但要迁移");
+		if (field.kind !== "choice") throw new Error("expected a choice field");
+		expect(field.options.map((option) => [option.value, option.checked])).toEqual([
+			["指数退避", false],
+			["固定 3 次", true],
+		]);
+		expect(defaultFormData(form)).toEqual({ retry: "固定 3 次" });
+		expect(formAnswers(form, { retry: "指数退避" })).toEqual([{ name: "retry", question: "重试应该怎么做？", answer: "指数退避" }]);
 	});
 });
