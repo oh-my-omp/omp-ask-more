@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Breaking Changes
 
 - Changed `ask` parameters to a single object containing a `questions[]` list, removing the `preview` option
