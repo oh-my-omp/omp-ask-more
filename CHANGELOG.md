@@ -17,6 +17,7 @@
 
 ### Changed
 
+- Updated the shared copy of `i18n.ts` to oh-my-omp/shared@e054d56.
 - Compiled the whole question batch into one HTML form for the host's native `ask`, carrying each question's brief, file and quoted evidence, diagram as text, risks, option tradeoffs and image demos
 - Rewrote the `ask` tool result text as `User answers:` lines in asked order with an appended `Option notes:` section
 - Marked the recommended option instead of preselecting it, so the host's timeout submits nothing the user did not choose and every question left blank reaches the model as `(timed out: …)`
