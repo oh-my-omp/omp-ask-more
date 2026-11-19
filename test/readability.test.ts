@@ -26,7 +26,6 @@ const questions: readonly AskQuestion[] = askParamsSchema.parse({
 	],
 }).questions;
 
-/** What a scripted judge says about a sentence or a term; the defaults are a readable one. */
 interface Verdict {
 	readonly actor?: number;
 	readonly unshown?: number;
@@ -35,11 +34,6 @@ interface Verdict {
 	readonly said?: number;
 }
 
-/**
- * A judge that answers each sentence and each term from `verdict` and records the state and the
- * question names it was asked. A request about a sentence carries `sentence` in its state; one about
- * a term names the term in its instructions.
- */
 function scripted(verdict: (subject: string) => Verdict, seen: { state: string; asked: string[] }[] = []): NoulJudge {
 	return {
 		async judge(request): Promise<{ answers: Record<string, { noul: number }> }> {
@@ -58,7 +52,6 @@ function scripted(verdict: (subject: string) => Verdict, seen: { state: string; 
 	};
 }
 
-/** A judge that never answers and gives up only when its signal aborts. */
 const hanging: NoulJudge = {
 	judge: (_request, { signal }) => {
 		const { promise, reject } = Promise.withResolvers<never>();
@@ -198,7 +191,6 @@ describe("what the gate hands the judge", () => {
 describe("the ask after a rejection", () => {
 	const unreadable = scripted(() => ({ actor: 0 }));
 
-	/** The session record of an `ask` call and its result. */
 	function askResult(content: string, isError: boolean): BranchEntry {
 		return {
 			type: "message",
@@ -227,7 +219,6 @@ describe("the ask after a rejection", () => {
 	it("goes through when the rejected ask was called through omp's xd://ask device", async () => {
 		const direct = await rejection();
 		if (direct.type !== "message" || direct.message.role !== "toolResult") throw new Error("expected a tool result");
-		// omp records a device call as the `write` that dispatched it, with the device's own result inside.
 		const viaDevice: BranchEntry = {
 			...direct,
 			message: {

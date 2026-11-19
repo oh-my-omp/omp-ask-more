@@ -1,21 +1,9 @@
-// The readability gate: before a human sees an ask, the session's judge role answers yes/no
-// questions about every sentence of each question and about every code or abbreviation in it. One
-// sentence that names no actor, mentions something the dialog never shows only by a name or number,
-// or uses a word the reader cannot place, and one code or abbreviation that is neither common
-// knowledge nor explained, rejects the call with the offending text listed, and the model asks
-// again. Nothing is tolerated: a wrongly rejected ask costs one rewrite, a missed one costs the
-// reader's decision.
-//
-// Every judgment is one literal question about one thing, named in the state: a sentence goes in as
-// `sentence` next to the `dialog` it belongs to, a term is named in the instruction. Code finds the
-// sentences and the candidate terms (a model does not list reliably) and decides what the answers add up to.
 import type { JsonValue, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { writeDeviceDispatch } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
-/** The part of the host's judge the gate uses: yes/no questions over one state. */
 export interface NoulJudge {
 	judge(
 		request: JudgmentRequest<Record<string, NoulQuestion>>,
@@ -25,12 +13,10 @@ export interface NoulJudge {
 
 type JsonObject = { readonly [key: string]: JsonValue };
 
-/** `{ [key]: value }`, or nothing when the value is absent. */
 function field(key: string, value: string | undefined): JsonObject {
 	return value === undefined ? {} : { [key]: value };
 }
 
-/** The question's section of the form, as the reader gets it. */
 function dialog(question: AskQuestion): JsonObject {
 	return {
 		...field("title", question.header),
@@ -44,7 +30,6 @@ function dialog(question: AskQuestion): JsonObject {
 	};
 }
 
-/** The text the reader reads as sentences, and every text the reader sees, labels and titles included. */
 function shownText(question: AskQuestion): { readonly prose: string[]; readonly all: string[] } {
 	const defined = (...values: readonly (string | undefined)[]): string[] => values.filter((value): value is string => value !== undefined);
 	const prose = [
@@ -59,23 +44,16 @@ function shownText(question: AskQuestion): { readonly prose: string[]; readonly 
 
 const URL = /https?:\/\/\S+/g;
 
-/**
- * What a reader outside the project cannot look up and a model cannot be trusted to list: issue and
- * section numbers, codes (`F106`, `K6`, `VM110`), commit hashes, long numbers and upper-case abbreviations.
- */
 const TERM =
 	/(?<![\w#])#\d+\b|§\s?\d+(?:\.\d+)*|\b[A-Z]{1,4}-?\d+[a-z]?\b|\b[A-Z]{2,}\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|\b\d{8,}\b/g;
 
-/** The distinct candidate terms in the dialog's texts, in order of appearance. */
 export function candidateTerms(texts: readonly string[]): string[] {
 	const found = texts.flatMap((text) => (text.replace(URL, " ").match(TERM) ?? []).map((term) => term.replace(/\s/g, "")));
 	return [...new Set(found)];
 }
 
-/** A fragment this short is a label, not a sentence. */
 const SENTENCE_MIN_LENGTH = 6;
 
-/** The distinct sentences of the dialog's prose, split at full stops, semicolons and line breaks, a link standing as `<link>`. */
 export function sentencesOf(texts: readonly string[]): string[] {
 	const all = texts.flatMap((text) =>
 		text
@@ -101,12 +79,10 @@ const SENTENCE_QUESTIONS = {
 	},
 } satisfies Record<string, NoulQuestion>;
 
-/** The questions about one sentence of `dialog`. */
 export function sentenceRequest(shown: JsonObject, sentence: string): JudgmentRequest<Record<string, NoulQuestion>> {
 	return { state: { dialog: shown, sentence }, questions: SENTENCE_QUESTIONS };
 }
 
-/** The questions about one code or abbreviation of `dialog`. */
 export function termRequest(shown: JsonObject, term: string): JudgmentRequest<Record<string, NoulQuestion>> {
 	return {
 		state: { dialog: shown },
@@ -117,23 +93,16 @@ export function termRequest(shown: JsonObject, term: string): JudgmentRequest<Re
 	};
 }
 
-/** What the judge said about one sentence: the probability that each yes/no condition holds. */
 export interface SentenceFinding {
 	readonly sentence: string;
-	/** The sentence says who or what acts. */
 	readonly actor: number;
-	/** The sentence mentions something the dialog does not show, only by a name or number. */
 	readonly unshown: number;
-	/** The sentence holds a word, name or number the reader could not explain. */
 	readonly jargon: number;
 }
 
-/** What the judge said about one code or abbreviation. */
 export interface TermFinding {
 	readonly term: string;
-	/** Engineers in general know it. */
 	readonly known: number;
-	/** The dialog alone lets a reader say what it is. */
 	readonly said: number;
 }
 
@@ -142,7 +111,6 @@ export interface Finding {
 	readonly terms: readonly TermFinding[];
 }
 
-/** How many judgments run at once across the whole call. */
 const CONCURRENCY = 8;
 
 function answer(answers: Readonly<Record<string, { readonly noul: number }>>, key: string): number {
@@ -151,7 +119,6 @@ function answer(answers: Readonly<Record<string, { readonly noul: number }>>, ke
 	return found.noul;
 }
 
-/** `work` over every item, at most `limit` at a time, results in input order; the first failure rejects. */
 async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
 	const results = new Array<R>(items.length);
 	const queue = items.entries();
@@ -163,7 +130,6 @@ async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) 
 	return results;
 }
 
-/** Every question's findings, in input order; each question is judged on its own, as its section of the form shows it. */
 export async function judgeReadability(
 	judge: NoulJudge,
 	questions: readonly AskQuestion[],
@@ -200,13 +166,10 @@ export async function judgeReadability(
 	}
 }
 
-/** An answer at or above this reads as "yes". */
 export const YES = 0.5;
 
-/** Why a sentence is rejected. */
 export type SentenceFault = "actor" | "unshown" | "jargon";
 
-/** Every reason this sentence fails; none means it reads. */
 export function sentenceFaults(finding: SentenceFinding): SentenceFault[] {
 	return [
 		...(finding.actor < YES ? (["actor"] as const) : []),
@@ -215,19 +178,16 @@ export function sentenceFaults(finding: SentenceFinding): SentenceFault[] {
 	];
 }
 
-/** A code or abbreviation fails when engineers in general would not know it and the dialog does not say what it is. */
 export function termFails(finding: TermFinding): boolean {
 	return finding.known < YES && finding.said < YES;
 }
 
-/** A question that fails, and what fails in it. */
 export interface Unreadable {
 	readonly id: string;
 	readonly sentences: readonly { readonly sentence: string; readonly faults: readonly SentenceFault[] }[];
 	readonly terms: readonly string[];
 }
 
-/** The questions with any failing sentence or term. */
 export function unreadableQuestions(questions: readonly AskQuestion[], findings: readonly Finding[]): Unreadable[] {
 	return questions.flatMap((question, index) => {
 		const finding = findings[index];
@@ -246,17 +206,14 @@ const FAULT_TEXT: Record<SentenceFault, string> = {
 	jargon: "it uses a word, abbreviation, name or number the dialog never explains",
 };
 
-/** The longest stretch of a sentence the rejection quotes back. */
 const QUOTE_LENGTH = 80;
 
 function quote(sentence: string): string {
 	return JSON.stringify(sentence.length > QUOTE_LENGTH ? `${sentence.slice(0, QUOTE_LENGTH)}…` : sentence);
 }
 
-/** What every readability rejection says of a question; the session's record of a rejected ask is recognised by it. */
 const REJECTION_MARK = "is hard to understand for a reader who sees only this dialog";
 
-/** The rejection the model reads: every failing question with the sentences and terms that fail. Fixed text around the model's own words, never judge output. */
 export function readabilityProblems(failing: readonly Unreadable[]): string[] {
 	return failing.map(({ id, sentences, terms }) => {
 		const lines = [
@@ -267,19 +224,13 @@ export function readabilityProblems(failing: readonly Unreadable[]): string[] {
 	});
 }
 
-/** How long the gate waits for the judge before asking without it. */
 export const JUDGE_DEADLINE_MS = 30_000;
 
-/** What the ask does after the gate. */
 export type Gate =
 	| { readonly kind: "pass" }
 	| { readonly kind: "reject"; readonly problems: readonly string[] }
 	| { readonly kind: "cancelled" };
 
-/**
- * Judge the call. A judge that fails or misses its deadline lets the ask through with a warning;
- * only the caller's own abort cancels it.
- */
 export async function readabilityGate(
 	judge: NoulJudge,
 	questions: readonly AskQuestion[],
@@ -304,27 +255,18 @@ export async function readabilityGate(
 	}
 }
 
-/**
- * The call after a rejection goes through unjudged: the model has been told what to fix, and a
- * judge that rejects again must not keep the ask from the reader. Whether the last `ask` was
- * rejected is read from the session's own record, the rejection being its result, so nothing else
- * remembers it: another session, a restart, a fork or `/tree` each see their own history.
- */
 export async function gateUnlessRetry(branch: readonly BranchEntry[], judge: () => Promise<Gate>): Promise<Gate> {
 	return lastAskRejected(branch) ? { kind: "pass" } : judge();
 }
 
-/** An entry of the session's active branch. */
 export type BranchEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
 
-/** Whether a tool result is this tool's: called directly, or through omp's `xd://ask` device (a `write`). */
 function isAskResult(toolName: string, result: unknown): boolean {
 	if (toolName === "ask") return true;
 	const dispatch = writeDeviceDispatch(toolName, result);
 	return dispatch?.tool === "ask" && dispatch.mode === "execute";
 }
 
-/** Whether the last `ask` result in the branch is a readability rejection. */
 export function lastAskRejected(branch: readonly BranchEntry[]): boolean {
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];

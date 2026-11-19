@@ -1,4 +1,3 @@
-// Thin wrapper over the Postgres client used by every instance.
 import { SQL } from "bun";
 
 const sql = new SQL(process.env.DATABASE_URL ?? "postgres://localhost/orders");

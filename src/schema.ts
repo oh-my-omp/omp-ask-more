@@ -1,33 +1,10 @@
-// The tool's parameters: the questions of one decision batch — id, question, header, options and a
-// recommendation — plus the extension fields that carry the decision (brief, tradeoffs, evidence,
-// image demos). `src/form.ts` compiles all of it into the HTML form the host's `ask` draws. See
-// README.md#what-the-model-sends-and-gets.
-//
-// The model sees `parametersSchema`, whose shape follows the plugin rule (工具参数「形状」): one
-// root object and no object union anywhere. An evidence entry is a single object whose `kind` enum
-// picks the form, and the evidence and demos of a call sit beside the questions, keyed back by
-// question id and option label, so an object never nests deeper than two levels. `parseParams`
-// maps that into the internal shapes below — the discriminated union the form compiler and the
-// readability check consume — and rejects a field that does not belong to its `kind` or names a
-// question or option the call does not hold, before any UI opens.
-//
-// The shapes are written for strict tool calling (index.ts registers `strict: true`): omp makes
-// every optional field nullable and drops null placeholders before validation, and every optional
-// string rejects "" so an empty placeholder is dropped the same way.
-//
 // omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`,
 // so every description opens with the value it expects, and holds at most one " or ": with
 // more, the check rewrites the text as a list of alternatives.
 import { z } from "@oh-my-pi/pi-coding-agent";
 
-/**
- * Labels the host form takes as its own free-text answer: it adds an `Other` answer to a radio
- * group unless one option's label starts with "other" (`html-form/parse.ts`), and reports a typed
- * answer as `Other: <text>`.
- */
 const RESERVED_LABEL = /^\s*other\b/i;
 
-/** File extensions a demo `path` may name: pictures and animations the host form shows. */
 export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const;
 
 export const fileEvidenceSchema = z.object({
@@ -63,10 +40,8 @@ export const textEvidenceSchema = z.object({
 	note: z.string().min(1).describe("text saying why this evidence matters").optional(),
 });
 
-/** Lines ask-more reads from a file itself, or text the model quotes from elsewhere. */
 export const evidenceSchema = z.union([fileEvidenceSchema, textEvidenceSchema]);
 
-/** A picture or animation file shown in the form. */
 export const demoSchema = z.object({
 	path: z.string().min(1).describe("a non-empty path to an image or animation file, relative to the working directory unless absolute"),
 	caption: z.string().min(1).describe("one line saying what to watch").optional(),
@@ -106,7 +81,6 @@ export const questionSchema = z.object({
 	brief: briefSchema,
 });
 
-/** The internal parameters: what the dialog, the readability check and the form generator take. */
 export const askParamsSchema = z.object({
 	questions: z
 		.array(questionSchema)
@@ -236,12 +210,10 @@ export type AskParamsWire = z.infer<typeof parametersSchema>;
 export type EvidenceParam = z.infer<typeof evidenceParamSchema>;
 export type DemoParam = z.infer<typeof demoParamSchema>;
 
-/** Every question validated; or every reason the call cannot be asked. */
 export type Validated =
 	| { readonly ok: true; readonly questions: readonly AskQuestion[] }
 	| { readonly ok: false; readonly problems: readonly string[] };
 
-/** One evidence entry of the wire shape as an internal one; the fields of the other `kind` are problems. */
 function parseEvidenceParam(entry: EvidenceParam, at: string): { value?: EvidenceRef; problems: string[] } {
 	const problems: string[] = [];
 	const note = entry.note === undefined ? {} : { note: entry.note };
@@ -299,12 +271,6 @@ function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
 	};
 }
 
-/**
- * The wire parameters as the internal ones, with every problem found on the way: an evidence
- * entry or demo that names a question or option the call does not hold, carries a field of the
- * other `kind`, or is the second demo of its slot. Runs before any UI opens, and lists every
- * problem of every question at once like `validate`.
- */
 export function parseParams(params: AskParamsWire): Validated {
 	const problems: string[] = [];
 	const questions = params.questions.map(questionOf);
@@ -360,10 +326,6 @@ export function parseParams(params: AskParamsWire): Validated {
 	return { ok: false, problems: [...problems, ...(checked.ok ? [] : checked.problems)] };
 }
 
-/**
- * Semantic checks the schema cannot state. They run before any UI opens and never degrade
- * into a thinner ask: the model gets every problem of every question at once and calls again.
- */
 export function validate(params: AskParams): Validated {
 	const problems: string[] = [];
 	if (params.questions.length === 0) problems.push("questions: empty; ask at least one question");
@@ -445,7 +407,6 @@ function validateTextEvidence(ref: TextEvidence, at: string): string[] {
 	return problems;
 }
 
-/** The extension of `path`, lower-cased, with its dot; empty when it has none. */
 export function extensionOf(path: string): string {
 	const name = path.slice(path.lastIndexOf("/") + 1);
 	const dot = name.lastIndexOf(".");

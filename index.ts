@@ -1,14 +1,3 @@
-/**
- * ask-more: registers `ask` under the native name, with the questions extended by a `brief`,
- * per-option tradeoffs, evidence and image demos. A call is validated, screened for readability,
- * its file evidence read, and the whole batch compiled into one HTML form (src/form.ts) that the
- * host's own `ask` answers through `ctx.invokeTool`: the host draws it in every session with a
- * UI, runs its timeout and notification, closes it when the user sends a message instead, and
- * returns its `AskToolDetails`. This plugin rewrites only the text the model reads (src/result.ts).
- * The persisted call keeps the model's own `questions[]`; the host's `/tree` re-answer rebuilds a
- * plain form from them. While `ask` is active, every user-invoked skill reaches the model with the
- * rule that its questions go through `ask` (src/skill-prompt.ts).
- */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import {
 	AgentRegistry,
@@ -31,15 +20,10 @@ import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } f
 import { readReadabilityJudge, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
 
-/**
- * The calling session's `judge` role chain, billed to it. The session model goes in as the host's
- * own fallback: the host adds it only when the chain holds no native judgment model.
- */
 function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
 		.list()
 		.find((ref) => ref.session?.sessionManager === ctx.sessionManager)?.session;
-	// Only the session on this thread exposes the settings and registries the judge needs.
 	if (session == null || !isLocalAgentSession(session)) return undefined;
 	const chain = resolveJudge({
 		settings: session.settings,
@@ -56,7 +40,6 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	return chain.primaryModel() === undefined ? undefined : chain;
 }
 
-/** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. The ask after a rejected one goes through unjudged. */
 function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], signal: AbortSignal | undefined): Promise<Gate> {
 	return gateUnlessRetry(ctx.sessionManager.getBranch(), async () => {
 		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
@@ -82,7 +65,6 @@ async function ask(
 	const checked = parseParams(params);
 	if (!checked.ok) return rejectedResult(checked.problems);
 	const questions = checked.questions;
-	// Present only where the host's own `ask` exists, which it builds only for sessions that can prompt the user.
 	const invoke = ctx.invokeTool;
 	if (invoke === undefined) return rejectedResult(["ask needs an interactive session, and this session cannot prompt the user"]);
 
@@ -112,19 +94,10 @@ export default function askMore(pi: ExtensionAPI): void {
 		docTopics,
 		parameters: parametersSchema,
 		approval: "read",
-		// One form at a time, as the host's own `ask` declares: the host has one ask slot over the
-		// composer, and a second form would take it from the first.
 		concurrency: "exclusive",
-		// Strict tool calling: the provider constrains the arguments to the schema, and omp turns every
-		// optional field into a nullable one whose null it drops before validation. The parameter
-		// shapes are written for it (src/schema.ts); OpenAI-family backends apply strict mode anyway
-		// when the flag is absent.
 		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, params, signal, onUpdate),
-		// The host draws its ask card only for its built-in `ask`; this tool replaces it, so it hands
-		// the host's `{ answers }` details to the same renderer. The host renderer's `args` are the HTML
-		// form (it reads password fields from it); this tool's arguments are `questions[]`, so none are passed.
 		renderResult: (result, options, theme) => askToolRenderer.renderResult(result, options, theme),
 		describeResult: (result, options) => askToolRenderer.describeResult(result, options),
 	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & {
@@ -132,8 +105,6 @@ export default function askMore(pi: ExtensionAPI): void {
 		concurrency: "exclusive";
 	};
 	pi.registerTool(tool);
-	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
-	// place left to carry the rule. Registering costs omp a clone of the history per model call.
 	pi.on("context", (event) => {
 		if (!pi.getActiveTools().includes("ask")) return undefined;
 		const messages = withSkillAskRule(event.messages);

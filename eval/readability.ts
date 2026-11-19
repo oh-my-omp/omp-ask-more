@@ -1,8 +1,3 @@
-// Runs the readability gate's judge over recorded asks and reports which questions it rejects and why:
-// `bun eval/readability.ts [corpus.json] [--session-model provider/id] [--out findings.json]`.
-// The corpus defaults to eval/readability-labelled.json. The judge is the `judge` role chain of this
-// directory's omp settings, as a session resolves it; --session-model is the session model the host
-// falls back to when that chain holds no native judgment model.
 import { parseArgs } from "node:util";
 import { z } from "@oh-my-pi/pi-coding-agent";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -12,7 +7,6 @@ import { discoverAuthStorage, loadCliExtensionProviders } from "@oh-my-pi/pi-cod
 import { type Finding, judgeReadability, unreadableQuestions } from "../src/readability.ts";
 import { type AskQuestion, demoParamSchema, evidenceParamSchema, parseParams, questionParamSchema } from "../src/schema.ts";
 
-/** A recorded ask in the parameters the model sends, so reading the corpus exercises the entry parse. */
 const corpusSchema = z.object({
 	calls: z.array(
 		z.object({
@@ -20,7 +14,6 @@ const corpusSchema = z.object({
 			questions: z.array(questionParamSchema).min(1),
 			evidence: z.array(evidenceParamSchema).optional(),
 			demos: z.array(demoParamSchema).optional(),
-			/** The human's verdict per question id; unlabelled questions are scored but not counted. */
 			labels: z.record(z.string(), z.enum(["readable", "hard"])).optional(),
 		}),
 	),
@@ -41,7 +34,6 @@ interface Scored {
 
 const CONCURRENCY = 4;
 
-/** Rejected questions against the labels: the gate must miss no `hard` question; a rejected `readable` one costs a rewrite. */
 function report(scored: readonly Scored[]): string {
 	let flagged = 0;
 	let questions = 0;

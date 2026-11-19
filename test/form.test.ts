@@ -39,7 +39,6 @@ const evidence: ResolvedEvidence[] = [
 	{ kind: "text", source: "server log", lines: ["timeout after 30s"] },
 ];
 
-// The form's own labels follow the user's language; these tests read the English ones.
 const lang = process.env.OMOMP_LANG;
 beforeAll(() => {
 	process.env.OMOMP_LANG = "en";

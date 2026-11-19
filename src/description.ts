@@ -1,5 +1,3 @@
-// Model-facing documentation: the short purpose stays in the prompt; detailed instructions
-// are shipped as markdown bodies and served through the host's native topic channel.
 import { readFileSync } from "node:fs";
 
 export const DESCRIPTION = `Puts your questions to the user as one form, each with its brief, evidence and the tradeoff of every option, and blocks until they answer.

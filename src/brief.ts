@@ -1,8 +1,3 @@
-// Evidence comes in two kinds. For a file the model names a path and an optional line window and the
-// tool reads those lines itself, so the panel shows the file's real lines rather than a copy the model
-// typed. Text the model quotes from elsewhere (a command's output, a page, a log) is shown as quoted,
-// with the source the model names; the tool does not check it. A file that cannot be read is
-// reported in its place, never fatal.
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -10,7 +5,6 @@ import { createInterface } from "node:readline";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { EvidenceRef, FileEvidence, TextEvidence } from "./schema.ts";
 
-/** Lines drawn when a file reference names no window. */
 const HEAD_LINES = 40;
 
 export type ResolvedEvidence =
@@ -26,7 +20,6 @@ export type ResolvedEvidence =
 	| { readonly kind: "text"; readonly source: string; readonly lang?: string; readonly lines: readonly string[]; readonly note?: string }
 	| { readonly kind: "unreadable"; readonly path: string; readonly error: string; readonly note?: string };
 
-/** A line as the panels draw it: tabs as two spaces, no trailing whitespace. */
 function displayLine(line: string): string {
 	return line.replace(/\t/g, "  ").replace(/\s+$/u, "");
 }
@@ -36,16 +29,11 @@ function noteOf(ref: EvidenceRef): { note?: string } {
 	return note ? { note } : {};
 }
 
-/**
- * The window a file reference names: its first lines without `start`, one line with `start` alone,
- * `start`-`end` inclusive otherwise.
- */
 function fileWindow(ref: FileEvidence): { start: number; end: number } {
 	if (ref.start === undefined) return { start: 1, end: HEAD_LINES };
 	return { start: ref.start, end: ref.end ?? ref.start };
 }
 
-/** Lines `start`-`end` of the file, read up to `end` and no further; fewer when the file ends first. */
 async function readWindow(absolute: string, start: number, end: number): Promise<string[]> {
 	const stream = createReadStream(absolute, { encoding: "utf8" });
 	const reader = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });

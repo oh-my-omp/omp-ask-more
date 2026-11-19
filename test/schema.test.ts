@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { type AskParams, type AskParamsWire, demoSchema, evidenceSchema, parametersSchema, parseParams, validate } from "../src/schema.ts";
 
-/** A wire call: one question, two options, nothing extended. */
 function wire(overrides: Partial<AskParamsWire> = {}): AskParamsWire {
 	return {
 		questions: [
@@ -20,7 +19,6 @@ function wire(overrides: Partial<AskParamsWire> = {}): AskParamsWire {
 	};
 }
 
-/** The wire call as the internal parameters; a rejection fails the test with its problems. */
 function parsed(overrides: Partial<AskParamsWire> = {}): AskParams {
 	const checked = parseParams(wire(overrides));
 	if (!checked.ok) throw new Error(checked.problems.join("\n"));
@@ -186,7 +184,6 @@ describe("validate", () => {
 	});
 
 	it("rejects a label the form takes for the user's own answer", () => {
-		// A label starting with "other" turns off the form's own free-text answer, and a typed answer comes back as `Other: …`.
 		for (const label of ["Other", "other approach", "Other…"]) {
 			const params = parsed();
 			params.questions[0]!.options[0]!.label = label;
@@ -272,8 +269,6 @@ describe("validate", () => {
 
 describe("strict tool calling", () => {
 	it("keeps the parameters representable in strict mode", () => {
-		// A shape omp cannot express in strict mode silently falls back to non-strict, and the
-		// provider then makes the model fill every optional field (the openai-codex failure).
 		const wireSchema = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<
 			typeof toolWireSchema
 		>[0]);

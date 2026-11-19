@@ -1,27 +1,15 @@
-// One HTML form for the whole batch, handed to the host's `ask` (`ctx.invokeTool({ html })`), which
-// draws it in every session with a UI: a panel over the composer or an inline card in Tern, and
-// field by field over RPC. One `<fieldset>` per question, in the order the reader needs it: the
-// header as the legend, Where / What / How, the evidence ask-more read itself, the diagram drawn as
-// text, the risks, the question's image demo, the options with their tradeoffs, the option demos,
-// then the question and its radios. The question sits right before the radios, so the host takes it
-// as the field's question (`fieldQuestions`), and every block above it is the field's context.
-//
 // No radio is preselected: the host submits the form's current values when its timeout ends, so a
-// preselected recommendation would come back looking like the user's choice. The recommendation is
-// marked on the option's tradeoff line instead, and radio labels are the option labels alone, since
-// the host reports a choice by its label text (`formAnswers`).
+// preselected recommendation would come back looking like the user's choice.
 import { isAbsolute, resolve } from "node:path";
 import { resolveMermaidAscii } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
 import type { AskQuestion, Demo } from "./schema.ts";
 
-/** Text or an attribute value as HTML. */
 export function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** Escaped prose with its `code` spans kept as code: the brief is written as light Markdown. */
 function inline(text: string): string {
 	return text
 		.split(/(`[^`\n]+`)/)
@@ -31,7 +19,6 @@ function inline(text: string): string {
 		.join("");
 }
 
-/** Paragraphs of `text` under a bold `label`: blank lines split paragraphs, a single newline is a line break. */
 function labelled(label: string, text: string): string {
 	const paragraphs = text
 		.trim()
@@ -41,7 +28,6 @@ function labelled(label: string, text: string): string {
 	return [`<p><strong>${escapeHtml(label)}</strong> ${first}</p>`, ...rest.map((paragraph) => `<p>${paragraph}</p>`)].join("");
 }
 
-/** Lines with their 1-based numbers, right-aligned to the widest. */
 function numbered(lines: readonly string[], start: number): string {
 	const width = String(start + lines.length - 1).length;
 	return lines.map((line, index) => `${String(start + index).padStart(width)}  ${line}`).join("\n");
@@ -62,13 +48,11 @@ function evidenceHtml(entry: ResolvedEvidence): string {
 	}
 }
 
-/** The diagram as the host's Markdown draws Mermaid: text art, or its source when it cannot be drawn. */
 function diagramHtml(source: string): string {
 	const art = resolveMermaidAscii(source) ?? source.trim();
 	return `<p><strong>${escapeHtml(tr("Diagram", "图"))}</strong></p><pre>${escapeHtml(art)}</pre>`;
 }
 
-/** An image demo; the host resolves a relative `src` itself, but against its own directory, so it goes absolute. */
 function demoHtml(demo: Demo, cwd: string, alt: string): string {
 	const src = isAbsolute(demo.path) ? demo.path : resolve(cwd, demo.path);
 	const caption = demo.caption === undefined ? "" : `<p>${inline(demo.caption)}</p>`;
@@ -116,7 +100,6 @@ function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence
 	return `<fieldset>${blocks.join("\n")}</fieldset>`;
 }
 
-/** The batch as one form: `evidence[i]` is question `i`'s evidence as ask-more read it. */
 export function compileForm(questions: readonly AskQuestion[], evidence: readonly (readonly ResolvedEvidence[])[], cwd: string): string {
 	return `<form>\n${questions.map((question, index) => questionHtml(question, evidence[index] ?? [], cwd)).join("\n")}\n</form>`;
 }
