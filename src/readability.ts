@@ -11,6 +11,7 @@
 // sentences and the candidate terms (a model does not list reliably) and decides what the answers add up to.
 import type { JsonValue, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { writeDeviceDispatch } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
@@ -316,11 +317,18 @@ export async function gateUnlessRetry(branch: readonly BranchEntry[], judge: () 
 /** An entry of the session's active branch. */
 export type BranchEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
 
+/** Whether a tool result is this tool's: called directly, or through omp's `xd://ask` device (a `write`). */
+function isAskResult(toolName: string, result: unknown): boolean {
+	if (toolName === "ask") return true;
+	const dispatch = writeDeviceDispatch(toolName, result);
+	return dispatch?.tool === "ask" && dispatch.mode === "execute";
+}
+
 /** Whether the last `ask` result in the branch is a readability rejection. */
 export function lastAskRejected(branch: readonly BranchEntry[]): boolean {
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];
-		if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") continue;
+		if (entry?.type !== "message" || entry.message.role !== "toolResult" || !isAskResult(entry.message.toolName, entry.message)) continue;
 		return entry.message.isError && entry.message.content.some((part) => part.type === "text" && part.text.includes(REJECTION_MARK));
 	}
 	return false;

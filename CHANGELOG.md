@@ -28,6 +28,7 @@
 
 - Showed `(no answer)` instead of `Cancelled` on answer cards for questions left blank
 - Skipped the session judge for non-local agent sessions
+- Let the `ask` after a readability rejection through unjudged when the rejected call came through omp's `xd://ask` device, which omp records as a `write`; before, the retry was judged and rejected again
 
 ## [0.1.15] - 2026-11-19
 

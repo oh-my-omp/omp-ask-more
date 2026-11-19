@@ -224,6 +224,21 @@ describe("the ask after a rejection", () => {
 		expect(await run([await rejection()], failing)).toEqual({ kind: "pass" });
 	});
 
+	it("goes through when the rejected ask was called through omp's xd://ask device", async () => {
+		const direct = await rejection();
+		if (direct.type !== "message" || direct.message.role !== "toolResult") throw new Error("expected a tool result");
+		// omp records a device call as the `write` that dispatched it, with the device's own result inside.
+		const viaDevice: BranchEntry = {
+			...direct,
+			message: {
+				...direct.message,
+				toolName: "write",
+				details: { xdev: { tool: "ask", mode: "execute", tier: "read", inner: { answers: [] } } },
+			},
+		};
+		expect(await run([viaDevice], failing)).toEqual({ kind: "pass" });
+	});
+
 	it("is judged when the session has no ask yet, or the last one was answered or rejected for another reason", async () => {
 		expect((await run([], unreadable)).kind).toBe("reject");
 		expect((await run([await rejection(), askResult("User answers:\nretry: 指数退避", false)], unreadable)).kind).toBe("reject");
