@@ -2,7 +2,16 @@ import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { defaultFormData, fieldContexts, fieldQuestions, formAnswers } from "@oh-my-pi/pi-tui/html-form/data";
 import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
-import { type AskParams, type AskParamsWire, askFormHtml, demoSchema, evidenceSchema, parametersSchema, parseParams, validate } from "../src/schema.ts";
+import {
+	type AskParams,
+	type AskParamsWire,
+	askFormHtml,
+	demoSchema,
+	evidenceSchema,
+	parametersSchema,
+	parseParams,
+	validate,
+} from "../src/schema.ts";
 
 /** A wire call: one question, two options, nothing extended. */
 function wire(overrides: Partial<AskParamsWire> = {}): AskParamsWire {
@@ -41,8 +50,14 @@ describe("parseParams", () => {
 	});
 
 	it("maps a frames demo in the brief position onto the question's brief", () => {
-		const params = parsed({ demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 }] });
-		expect(params.questions[0]!.brief.demo).toEqual({ kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 });
+		const params = parsed({
+			demos: [{ question: "retry", kind: "frames", frames: [{ body: "a" }, { body: "b", caption: "second" }], interval_ms: 800 }],
+		});
+		expect(params.questions[0]!.brief.demo).toEqual({
+			kind: "frames",
+			frames: [{ body: "a" }, { body: "b", caption: "second" }],
+			interval_ms: 800,
+		});
 	});
 
 	it("maps a file demo in the brief position onto the question's brief", () => {
@@ -125,12 +140,41 @@ describe("parseParams", () => {
 			}),
 		);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(['demos[1].option: option "指数退避" of question "retry" already has a demo; one demo per option']);
+		if (!checked.ok)
+			expect(checked.problems).toEqual(['demos[1].option: option "指数退避" of question "retry" already has a demo; one demo per option']);
 	});
 
 	it("rejects a label the form would not return unchanged", () => {
-		expect(parseParams(wire({ questions: [{ ...wire().questions[0]!, options: [{ label: "指数\n退避", tradeoff: "t" }, { label: "固定 3 次", tradeoff: "t" }] }] }))).toMatchObject({ ok: false });
-		expect(parseParams(wire({ questions: [{ ...wire().questions[0]!, options: [{ label: "指数  退避", tradeoff: "t" }, { label: "固定 3 次", tradeoff: "t" }] }] }))).toMatchObject({ ok: false });
+		expect(
+			parseParams(
+				wire({
+					questions: [
+						{
+							...wire().questions[0]!,
+							options: [
+								{ label: "指数\n退避", tradeoff: "t" },
+								{ label: "固定 3 次", tradeoff: "t" },
+							],
+						},
+					],
+				}),
+			),
+		).toMatchObject({ ok: false });
+		expect(
+			parseParams(
+				wire({
+					questions: [
+						{
+							...wire().questions[0]!,
+							options: [
+								{ label: "指数  退避", tradeoff: "t" },
+								{ label: "固定 3 次", tradeoff: "t" },
+							],
+						},
+					],
+				}),
+			),
+		).toMatchObject({ ok: false });
 	});
 });
 
@@ -147,7 +191,8 @@ describe("validate", () => {
 		params.questions.push(second);
 		const checked = validate(params);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
+		if (!checked.ok)
+			expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
 	});
 
 	it("rejects two questions with the same id", () => {
@@ -266,7 +311,9 @@ describe("strict tool calling", () => {
 	it("keeps the parameters representable in strict mode", () => {
 		// A shape omp cannot express in strict mode silently falls back to non-strict, and the
 		// provider then makes the model fill every optional field (the openai-codex failure).
-		const wireSchema = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<typeof toolWireSchema>[0]);
+		const wireSchema = toolWireSchema({ name: "ask", description: "", parameters: parametersSchema } as Parameters<
+			typeof toolWireSchema
+		>[0]);
 		expect(tryEnforceStrictSchema(wireSchema as Record<string, unknown>).strict).toBe(true);
 	});
 });
@@ -285,7 +332,7 @@ describe("askFormHtml", () => {
 		expect(context).toContain("重试上限");
 		expect(context).toContain("指数退避: 安全，但要迁移");
 		if (field.kind !== "choice") throw new Error("expected a choice field");
-		expect(field.options.map(option => [option.value, option.checked])).toEqual([
+		expect(field.options.map((option) => [option.value, option.checked])).toEqual([
 			["指数退避", false],
 			["固定 3 次", true],
 		]);

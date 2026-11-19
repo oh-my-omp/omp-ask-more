@@ -10,7 +10,10 @@ import type { FormAnswer } from "@oh-my-pi/pi-tui/html-form/data";
 import type { AskQuestion } from "./schema.ts";
 
 /** What the user gave one question. A cursor resting on an option is not an answer. */
-export type Answer = { readonly kind: "unanswered" } | { readonly kind: "option"; readonly index: number } | { readonly kind: "custom"; readonly text: string };
+export type Answer =
+	| { readonly kind: "unanswered" }
+	| { readonly kind: "option"; readonly index: number }
+	| { readonly kind: "custom"; readonly text: string };
 
 export const UNANSWERED: Answer = { kind: "unanswered" };
 
@@ -67,7 +70,7 @@ export function cancelledResult(questions: readonly AskQuestion[]): AgentToolRes
 /** A refused ask: the model gets every problem at once and calls again. */
 export function rejectedResult(problems: readonly string[]): AgentToolResult<AskToolDetails> {
 	return {
-		content: [{ type: "text", text: `ask rejected:\n${problems.map(problem => `- ${problem}`).join("\n")}` }],
+		content: [{ type: "text", text: `ask rejected:\n${problems.map((problem) => `- ${problem}`).join("\n")}` }],
 		details: { answers: [] },
 		isError: true,
 	};

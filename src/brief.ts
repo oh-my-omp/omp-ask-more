@@ -7,14 +7,21 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { tr } from "./i18n.ts";
+import { tr } from "../omomp-shared/i18n.ts";
 import type { EvidenceRef, FileEvidence, TextEvidence } from "./schema.ts";
 
 /** Lines drawn when a file reference names no window. */
 const HEAD_LINES = 40;
 
 export type ResolvedEvidence =
-	| { readonly kind: "file"; readonly path: string; readonly start: number; readonly end: number; readonly lines: readonly string[]; readonly note?: string }
+	| {
+			readonly kind: "file";
+			readonly path: string;
+			readonly start: number;
+			readonly end: number;
+			readonly lines: readonly string[];
+			readonly note?: string;
+	  }
 	| { readonly kind: "directory"; readonly path: string; readonly note?: string }
 	| { readonly kind: "text"; readonly source: string; readonly lang?: string; readonly lines: readonly string[]; readonly note?: string }
 	| { readonly kind: "unreadable"; readonly path: string; readonly error: string; readonly note?: string };
@@ -77,7 +84,10 @@ async function readFileRef(ref: FileEvidence, cwd: string): Promise<ResolvedEvid
 }
 
 function quotedText(ref: TextEvidence): ResolvedEvidence {
-	const lines = ref.text.replace(/\r?\n$/, "").split(/\r?\n/).map(displayLine);
+	const lines = ref.text
+		.replace(/\r?\n$/, "")
+		.split(/\r?\n/)
+		.map(displayLine);
 	return { kind: "text", source: ref.source.trim(), ...(ref.lang ? { lang: ref.lang } : {}), lines, ...noteOf(ref) };
 }
 
@@ -92,5 +102,5 @@ function resolveRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence> {
 
 export async function resolveEvidence(refs: readonly EvidenceRef[] | undefined, cwd: string): Promise<readonly ResolvedEvidence[]> {
 	if (refs === undefined) return [];
-	return Promise.all(refs.map(ref => resolveRef(ref, cwd)));
+	return Promise.all(refs.map((ref) => resolveRef(ref, cwd)));
 }

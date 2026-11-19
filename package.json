@@ -1,6 +1,6 @@
 {
 	"name": "omp-ask-more",
-	"version": "0.1.14",
+	"version": "0.1.15",
 	"private": true,
 	"type": "module",
 	"description": "One ask for every user decision: native ask parameters extended with a brief, evidence and per-option tradeoffs, answered on a fullscreen page or Tern sheet",
@@ -8,23 +8,66 @@
 		"type": "git",
 		"url": "git+https://github.com/oh-my-omp/omp-ask-more.git"
 	},
-	"files": ["index.ts", "src", "tern", "CHANGELOG.md"],
+	"files": [
+		"index.ts",
+		"src",
+		"omomp-shared",
+		"tern",
+		"CHANGELOG.md"
+	],
 	"omomp": {
 		"changelog": "CHANGELOG.md"
 	},
 	"omp": {
-		"extensions": ["./index.ts"],
+		"extensions": [
+			"./index.ts"
+		],
 		"settings": {
-			"timeout": { "type": "number", "default": 1800, "min": 0, "max": 2147483, "step": 1, "description": "Whole idle seconds before the first step; 0 disables timing" },
-			"returnTimeout": { "type": "number", "default": 1200, "min": 0, "max": 2147483, "step": 1, "description": "Whole seconds after notification before the model decides" },
-			"onExpiry": { "type": "enum", "values": ["decide", "wait"], "default": "decide", "description": "Decide unanswered questions or keep waiting after the countdown" },
-			"notify.terminal": { "type": "boolean", "default": true, "description": "Send a terminal notification when idle time expires" },
-			"notify.command": { "type": "string", "env": "OMP_ASK_MORE_NOTIFY_COMMAND", "secret": true, "description": "Trusted shell notification command; project-sourced commands are ignored" },
-			"readability.judge": { "type": "boolean", "default": true, "description": "When a judge model is available, reject asks it finds hard to understand so the agent rewrites them" }
+			"timeout": {
+				"type": "number",
+				"default": 1800,
+				"min": 0,
+				"max": 2147483,
+				"step": 1,
+				"description": "Whole idle seconds before the first step; 0 disables timing"
+			},
+			"returnTimeout": {
+				"type": "number",
+				"default": 1200,
+				"min": 0,
+				"max": 2147483,
+				"step": 1,
+				"description": "Whole seconds after notification before the model decides"
+			},
+			"onExpiry": {
+				"type": "enum",
+				"values": [
+					"decide",
+					"wait"
+				],
+				"default": "decide",
+				"description": "Decide unanswered questions or keep waiting after the countdown"
+			},
+			"notify.terminal": {
+				"type": "boolean",
+				"default": true,
+				"description": "Send a terminal notification when idle time expires"
+			},
+			"notify.command": {
+				"type": "string",
+				"env": "OMP_ASK_MORE_NOTIFY_COMMAND",
+				"secret": true,
+				"description": "Trusted shell notification command; project-sourced commands are ignored"
+			},
+			"readability.judge": {
+				"type": "boolean",
+				"default": true,
+				"description": "When a judge model is available, reject asks it finds hard to understand so the agent rewrites them"
+			}
 		}
 	},
 	"scripts": {
-		"check": "tsc --noEmit -p tsconfig.json",
+		"check": "biome check . && tsc --noEmit -p tsconfig.json",
 		"test": "bun test",
 		"eval:readability": "bun eval/readability.ts"
 	},
@@ -35,6 +78,7 @@
 		"@oh-my-pi/pi-tui": "*"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "latest",
 		"@oh-my-pi/pi-agent-core": "latest",
 		"@oh-my-pi/pi-ai": "latest",
 		"@oh-my-pi/pi-coding-agent": "latest",

@@ -9,12 +9,13 @@
 // Measured per cycle after a full GC: the JS heap (bun:jsc `heapSize`) and mimalloc's committed bytes.
 // The metric is the growth over the cycles; the kept phase's retention per component is reported. The
 // digest covers every drawn page and the first cycle's node tree, so the page must stay byte-identical.
-import { join } from "node:path";
+
 import { heapSize } from "bun:jsc";
-import { initThemeSync, type DescribeContext, type NativeNode } from "@oh-my-pi/pi-tui";
-import type { AskMoreComponent as AskMore } from "../../src/component.ts";
-import type * as ComponentModule from "../../src/component.ts";
+import { join } from "node:path";
+import { type DescribeContext, initThemeSync, type NativeNode } from "@oh-my-pi/pi-tui";
 import type { ResolvedEvidence } from "../../src/brief.ts";
+import type * as ComponentModule from "../../src/component.ts";
+import type { AskMoreComponent as AskMore } from "../../src/component.ts";
 import type { LoadedDemo, QuestionDemos } from "../../src/demo.ts";
 import { questionSchema } from "../../src/schema.ts";
 import { compare, mallocNow, measured, parseArgs, report, sha256, VirtualClock } from "./harness.ts";
@@ -97,7 +98,15 @@ if (args.worker) {
 	 * answered with Enter, disposed, and either dropped with this frame or kept by `keep`.
 	 */
 	const runCycle = (cycle: number, keep: AskMore[] | undefined): void => {
-		const component = new AskMoreComponent({ tui: clock, questions: [question], evidence: [evidenceFor(cycle)], demos, finish: () => {}, timeout: { kind: "off" }, notify: () => {} });
+		const component = new AskMoreComponent({
+			tui: clock,
+			questions: [question],
+			evidence: [evidenceFor(cycle)],
+			demos,
+			finish: () => {},
+			timeout: { kind: "off" },
+			notify: () => {},
+		});
 		for (const line of component.render(WIDTH)) hasher.update(`${line}\n`);
 		const tree = component.describe(CX);
 		if (described === undefined) described = tree;

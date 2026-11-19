@@ -11,9 +11,9 @@
 // collection — while the character count is exact. The digest covers every drawn page line and the
 // node tree at the end, so the body must stay byte-identical.
 import { join } from "node:path";
-import { initThemeSync, Markdown, type DescribeContext } from "@oh-my-pi/pi-tui";
-import type * as ComponentModule from "../../src/component.ts";
+import { type DescribeContext, initThemeSync, Markdown } from "@oh-my-pi/pi-tui";
 import type { ResolvedEvidence } from "../../src/brief.ts";
+import type * as ComponentModule from "../../src/component.ts";
 import { questionSchema } from "../../src/schema.ts";
 import { compare, measured, parseArgs, report, sha256, VirtualClock } from "./harness.ts";
 
@@ -38,7 +38,8 @@ const CX: DescribeContext = { cols: 120, reduceMotion: false, dark: true, suppor
 function section(name: string): string {
 	return Array.from(
 		{ length: PARAGRAPHS },
-		(_, index) => `The ${name} paragraph ${index} explains what the page holds and what changes when the same text is rendered again at the same width.`,
+		(_, index) =>
+			`The ${name} paragraph ${index} explains what the page holds and what changes when the same text is rendered again at the same width.`,
 	).join("\n\n");
 }
 
@@ -48,7 +49,8 @@ if (args.worker) {
 	const question = questionSchema.parse({
 		id: "brief",
 		header: "Brief",
-		question: "Which rendering should the dialog keep playing while the cursor rests on Drop?\n\nA rebuild per key press re-renders the question, the brief, the diagram and the risks, none of which can have changed.",
+		question:
+			"Which rendering should the dialog keep playing while the cursor rests on Drop?\n\nA rebuild per key press re-renders the question, the brief, the diagram and the risks, none of which can have changed.",
 		brief: {
 			where: section("where"),
 			what: section("what"),
@@ -57,19 +59,48 @@ if (args.worker) {
 			risks: Array.from({ length: 50 }, (_, index) => `risk ${index}: the rebuilt page keeps this line alive until the next press`),
 		},
 		options: [
-			{ label: "Keep", description: "nothing changes", tradeoff: "the dialog keeps its current cost", holds_when: "the cost is already bounded", cost: "no work" },
-			{ label: "Drop", tradeoff: "the text is rendered once per page", holds_when: "the page outlives the press", cost: "one rendering per page" },
+			{
+				label: "Keep",
+				description: "nothing changes",
+				tradeoff: "the dialog keeps its current cost",
+				holds_when: "the cost is already bounded",
+				cost: "no work",
+			},
+			{
+				label: "Drop",
+				tradeoff: "the text is rendered once per page",
+				holds_when: "the page outlives the press",
+				cost: "one rendering per page",
+			},
 			{ label: "Shrink", tradeoff: "the evidence shows fewer rows", holds_when: "the window is short", cost: "less visible context" },
 		],
 	});
 	const evidence: readonly ResolvedEvidence[] = [
-		{ kind: "file", path: "src/component.ts", start: 1, end: 3000, lines: Array.from({ length: 3000 }, (_, line) => `const line${line} = "${"x".repeat(40)}";`) },
-		{ kind: "text", source: "bun test", lines: Array.from({ length: 2000 }, (_, line) => `ok ${line} - case ${line} passes with ${"y".repeat(30)}`) },
+		{
+			kind: "file",
+			path: "src/component.ts",
+			start: 1,
+			end: 3000,
+			lines: Array.from({ length: 3000 }, (_, line) => `const line${line} = "${"x".repeat(40)}";`),
+		},
+		{
+			kind: "text",
+			source: "bun test",
+			lines: Array.from({ length: 2000 }, (_, line) => `ok ${line} - case ${line} passes with ${"y".repeat(30)}`),
+		},
 	];
 
 	initThemeSync();
 	const clock = new VirtualClock(ROWS);
-	const component = new AskMoreComponent({ tui: clock, questions: [question], evidence: [evidence], demos: [], finish: () => {}, timeout: { kind: "off" }, notify: () => {} });
+	const component = new AskMoreComponent({
+		tui: clock,
+		questions: [question],
+		evidence: [evidence],
+		demos: [],
+		finish: () => {},
+		timeout: { kind: "off" },
+		notify: () => {},
+	});
 	const hasher = new Bun.CryptoHasher("sha256");
 	// One page before the window: neither variant is charged for the first build.
 	for (const line of component.render(WIDTH)) hasher.update(`${line}\n`);

@@ -24,7 +24,7 @@ function withRule(text: string): string {
 /** The content with the rule appended to its text: a string, or the first text block before the attached images. */
 function contentWithRule(content: CustomMessage["content"]): CustomMessage["content"] {
 	if (typeof content === "string") return withRule(content);
-	const at = content.findIndex(block => block.type === "text");
+	const at = content.findIndex((block) => block.type === "text");
 	const block = content[at];
 	if (block?.type !== "text") return content;
 	const text = withRule(block.text);

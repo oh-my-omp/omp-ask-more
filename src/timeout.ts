@@ -1,6 +1,6 @@
 // What an ask does when nobody answers it: the policy parsed from the settings snapshot, and the
 // line the sheet shows about it. Pure; the component owns the clock, `notify.ts` the side effects.
-import { tr } from "./i18n.ts";
+import { tr } from "../omomp-shared/i18n.ts";
 
 export const EXPIRY_VALUES = ["decide", "wait"] as const;
 /** When the last countdown ends: hand the unanswered questions to the model, or keep waiting. */
@@ -108,7 +108,10 @@ export function countdownStatus(policy: TimeoutPolicy, phase: Phase): string | u
 		case "off":
 			return undefined;
 		case "decide":
-			return tr(`No input for ${duration(policy.idleMs)}: the model decides the unanswered questions`, `无操作 ${duration(policy.idleMs)} 后，未答的问题交给模型决定`);
+			return tr(
+				`No input for ${duration(policy.idleMs)}: the model decides the unanswered questions`,
+				`无操作 ${duration(policy.idleMs)} 后，未答的问题交给模型决定`,
+			);
 		case "notify":
 			return phase.kind === "idle" ? idleNotice(policy.idleMs, policy.then) : notifiedNotice(phase.at, phase.due);
 	}
@@ -129,5 +132,8 @@ function idleNotice(idleMs: number, then: AfterNotice): string {
 function notifiedNotice(at: Date, due: Date | undefined): string {
 	return due === undefined
 		? tr(`Notified at ${clock(at)}; waiting for you`, `${clock(at)} 已通知，等你回来`)
-		: tr(`Notified at ${clock(at)}; the model decides at ${clock(due)} unless you act`, `${clock(at)} 已通知；${clock(due)} 前无操作则交给模型决定`);
+		: tr(
+				`Notified at ${clock(at)}; the model decides at ${clock(due)} unless you act`,
+				`${clock(at)} 已通知；${clock(due)} 前无操作则交给模型决定`,
+			);
 }

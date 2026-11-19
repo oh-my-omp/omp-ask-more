@@ -1,9 +1,9 @@
 // Native plugin settings are read once when each ask opens, never by its timers.
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getPluginSettings } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/loader";
+import { tr } from "../omomp-shared/i18n.ts";
 import manifest from "../package.json";
-import { tr } from "./i18n.ts";
-import { type CommandSetting, type TimeoutSettings } from "./timeout.ts";
+import type { CommandSetting, TimeoutSettings } from "./timeout.ts";
 
 const PLUGIN = "omp-ask-more";
 const defaults = manifest.omp.settings;
@@ -49,7 +49,6 @@ function wholeSeconds(key: "timeout" | "returnTimeout", raw: unknown): number {
 
 type CommandSource = "project" | "trusted";
 
-
 function commandSetting(raw: unknown, source: CommandSource): CommandSetting {
 	if (raw === undefined) return { kind: "unset" };
 	if (typeof raw !== "string") throw new SettingsError({ kind: "command" });
@@ -74,9 +73,10 @@ export async function readTimeoutSettings(ctx: Pick<ExtensionContext, "cwd">): P
 	if (onExpiry !== "decide" && onExpiry !== "wait") throw new SettingsError({ kind: "expiry" });
 	const terminal: unknown = settings["notify.terminal"] === undefined ? defaults["notify.terminal"].default : settings["notify.terminal"];
 	if (typeof terminal !== "boolean") throw new SettingsError({ kind: "terminal" });
-	const command = env !== undefined
-		? commandSetting(env, "trusted")
-		: commandSetting(settings["notify.command"], settings["notify.command"] === baseline?.["notify.command"] ? "trusted" : "project");
+	const command =
+		env !== undefined
+			? commandSetting(env, "trusted")
+			: commandSetting(settings["notify.command"], settings["notify.command"] === baseline?.["notify.command"] ? "trusted" : "project");
 	return { timeoutSeconds, returnSeconds, onExpiry, terminal, command };
 }
 

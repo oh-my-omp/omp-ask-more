@@ -52,7 +52,7 @@ function report(scored: readonly Scored[]): string {
 	let readable = 0;
 	let readableRejected = 0;
 	for (const { call, findings } of scored) {
-		const failing = new Set(unreadableQuestions(call.questions, findings).map(item => item.id));
+		const failing = new Set(unreadableQuestions(call.questions, findings).map((item) => item.id));
 		questions += call.questions.length;
 		flagged += failing.size;
 		for (const question of call.questions) {
@@ -70,7 +70,11 @@ function report(scored: readonly Scored[]): string {
 }
 
 async function main(): Promise<void> {
-	const { values, positionals } = parseArgs({ args: process.argv.slice(2), options: { out: { type: "string" }, "session-model": { type: "string" } }, allowPositionals: true });
+	const { values, positionals } = parseArgs({
+		args: process.argv.slice(2),
+		options: { out: { type: "string" }, "session-model": { type: "string" } },
+		allowPositionals: true,
+	});
 	const corpus = positionals[0] ?? new URL("./readability-labelled.json", import.meta.url).pathname;
 	const { calls } = corpusSchema.parse(await Bun.file(corpus).json());
 	const settings = await Settings.init({ cwd: process.cwd() });
@@ -85,7 +89,14 @@ async function main(): Promise<void> {
 		const slash = named?.indexOf("/") ?? -1;
 		const sessionModel = named === undefined ? undefined : registry.find(named.slice(0, slash), named.slice(slash + 1));
 		if (named !== undefined && sessionModel === undefined) throw new Error(`no model ${named}`);
-		const judge = resolveJudge({ settings, registry, sessionModel, sessionId: Bun.randomUUIDv7(), purpose: "ask-readability-eval", cache: sharedJudgmentCache() });
+		const judge = resolveJudge({
+			settings,
+			registry,
+			sessionModel,
+			sessionId: Bun.randomUUIDv7(),
+			purpose: "ask-readability-eval",
+			cache: sharedJudgmentCache(),
+		});
 		if (judge.primaryModel() === undefined) throw new Error("the judge role resolves no model");
 		let next = 0;
 		const worker = async () => {
@@ -101,9 +112,17 @@ async function main(): Promise<void> {
 					failed.push(`${call.id}: ${checked.problems.join("; ")}`);
 					continue;
 				}
-				const recorded: RecordedCall = { id: call.id, surface: call.surface, questions: checked.questions, ...(call.labels === undefined ? {} : { labels: call.labels }) };
+				const recorded: RecordedCall = {
+					id: call.id,
+					surface: call.surface,
+					questions: checked.questions,
+					...(call.labels === undefined ? {} : { labels: call.labels }),
+				};
 				try {
-					scored.push({ call: recorded, findings: await judgeReadability(judge, recorded.questions, recorded.surface, AbortSignal.timeout(120_000)) });
+					scored.push({
+						call: recorded,
+						findings: await judgeReadability(judge, recorded.questions, recorded.surface, AbortSignal.timeout(120_000)),
+					});
 				} catch (error) {
 					failed.push(`${call.id}: ${error instanceof Error ? error.message : String(error)}`);
 				}
@@ -116,7 +135,7 @@ async function main(): Promise<void> {
 	const out = values.out;
 	if (out !== undefined) {
 		const rows = scored.flatMap(({ call, findings }) =>
-			unreadableQuestions(call.questions, findings).map(item => ({ call: call.id, label: call.labels?.[item.id] ?? null, ...item })),
+			unreadableQuestions(call.questions, findings).map((item) => ({ call: call.id, label: call.labels?.[item.id] ?? null, ...item })),
 		);
 		await Bun.write(out, JSON.stringify(rows, null, 1));
 	}

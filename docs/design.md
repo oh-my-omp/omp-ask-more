@@ -205,7 +205,7 @@ src/settings.ts    native plugin settings and command provenance, validated and 
 src/readability.ts the readability check: per-question dialog per surface, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
 src/timeout.ts     the timeout policy parsed from that snapshot, and the countdown line
 src/notify.ts      timeout notifications: the terminal one and the notify command
-src/i18n.ts        UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English
+omomp-shared/i18n.ts UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English (copy of shared src/i18n.ts)
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/description.ts model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
 src/topics/        shipped routing, rounds and results markdown bodies

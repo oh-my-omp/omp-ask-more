@@ -22,6 +22,12 @@
 - Stopped `/tree` from reopening asks, with answer cards showing `(no answer)` instead of `Cancelled`
 - Skipped the session judge for non-local agent sessions
 
+## [0.1.15] - 2026-11-19
+
+### Changed
+
+- Updated the shared copy of `i18n.ts` to oh-my-omp/shared@33dbe00.
+
 ## [0.1.14] - 2026-11-15
 
 ### Changed

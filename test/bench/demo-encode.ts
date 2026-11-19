@@ -31,7 +31,12 @@ if (args.worker) {
 	const question = questionSchema.parse({
 		id: "playback",
 		question: "Which clip?",
-		brief: { where: "a clip plays below", what: "pick one", how: "the clip shows the result", demo: { kind: "file", path: "clip-a.mp4", caption: "the clip" } },
+		brief: {
+			where: "a clip plays below",
+			what: "pick one",
+			how: "the clip shows the result",
+			demo: { kind: "file", path: "clip-a.mp4", caption: "the clip" },
+		},
 		options: [
 			{ label: "Keep", tradeoff: "nothing changes" },
 			{ label: "Drop", tradeoff: "the clip goes" },
@@ -39,10 +44,19 @@ if (args.worker) {
 	});
 	const demos = await loadQuestionDemos([question], fixtures, "ansi", WIDTH - 8, undefined);
 	const playing = demos[0]?.question;
-	if (playing?.kind !== "raster" || playing.frames.length < 2) throw new Error(`the clip did not load as an animated raster: ${JSON.stringify(playing)}`);
+	if (playing?.kind !== "raster" || playing.frames.length < 2)
+		throw new Error(`the clip did not load as an animated raster: ${JSON.stringify(playing)}`);
 	initThemeSync();
 	const clock = new VirtualClock(ROWS);
-	const component = new AskMoreComponent({ tui: clock, questions: [question], evidence: [[]], demos, finish: () => {}, timeout: { kind: "off" }, notify: () => {} });
+	const component = new AskMoreComponent({
+		tui: clock,
+		questions: [question],
+		evidence: [[]],
+		demos,
+		finish: () => {},
+		timeout: { kind: "off" },
+		notify: () => {},
+	});
 	const hasher = new Bun.CryptoHasher("sha256");
 	for (const line of component.render(WIDTH)) hasher.update(`${line}\n`);
 
