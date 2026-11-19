@@ -2,7 +2,6 @@
 	"calls": [
 		{
 			"id": "toolu_01LZPfFhbmzUArnqhix1FSTb",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "env_blocker",
@@ -182,7 +181,6 @@
 		},
 		{
 			"id": "toolu_01Nt38Yc3ugt5w6rL9icNL5L",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "moat-app1-boundary",
@@ -324,7 +322,6 @@
 		},
 		{
 			"id": "toolu_0154AUNTgE5hZAYU3wwMpm3z",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "hapi-hub",
@@ -482,7 +479,6 @@
 		},
 		{
 			"id": "toolu_01NDTmJ5hyZzerQbKYAbnyP9",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "formal",
@@ -545,7 +541,6 @@
 		},
 		{
 			"id": "toolu_017Qo9TbMDFWobKESVFkQc6S",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "scope",
@@ -639,7 +634,6 @@
 		},
 		{
 			"id": "toolu_01N5XHhF2eptuovt8nEmqoJX",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "judge_scope",
@@ -696,7 +690,6 @@
 		},
 		{
 			"id": "toolu_01SZo6u5Kzd1YpsBGpDCxHCs",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "original",
@@ -774,7 +767,6 @@
 		},
 		{
 			"id": "toolu_01WsTbxVhrHZj8MpykDhSyPC",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "push",
@@ -891,7 +883,6 @@
 		},
 		{
 			"id": "toolu_01PVZ85TNurfPfyodd6vU1w1",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "harness",
@@ -997,7 +988,6 @@
 		},
 		{
 			"id": "toolu_01CwAabzTfwQ7XFZFjn9hvge",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "delivery",
@@ -1117,7 +1107,6 @@
 		},
 		{
 			"id": "toolu_01HU3YDtQnzDoP6YV5UdAejo",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "trigger",
@@ -1197,7 +1186,6 @@
 		},
 		{
 			"id": "toolu_019f7qzmXUbjYcCeJErfcz1h",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "naming",
@@ -1250,7 +1238,6 @@
 		},
 		{
 			"id": "toolu_01E1T98AHnc71YAjFkBMVRYz",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "pepgent_repo",
@@ -1364,7 +1351,6 @@
 		},
 		{
 			"id": "toolu_016PsR7DwHLmGwMxRRGCYNZ2",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "semantics",
@@ -1398,7 +1384,6 @@
 		},
 		{
 			"id": "pr265-narrow-scope",
-			"surface": "sheet",
 			"questions": [
 				{
 					"id": "narrow_scope",

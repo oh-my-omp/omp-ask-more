@@ -1,13 +1,13 @@
 /**
- * ask-more: registers `ask` under the native name, with the questions extended by a `brief` and
- * per-option tradeoffs. An interactive TUI session answers in this plugin's component (an ANSI
- * dialog, or a modal sheet in Tern); any other session delegates the batch to the native
- * built-in as one HTML form (src/schema.ts#askFormHtml). Results take the host's `AskToolDetails`
- * shape (`details.answers[]`), so the transcript card draws every question and its answer; the
- * persisted call keeps the model's own `questions[]` parameters, which the host's `/tree`
- * re-answer cannot reopen — it lands on the result as an ordinary leaf. While `ask` is active,
- * every user-invoked skill reaches the model with the rule that its questions go through `ask`
- * (src/skill-prompt.ts).
+ * ask-more: registers `ask` under the native name, with the questions extended by a `brief`,
+ * per-option tradeoffs, evidence and image demos. A call is validated, screened for readability,
+ * its file evidence read, and the whole batch compiled into one HTML form (src/form.ts) that the
+ * host's own `ask` answers through `ctx.invokeTool`: the host draws it in every session with a
+ * UI, runs its timeout and notification, closes it when the user sends a message instead, and
+ * returns its `AskToolDetails`. This plugin rewrites only the text the model reads (src/result.ts).
+ * The persisted call keeps the model's own `questions[]`; the host's `/tree` re-answer rebuilds a
+ * plain form from them. While `ask` is active, every user-invoked skill reaches the model with the
+ * rule that its questions go through `ask` (src/skill-prompt.ts).
  */
 import type { AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import {
@@ -16,42 +16,20 @@ import {
 	askToolRenderer,
 	type ExtensionAPI,
 	type ExtensionContext,
-	type ExtensionUIContext,
-	type OverlayOptions,
 	type ToolDefinition,
 } from "@oh-my-pi/pi-coding-agent";
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session-handle";
-import { isNativeRendering } from "@oh-my-pi/pi-tui";
+import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
-import { AskMoreComponent, type Submission } from "./src/component.ts";
-import { loadQuestionDemos } from "./src/demo.ts";
 import { DESCRIPTION, docTopics } from "./src/description.ts";
-import { sheetTitle } from "./src/nodes.ts";
-import { sendNotice } from "./src/notify.ts";
-import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate, type Surface } from "./src/readability.ts";
-import { answerResult, cancelledResult, rejectedResult, timedOutResult } from "./src/result.ts";
-import { type AskParamsWire, type AskQuestion, askFormHtml, parametersSchema, parseParams } from "./src/schema.ts";
-import { readReadabilityJudge, readTimeoutSettings, SettingsError, settingsErrorText } from "./src/settings.ts";
+import { compileForm } from "./src/form.ts";
+import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate } from "./src/readability.ts";
+import { answeredResult, rejectedResult } from "./src/result.ts";
+import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "./src/schema.ts";
+import { readReadabilityJudge, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
-import { policyProblemText, type TimeoutPolicy, timeoutPolicy } from "./src/timeout.ts";
-
-/** One ask at a time: a second call would open a second sheet over the first and orphan its promise. */
-let asking = false;
-
-/** The host's own `ask` when this session cannot host the richer surface: the batch as one form. */
-async function delegate(
-	invoke: NonNullable<ExtensionContext["invokeTool"]>,
-	questions: readonly AskQuestion[],
-	signal: AbortSignal | undefined,
-	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
-): Promise<AgentToolResult<AskToolDetails>> {
-	return invoke<AskToolDetails>(
-		{ html: askFormHtml(questions) },
-		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
-	);
-}
 
 /**
  * The calling session's `judge` role chain, billed to it. The session model goes in as the host's
@@ -79,62 +57,24 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 }
 
 /** The readability gate per the `readability.judge` setting; a bad setting warns and skips it. The ask after a rejected one goes through unjudged. */
-function screen(
-	ctx: ExtensionContext,
-	questions: readonly AskQuestion[],
-	surface: Surface,
-	signal: AbortSignal | undefined,
-): Promise<Gate> {
+function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], signal: AbortSignal | undefined): Promise<Gate> {
 	return gateUnlessRetry(ctx.sessionManager.getBranch(), async () => {
 		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
 		let enabled: boolean;
 		try {
 			enabled = await readReadabilityJudge(ctx);
 		} catch (error) {
-			warn(error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error));
+			warn(error instanceof SettingsError ? settingsErrorText() : error instanceof Error ? error.message : String(error));
 			return { kind: "pass" };
 		}
 		if (!enabled) return { kind: "pass" };
 		const judge = sessionJudge(ctx);
-		return judge === undefined ? { kind: "pass" } : readabilityGate(judge, questions, surface, signal, warn);
+		return judge === undefined ? { kind: "pass" } : readabilityGate(judge, questions, signal, warn);
 	});
-}
-
-/** The result that ends the call at the gate; undefined when the ask goes on. */
-function gateResult(ctx: ExtensionContext, questions: readonly AskQuestion[], gate: Gate): AgentToolResult<AskToolDetails> | undefined {
-	switch (gate.kind) {
-		case "pass":
-			return undefined;
-		case "reject":
-			return rejectedResult(gate.problems);
-		case "cancelled":
-			ctx.abort();
-			return cancelledResult(questions);
-	}
-}
-
-/**
- * A fullscreen overlay: the alternate screen in an ANSI terminal; in Tern the component's
- * `nativeOverlay` turns it into a sheet over the transcript.
- */
-const SHEET: OverlayOptions = { fullscreen: true, width: "100%", maxHeight: "100%", margin: 0, anchor: "top-left" };
-
-/** Notify through the policy's channels; a failing channel is a warning and never touches the ask. */
-function notifier(ctx: ExtensionContext, policy: TimeoutPolicy, questions: readonly AskQuestion[]): (due: Date | undefined) => void {
-	const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
-	return (due) => {
-		if (policy.kind !== "notify") return;
-		try {
-			sendNotice(policy.channels, { title: sheetTitle(questions), questions: questions.length, cwd: ctx.cwd, due }, warn);
-		} catch (error) {
-			warn(error instanceof Error ? error.message : String(error));
-		}
-	};
 }
 
 async function ask(
 	ctx: ExtensionContext,
-	ui: ExtensionUIContext,
 	params: AskParamsWire,
 	signal: AbortSignal | undefined,
 	onUpdate: AgentToolUpdateCallback<AskToolDetails> | undefined,
@@ -142,62 +82,26 @@ async function ask(
 	const checked = parseParams(params);
 	if (!checked.ok) return rejectedResult(checked.problems);
 	const questions = checked.questions;
+	// Present only where the host's own `ask` exists, which it builds only for sessions that can prompt the user.
+	const invoke = ctx.invokeTool;
+	if (invoke === undefined) return rejectedResult(["ask needs an interactive session, and this session cannot prompt the user"]);
 
-	if (!(ctx.hasUI && ctx.mode === "tui")) {
-		const invoke = ctx.invokeTool;
-		if (invoke === undefined) {
-			return rejectedResult(["ask needs an interactive session, and no native ask is available to delegate to here"]);
-		}
-		return gateResult(ctx, questions, await screen(ctx, questions, "native", signal)) ?? delegate(invoke, questions, signal, onUpdate);
+	const gate = await screen(ctx, questions, signal);
+	switch (gate.kind) {
+		case "pass":
+			break;
+		case "reject":
+			return rejectedResult(gate.problems);
+		case "cancelled":
+			throw new ToolAbortError("Ask input was cancelled");
 	}
-	if (asking) return rejectedResult(["another ask is open in this session; answer it before asking again"]);
 
-	// Held through the readability check too, so a parallel ask cannot slip in while the judge runs.
-	asking = true;
-	try {
-		const stopped = gateResult(ctx, questions, await screen(ctx, questions, "sheet", signal));
-		if (stopped !== undefined) return stopped;
-		// The settings as they are now; a config change applies from the next ask.
-		const { policy, problems } = timeoutPolicy(await readTimeoutSettings(ctx));
-		for (const problem of problems) ctx.ui.notify?.(`ask-more: ${policyProblemText(problem)}`, "warning");
-		const [evidence, demos] = await Promise.all([
-			Promise.all(questions.map((question) => resolveEvidence(question.brief.evidence, ctx.cwd))),
-			// Tern plays image bytes itself; the ANSI page draws decoded frames as wide as the page.
-			loadQuestionDemos(questions, ctx.cwd, isNativeRendering() ? "native" : "ansi", (process.stdout.columns ?? 80) - 8, signal),
-		]);
-		const notify = notifier(ctx, policy, questions);
-		const submission = await ui.custom<Submission | undefined>(
-			(tui, _theme, _keybindings, done) => new AskMoreComponent({ tui, questions, evidence, demos, finish: done, timeout: policy, notify }),
-			{ overlay: true, overlayOptions: SHEET, ...(signal === undefined ? {} : { signal }) },
-		);
-		if (submission === undefined) {
-			ctx.abort();
-			return cancelledResult(questions);
-		}
-		switch (submission.kind) {
-			case "cancel":
-				ctx.abort();
-				return cancelledResult(questions);
-			case "submit":
-				return answerResult(questions, submission.answers);
-			case "timeout":
-				return timedOutResult(questions, submission.answers);
-		}
-	} catch (error) {
-		if (signal?.aborted) {
-			ctx.abort();
-			return cancelledResult(questions);
-		}
-		// The rich surface failed before it could be answered: fall back rather than lose the ask.
-		const detail = error instanceof SettingsError ? settingsErrorText(error) : error instanceof Error ? error.message : String(error);
-		ctx.ui.notify?.(`ask-more: ${tr("Could not open the full-screen dialog", "无法打开全屏对话框")}: ${detail}`, "warning");
-		const invoke = ctx.invokeTool;
-		return invoke === undefined
-			? rejectedResult([`ask could not open its dialog: ${detail}`])
-			: delegate(invoke, questions, signal, onUpdate);
-	} finally {
-		asking = false;
-	}
+	const evidence = await Promise.all(questions.map((question) => resolveEvidence(question.brief.evidence, ctx.cwd)));
+	const result = await invoke<AskToolDetails>(
+		{ html: compileForm(questions, evidence, ctx.cwd) },
+		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
+	);
+	return answeredResult(questions, result);
 }
 
 export default function askMore(pi: ExtensionAPI): void {
@@ -208,19 +112,25 @@ export default function askMore(pi: ExtensionAPI): void {
 		docTopics,
 		parameters: parametersSchema,
 		approval: "read",
+		// One form at a time, as the host's own `ask` declares: the host has one ask slot over the
+		// composer, and a second form would take it from the first.
+		concurrency: "exclusive",
 		// Strict tool calling: the provider constrains the arguments to the schema, and omp turns every
 		// optional field into a nullable one whose null it drops before validation. The parameter
 		// shapes are written for it (src/schema.ts); OpenAI-family backends apply strict mode anyway
 		// when the flag is absent.
 		strict: true,
 		loadMode: "essential",
-		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, ctx.ui, params, signal, onUpdate),
+		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, params, signal, onUpdate),
 		// The host draws its ask card only for its built-in `ask`; this tool replaces it, so it hands
-		// its `{ answers }` details to the same renderer. The host renderer's `args` are the HTML form
-		// (it reads password fields from it); this tool's arguments are `questions[]`, so none are passed.
+		// the host's `{ answers }` details to the same renderer. The host renderer's `args` are the HTML
+		// form (it reads password fields from it); this tool's arguments are `questions[]`, so none are passed.
 		renderResult: (result, options, theme) => askToolRenderer.renderResult(result, options, theme),
 		describeResult: (result, options) => askToolRenderer.describeResult(result, options),
-	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & { docTopics(): Readonly<Record<string, string>> };
+	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & {
+		docTopics(): Readonly<Record<string, string>>;
+		concurrency: "exclusive";
+	};
 	pi.registerTool(tool);
 	// The skill message is rendered by a fixed omp template; the copy sent to the model is the one
 	// place left to carry the rule. Registering costs omp a clone of the history per model call.

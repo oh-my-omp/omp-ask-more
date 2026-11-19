@@ -77,7 +77,6 @@ describe("readability gate", () => {
 			await readabilityGate(
 				scripted(() => ({})),
 				questions,
-				"sheet",
 				undefined,
 				noWarn,
 			),
@@ -88,7 +87,6 @@ describe("readability gate", () => {
 		const gate = await readabilityGate(
 			scripted((subject) => (subject.includes("每次失败都立即重发") ? { actor: 0.1 } : {})),
 			questions,
-			"sheet",
 			undefined,
 			noWarn,
 		);
@@ -105,7 +103,6 @@ describe("readability gate", () => {
 		const gate = await readabilityGate(
 			scripted((subject) => (subject.includes("met 语义") ? { unshown: 0.9, jargon: 0.8 } : {})),
 			questions,
-			"sheet",
 			undefined,
 			noWarn,
 		);
@@ -130,7 +127,6 @@ describe("readability gate", () => {
 		const gate = await readabilityGate(
 			scripted((subject) => (subject === "K6" ? { known: 0.1, said: 0.2 } : subject === "#592" ? { known: 0.1, said: 0.9 } : {})),
 			coded,
-			"sheet",
 			undefined,
 			noWarn,
 		);
@@ -141,52 +137,38 @@ describe("readability gate", () => {
 		expect(gate.problems[0]).not.toContain("`SSH`");
 	});
 
-	it("judges each question alone: the full sheet, or the text its delegated form shows", async () => {
-		const sheet: { state: string; asked: string[] }[] = [];
+	it("judges each question alone, with its brief and tradeoffs", async () => {
+		const calls: { state: string; asked: string[] }[] = [];
 		await readabilityGate(
-			scripted(() => ({}), sheet),
+			scripted(() => ({}), calls),
 			questions,
-			"sheet",
 			undefined,
 			noWarn,
 		);
-		expect(sheet.some((call) => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
-		expect(sheet.some((call) => call.state.includes("met 后要电平还是边沿") && call.state.includes("每次失败都立即重发"))).toBe(false);
-		const native: { state: string; asked: string[] }[] = [];
-		const gate = await readabilityGate(
-			scripted(() => ({ actor: 0 }), native),
-			questions,
-			"native",
-			undefined,
-			noWarn,
-		);
-		const retry = native.filter((call) => call.state.includes("重试应该怎么做"));
-		expect(retry.length).toBeGreaterThan(0);
-		// The form shows the labels and their tradeoffs but never the brief.
-		expect(retry.some((call) => call.state.includes("不迁移，但重复写继续"))).toBe(true);
-		expect(retry.every((call) => !call.state.includes("每次失败都立即重发"))).toBe(true);
-		expect(gate.kind === "reject" && gate.problems.at(-1)).toContain("the brief is not shown");
+		expect(calls.some((call) => call.state.includes("每次失败都立即重发") && call.asked.includes("actor"))).toBe(true);
+		expect(calls.some((call) => call.state.includes("met 后要电平还是边沿") && call.state.includes("每次失败都立即重发"))).toBe(false);
+		expect(calls.some((call) => call.state.includes("重试应该怎么做") && call.state.includes("不迁移，但重复写继续"))).toBe(true);
 	});
 
 	it("asks without the check, with a warning, when the judge fails", async () => {
 		const warnings: string[] = [];
 		const failing: NoulJudge = { judge: async () => Promise.reject(new Error("every judge candidate failed")) };
-		expect(await readabilityGate(failing, questions, "sheet", undefined, (message) => warnings.push(message))).toEqual({ kind: "pass" });
+		expect(await readabilityGate(failing, questions, undefined, (message) => warnings.push(message))).toEqual({ kind: "pass" });
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("every judge candidate failed");
 	});
 
 	it("asks without the check when the judge misses its deadline", async () => {
 		const warnings: string[] = [];
-		expect(
-			await readabilityGate(hanging, questions, "sheet", new AbortController().signal, (message) => warnings.push(message), 20),
-		).toEqual({ kind: "pass" });
+		expect(await readabilityGate(hanging, questions, new AbortController().signal, (message) => warnings.push(message), 20)).toEqual({
+			kind: "pass",
+		});
 		expect(warnings).toHaveLength(1);
 	});
 
 	it("cancels the ask when the caller aborts while the judge runs", async () => {
 		const caller = new AbortController();
-		const gate = readabilityGate(hanging, questions, "sheet", caller.signal, noWarn, 60_000);
+		const gate = readabilityGate(hanging, questions, caller.signal, noWarn, 60_000);
 		caller.abort();
 		expect(await gate).toEqual({ kind: "cancelled" });
 	});
@@ -228,7 +210,7 @@ describe("the ask after a rejection", () => {
 	}
 
 	async function rejection(): Promise<BranchEntry> {
-		const gate = await readabilityGate(unreadable, questions, "sheet", undefined, noWarn);
+		const gate = await readabilityGate(unreadable, questions, undefined, noWarn);
 		if (gate.kind !== "reject") throw new Error("expected a rejection");
 		const result = rejectedResult(gate.problems);
 		return askResult(result.content.map((part) => (part.type === "text" ? part.text : "")).join(""), true);
@@ -236,7 +218,7 @@ describe("the ask after a rejection", () => {
 
 	const failing: NoulJudge = { judge: async () => Promise.reject(new Error("must not be asked")) };
 	const run = (branch: readonly BranchEntry[], judge: NoulJudge) =>
-		gateUnlessRetry(branch, () => readabilityGate(judge, questions, "sheet", undefined, noWarn));
+		gateUnlessRetry(branch, () => readabilityGate(judge, questions, undefined, noWarn));
 
 	it("goes through without asking the judge when the last ask in the session was rejected by the gate", async () => {
 		expect(await run([await rejection()], failing)).toEqual({ kind: "pass" });

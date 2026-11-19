@@ -22,9 +22,6 @@ export interface NoulJudge {
 	): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
 }
 
-/** Where the questions will be shown, which decides what text the reader actually gets. */
-export type Surface = "sheet" | "native";
-
 type JsonObject = { readonly [key: string]: JsonValue };
 
 /** `{ [key]: value }`, or nothing when the value is absent. */
@@ -32,50 +29,31 @@ function field(key: string, value: string | undefined): JsonObject {
 	return value === undefined ? {} : { [key]: value };
 }
 
-/** The dialog as the reader gets it: the whole authored sheet, or the native dialog's fields. */
-function dialog(question: AskQuestion, surface: Surface): JsonObject {
-	switch (surface) {
-		case "sheet":
-			return {
-				...field("title", question.header),
-				question: question.question,
-				situation: question.brief.where,
-				decision: question.brief.what,
-				consequences: question.brief.how,
-				options: question.options.map(
-					(option): JsonObject => ({ label: option.label, effect: option.tradeoff, ...field("note", option.description) }),
-				),
-			};
-		case "native":
-			return {
-				...field("title", question.header),
-				question: question.question,
-				options: question.options.map((option): JsonObject => ({ label: option.label, effect: option.tradeoff })),
-			};
-	}
+/** The question's section of the form, as the reader gets it. */
+function dialog(question: AskQuestion): JsonObject {
+	return {
+		...field("title", question.header),
+		question: question.question,
+		situation: question.brief.where,
+		decision: question.brief.what,
+		consequences: question.brief.how,
+		options: question.options.map(
+			(option): JsonObject => ({ label: option.label, effect: option.tradeoff, ...field("note", option.description) }),
+		),
+	};
 }
 
 /** The text the reader reads as sentences, and every text the reader sees, labels and titles included. */
-function shownText(question: AskQuestion, surface: Surface): { readonly prose: string[]; readonly all: string[] } {
+function shownText(question: AskQuestion): { readonly prose: string[]; readonly all: string[] } {
 	const defined = (...values: readonly (string | undefined)[]): string[] => values.filter((value): value is string => value !== undefined);
-	switch (surface) {
-		case "sheet": {
-			const prose = [
-				question.question,
-				question.brief.where,
-				question.brief.what,
-				question.brief.how,
-				...question.options.flatMap((option) => defined(option.tradeoff, option.description)),
-			];
-			return { prose, all: [...defined(question.header), ...prose, ...question.options.map((option) => option.label)] };
-		}
-		case "native": {
-			// The delegated form shows the header as the section title, one `label: tradeoff`
-			// line per option as context, and the question; the brief never reaches it.
-			const prose = [question.question, ...question.options.map((option) => option.tradeoff)];
-			return { prose, all: [...defined(question.header), ...prose, ...question.options.map((option) => option.label)] };
-		}
-	}
+	const prose = [
+		question.question,
+		question.brief.where,
+		question.brief.what,
+		question.brief.how,
+		...question.options.flatMap((option) => defined(option.tradeoff, option.description)),
+	];
+	return { prose, all: [...defined(question.header), ...prose, ...question.options.map((option) => option.label)] };
 }
 
 const URL = /https?:\/\/\S+/g;
@@ -184,11 +162,10 @@ async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) 
 	return results;
 }
 
-/** Every question's findings, in input order; each question is judged on its own, as its surface shows it. */
+/** Every question's findings, in input order; each question is judged on its own, as its section of the form shows it. */
 export async function judgeReadability(
 	judge: NoulJudge,
 	questions: readonly AskQuestion[],
-	surface: Surface,
 	signal: AbortSignal,
 ): Promise<readonly Finding[]> {
 	const stop = new AbortController();
@@ -196,10 +173,10 @@ export async function judgeReadability(
 	const sentenceJobs: { readonly at: number; readonly sentence: string }[] = [];
 	const termJobs: { readonly at: number; readonly term: string }[] = [];
 	const shown = questions.map((question, at) => {
-		const text = shownText(question, surface);
+		const text = shownText(question);
 		for (const sentence of sentencesOf(text.prose)) sentenceJobs.push({ at, sentence });
 		for (const term of candidateTerms(text.all)) termJobs.push({ at, term });
-		return dialog(question, surface);
+		return dialog(question);
 	});
 	try {
 		const [sentences, terms] = await Promise.all([
@@ -278,24 +255,15 @@ function quote(sentence: string): string {
 /** What every readability rejection says of a question; the session's record of a rejected ask is recognised by it. */
 const REJECTION_MARK = "is hard to understand for a reader who sees only this dialog";
 
-/** The rejection the model reads: every failing question with the sentences and terms that fail, and what this surface shows. Fixed text around the model's own words, never judge output. */
-export function readabilityProblems(failing: readonly Unreadable[], surface: Surface): string[] {
-	const problems = failing.map(({ id, sentences, terms }) => {
+/** The rejection the model reads: every failing question with the sentences and terms that fail. Fixed text around the model's own words, never judge output. */
+export function readabilityProblems(failing: readonly Unreadable[]): string[] {
+	return failing.map(({ id, sentences, terms }) => {
 		const lines = [
 			...sentences.map(({ sentence, faults }) => `${quote(sentence)}: ${faults.map((fault) => FAULT_TEXT[fault]).join("; ")}`),
 			...terms.map((term) => `\`${term}\`: neither common knowledge nor explained in the dialog`),
 		];
 		return `question "${id}" ${REJECTION_MARK} and has never seen your session or this project; rewrite every item below so each sentence says who does what, each abbreviation is spelled out, and each name, number or earlier decision is said in plain words:\n${lines.map((line) => `  - ${line}`).join("\n")}`;
 	});
-	switch (surface) {
-		case "sheet":
-			return problems;
-		case "native":
-			return [
-				...problems,
-				"this session shows only each question's text and header and each option's label and tradeoff; the brief is not shown, so put the context there",
-			];
-	}
 }
 
 /** How long the gate waits for the judge before asking without it. */
@@ -314,21 +282,15 @@ export type Gate =
 export async function readabilityGate(
 	judge: NoulJudge,
 	questions: readonly AskQuestion[],
-	surface: Surface,
 	signal: AbortSignal | undefined,
 	warn: (message: string) => void,
 	deadlineMs = JUDGE_DEADLINE_MS,
 ): Promise<Gate> {
 	const deadline = AbortSignal.timeout(deadlineMs);
 	try {
-		const findings = await judgeReadability(
-			judge,
-			questions,
-			surface,
-			signal === undefined ? deadline : AbortSignal.any([signal, deadline]),
-		);
+		const findings = await judgeReadability(judge, questions, signal === undefined ? deadline : AbortSignal.any([signal, deadline]));
 		const failing = unreadableQuestions(questions, findings);
-		return failing.length === 0 ? { kind: "pass" } : { kind: "reject", problems: readabilityProblems(failing, surface) };
+		return failing.length === 0 ? { kind: "pass" } : { kind: "reject", problems: readabilityProblems(failing) };
 	} catch (error) {
 		if (signal?.aborted) return { kind: "cancelled" };
 		const detail = deadline.aborted
