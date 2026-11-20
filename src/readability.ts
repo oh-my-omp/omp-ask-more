@@ -1,15 +1,10 @@
-import type { JsonValue, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
+import type { JsonValue, Judge, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { writeDeviceDispatch } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
-export interface NoulJudge {
-	judge(
-		request: JudgmentRequest<Record<string, NoulQuestion>>,
-		options: { signal: AbortSignal },
-	): Promise<{ readonly answers: Readonly<Record<string, { readonly noul: number }>> }>;
-}
+export type NoulJudge = Pick<Judge, "judge">;
 
 type JsonObject = { readonly [key: string]: JsonValue };
 

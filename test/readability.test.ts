@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { type JudgmentRequest, type JudgmentResult, type Questions, tokenUsage } from "@oh-my-pi/pi-ai";
 import { type BranchEntry, candidateTerms, gateUnlessRetry, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
 import { rejectedResult } from "../src/result.ts";
 import { type AskQuestion, askParamsSchema } from "../src/schema.ts";
@@ -34,28 +35,40 @@ interface Verdict {
 	readonly said?: number;
 }
 
+function judged<Q extends Questions>(request: JudgmentRequest<Q>, nouls: Record<string, number>): JudgmentResult<Q> {
+	const answers: Record<string, { type: "noul"; noul: number }> = {};
+	for (const id of Object.keys(request.questions)) answers[id] = { type: "noul", noul: nouls[id] ?? 0 };
+	return {
+		api: "test",
+		provider: "test",
+		model: "test",
+		answers: answers as JudgmentResult<Q>["answers"],
+		usage: tokenUsage(0, 0),
+	};
+}
+
 function scripted(verdict: (subject: string) => Verdict, seen: { state: string; asked: string[] }[] = []): NoulJudge {
 	return {
-		async judge(request): Promise<{ answers: Record<string, { noul: number }> }> {
+		async judge<Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
 			const text = JSON.stringify(request.state);
 			const asked = Object.keys(request.questions);
 			seen.push({ state: text, asked });
 			const state: unknown = JSON.parse(text);
 			if (typeof state === "object" && state !== null && "sentence" in state && typeof state.sentence === "string") {
 				const said = verdict(state.sentence);
-				return { answers: { actor: { noul: said.actor ?? 1 }, unshown: { noul: said.unshown ?? 0 }, jargon: { noul: said.jargon ?? 0 } } };
+				return judged(request, { actor: said.actor ?? 1, unshown: said.unshown ?? 0, jargon: said.jargon ?? 0 });
 			}
 			const term = /`([^`]+)`/.exec(request.questions.known?.instructions ?? "")?.[1] ?? "";
 			const said = verdict(term);
-			return { answers: { known: { noul: said.known ?? 1 }, said: { noul: said.said ?? 1 } } };
+			return judged(request, { known: said.known ?? 1, said: said.said ?? 1 });
 		},
 	};
 }
 
 const hanging: NoulJudge = {
-	judge: (_request, { signal }) => {
+	judge: (_request, options) => {
 		const { promise, reject } = Promise.withResolvers<never>();
-		signal.addEventListener("abort", () => reject(signal.reason));
+		options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
 		return promise;
 	},
 };
