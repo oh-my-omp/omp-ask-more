@@ -15,7 +15,7 @@ ask-more owns what the model writes and what the model reads back; the host owns
 | the parameter schema and the model-facing description and topics | drawing the form, keys, the Other answer, option notes |
 | validation of every question at once | its timeout (`ask.timeout`) and notification (`ask.notify`), off in plan mode |
 | the readability check | closing the form when the user sends a message instead, with the answers given so far |
-| reading file evidence from disk | field-by-field prompts where no form dialog exists |
+| reading file evidence and demo files from disk | field-by-field prompts where no form dialog exists |
 | compiling the batch into one form | the transcript card (`askToolRenderer`) and `/tree` re-answer |
 | the result text the model reads | `details: {answers, notes?, timedOut?}` |
 
@@ -28,7 +28,7 @@ flowchart LR
   i -- no --> e
   i -- yes --> r{readability check}
   r -- "hard to read" --> e
-  r -- "readable, off, no judge or retry" --> f[read evidence, compile form]
+  r -- "readable, off, no judge or retry" --> f[read evidence and demos, compile form]
   f --> h["ctx.invokeTool({html})"]
   h --> a[host AskToolDetails]
   a --> x[result text rewritten for the model]
@@ -40,17 +40,18 @@ The entry is the package-root `index.ts`, declared by `omp.extensions` in `packa
 
 ## The compiled form
 
-`src/form.ts#compileForm` turns the batch into one `<form>`, a `<fieldset>` per question in the order a reader needs it: the header as the `<legend>`, Where / What / How, the evidence, the diagram, the risks, the question's demo, the options with their tradeoffs, the option demos, then the question and its radios. The host takes the paragraph right before a radio group as the field's question (`packages/tui/src/html-form/data.ts#fieldQuestions`) and every block above it as the field's context (`#fieldContexts`), so a field-by-field prompt carries the whole brief too.
+`src/form.ts#compileForm` turns the batch into one `<form>`, a `<fieldset>` per question in the order a reader needs it: the header as the `<legend>`, Where / What / How, the evidence, the diagram, the risks, the question's demo, the option demos, then the question and its radios, each radio carrying its option's tradeoff. The host takes the paragraph right before a radio group as the field's question (`packages/tui/src/html-form/data.ts#fieldQuestions`) and every block above it as the field's context (`#fieldContexts`), so a field-by-field prompt carries the whole brief too.
 
 - **Nothing is preselected.** The host reports a choice by its label text (`formAnswers`) and its timeout submits the form's current values. A preselected recommendation would come back indistinguishable from the user's choice, so the recommendation is a marker on the option's line and a question still blank when the timeout fires is the model's to decide.
-- **Radio values are the option labels.** The host returns the label as the answer, so a label must survive the parser unchanged: one line, single spaces. A label starting with "Other" is refused, because the parser then withholds the host's own free-text answer for that group (`packages/tui/src/html-form/parse.ts`) and a typed answer, reported as `Other: <text>`, would be ambiguous.
+- **An option's tradeoff is on its own row.** Each radio's `<label>` holds the option label in bold with the recommended marker, then on lines of their own the tradeoff, the description, holds-when and cost, so they belong to that option rather than to a list apart from the choices. omp's classic terminal draws the lines under the option's row. Tern's own omp view joins a label's lines into one wrapped run, so each line is one `<em>` of plain text and the plugin's Tern package (`tern/`, a stylesheet) sets each `<em>` of an option label as a block under the option's name; an inline `<code>` in such a line would split it, so these lines keep backticks as written. When omp loads the extension, `src/tern-setup.ts` finds `tern` on `PATH`, links `tern/` into Tern's plugin directory unless that link is already there (an installed copy of the same id, which `tern plugin link` refuses, is removed first), and reloads the Tern plugin when Tern runs another version; the main session then reports a reload, or a failure that leaves the lines run together. Without `tern` on `PATH` it does nothing, since the ask itself needs no Tern.
+- **Radio values are the option labels.** The host reports a choice by the whole text of its radio label folded onto one line (`packages/tui/src/html-form/data.ts#formAnswers`), tradeoff lines included. `src/result.ts#labelMap` reads the compiled form back through the host's parser and maps that text to the radio's value, so the model gets its own label back. A label must survive the parser unchanged: one line, single spaces. A label starting with "Other" is refused, because the parser then withholds the host's own free-text answer for that group (`packages/tui/src/html-form/parse.ts`) and a typed answer, reported as `Other: <text>`, would be ambiguous.
 - **Evidence is read by ask-more.** File evidence is resolved against the session's working directory and read when the ask opens, so the reader sees the real lines with their numbers rather than code the model typed. Text evidence is a quote ask-more cannot check, and its head says so.
 - **The diagram is text art.** Mermaid is drawn by the host's own renderer (`packages/tui/src/theme/mermaid-cache.ts#resolveMermaidAscii`) into a `<pre>`, since a form has no diagram element; source the renderer cannot draw is shown as source.
-- **Demos are pictures.** A form shows `<img>`; GIF, APNG and WebP animate there. The image path goes in absolute, because the host resolves a relative one against a directory of its own choosing.
+- **Demos are frames or any file.** A frames demo is Markdown the model writes, shown frame by frame in order, each numbered, with Mermaid drawn as text art and other fenced blocks kept as written. A file demo is read when the ask opens (`src/demo.ts`): a file the host's form loads as a picture (`packages/tui/src/media.ts`: within its size cap and starting with image bytes or `<svg`) goes in as an `<img>` with its absolute path, because the host resolves a relative one against a directory of its own choosing; any other file, such as a video or a recording, goes in as its `file://` URL in plain text with its caption on the same line, for the terminal to open, since the form drops links; a file that cannot be read is shown with its path and the reason, and the ask still opens. Option demos sit above the radios because a `<label>` keeps only an image's alt text.
 
 ## Result
 
-The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces only its first text block with one line per question in input order, the contract `xd://ask/results` describes, then the option notes. `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
+The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces its first text block with one line per question in input order, the contract `xd://ask/results` describes, then the option notes, and gives the model's option label in place of the shown option text in both the text and `details` (`answers[].answer`, `notes[].option`). `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
 
 ## The rule in an invoked skill
 
@@ -66,9 +67,9 @@ The model's parameters are a batch of decisions in `questions[]`, a shape of the
 
 | Per question | Added |
 |---|---|
-| `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?`; not `multi`, since every question takes one answer | `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]`, each naming its question by `id` and, for an option's demo, its option by `label` |
+| `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?`; not `multi`, since every question takes one answer | `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]` (`kind` frames with `frames[{body, caption?}]`, or `kind` file with any `path`), each naming its question by `id` and, for an option's demo, its option by `label` |
 
-The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry is a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated union, attaching every evidence entry and demo to its target.
+The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry and a demo are each a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated union, attaching every evidence entry and demo to its target.
 
 The shapes are chosen for strict mode, where the model has to produce every field: omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `packages/ai/src/utils/validation.ts`). Each field a `kind` does not use stays optional, and required-with-kind is checked in `parseParams`, not the schema, because two optional fields under an "exactly one" rule once made strict models send both. Every optional string rejects `""`, so an empty placeholder is dropped the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
@@ -96,18 +97,22 @@ After validation and before the form, `index.ts#screen` reads `readability.judge
 ## Files
 
 ```
-index.ts            plugin entry: registers ask, validates, runs the readability check, compiles the form, invokes the host ask; adds the rule to invoked skills
+index.ts            plugin entry: registers ask, validates, runs the readability check, compiles the form, invokes the host ask; adds the rule to invoked skills; links the Tern plugin
 src/schema.ts       wire and internal zod shapes, entry map, per-question validation
 src/brief.ts        evidence: file windows read up to their last line against the working directory, quoted text as lines
+src/demo.ts         demos: a file classed as a picture or a file:// link against the working directory, frames as given
 src/form.ts         the batch compiled into one HTML form for the host ask
-src/result.ts       the host result with the model's answer text, and rejected results
+src/result.ts       the host result with the model's answer text and labels, and rejected results
 src/settings.ts     the readability.judge plugin setting
 src/readability.ts  the readability check: per-question dialog, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
+src/tern-setup.ts   links and reloads the package's Tern plugin when omp loads the extension
 src/description.ts  model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
 src/topics/         shipped routing, rounds and results markdown bodies
+tern/               Tern plugin: the stylesheet putting each line under an option's name on its own line in Tern's omp view
 omomp-shared/i18n.ts UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English (copy of shared src/i18n.ts)
+omomp-shared/tern-plugin.ts the tern plugin CLI (find, dir, list, link, reload) and manifest reader (copy of shared src/tern-plugin.ts)
 eval/               the readability judge over labelled recorded asks (bun run eval:readability)
-test/               validation, evidence windows and quoted text, the compiled form read back through the host's form parser,
+test/               validation, evidence windows and quoted text, demos and the compiled form read back through the host's form parser,
                     the result text, the skill rule, the readability check and its setting (bun test)
 ```

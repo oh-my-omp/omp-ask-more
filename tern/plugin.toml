@@ -1,0 +1,7 @@
+schema = 1
+id = "omp-ask-more"
+name = "Ask More"
+version = "0.2.0"
+description = "Puts each tradeoff line of an ask option on its own line in Tern's omp view."
+window = "window.luau"
+styles = ["ask-more.css"]

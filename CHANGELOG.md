@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Required `kind` on every `demos[]` entry: `file` with `path`, or `frames` with `frames[{body, caption?}]`
+
+### Added
+
+- Added a Tern plugin, shipped in the package, linked into Tern's plugins directory on load after removing any installed copy left under the same id, and reloaded when its version changes, whose stylesheet puts each option's tradeoff, description, holds-when and cost line on its own line under that option's name in Tern's omp view
+- Added frame-by-frame and file demos to questions, rendering frames in order with captions and files as images or `file://` links
+- Added a localized file-not-found notice for unreadable or missing demo files
+- Added restoration of the model's option labels in answers, notes, and returned details
+
+### Changed
+
+- Shown option tradeoff, description, holds-when and cost lines as plain text, so backticks in them appear as written rather than as code
+- Shown a file demo's caption on the line with its `file://` URL
+- Moved each option's tradeoff, description, holds-when, and cost beneath the choice and placed option demos above the radio group
+- Accepted any demo file path instead of only image extensions
+
 ## [0.2.0] - 2026-11-20
 
 ### Breaking Changes

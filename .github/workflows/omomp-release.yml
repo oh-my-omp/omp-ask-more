@@ -37,4 +37,4 @@ jobs:
         working-directory: repository
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bun ../omomp-shared/release.ts --github-release "$GITHUB_REPOSITORY"
+        run: bun ../omomp-shared/release.ts --github-release "$GITHUB_REPOSITORY" --version-files tern/plugin.toml

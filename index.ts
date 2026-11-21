@@ -12,13 +12,15 @@ import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-ses
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
+import { resolveDemos } from "./src/demo.ts";
 import { DESCRIPTION, docTopics } from "./src/description.ts";
 import { compileForm } from "./src/form.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate } from "./src/readability.ts";
-import { answeredResult, rejectedResult } from "./src/result.ts";
+import { answeredResult, labelMap, rejectedResult } from "./src/result.ts";
 import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "./src/schema.ts";
 import { readReadabilityJudge, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
+import { ensureTernPlugin, ternNotice } from "./src/tern-setup.ts";
 
 function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
@@ -78,12 +80,16 @@ async function ask(
 			throw new ToolAbortError("Ask input was cancelled");
 	}
 
-	const evidence = await Promise.all(questions.map((question) => resolveEvidence(question.brief.evidence, ctx.cwd)));
+	const [evidence, demos] = await Promise.all([
+		Promise.all(questions.map((question) => resolveEvidence(question.brief.evidence, ctx.cwd))),
+		Promise.all(questions.map((question) => resolveDemos(question, ctx.cwd))),
+	]);
+	const html = compileForm(questions, evidence, demos);
 	const result = await invoke<AskToolDetails>(
-		{ html: compileForm(questions, evidence, ctx.cwd) },
+		{ html },
 		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
 	);
-	return answeredResult(questions, result);
+	return answeredResult(questions, labelMap(html), result);
 }
 
 export default function askMore(pi: ExtensionAPI): void {
@@ -105,6 +111,12 @@ export default function askMore(pi: ExtensionAPI): void {
 		concurrency: "exclusive";
 	};
 	pi.registerTool(tool);
+	const tern = ensureTernPlugin();
+	pi.on("session_start", async (_event, ctx) => {
+		if (ctx.agent.kind !== "main") return;
+		const notice = ternNotice(await tern);
+		if (notice !== null) ctx.ui.notify(notice.text, notice.level);
+	});
 	pi.on("context", (event) => {
 		if (!pi.getActiveTools().includes("ask")) return undefined;
 		const messages = withSkillAskRule(event.messages);
