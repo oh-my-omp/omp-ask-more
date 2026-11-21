@@ -15,6 +15,7 @@
 
 ### Changed
 
+- Updated the shared copy of `tern-plugin.ts` to oh-my-omp/shared@3d09cd4.
 - Shown option tradeoff, description, holds-when and cost lines as plain text, so backticks in them appear as written rather than as code
 - Shown a file demo's caption on the line with its `file://` URL
 - Moved each option's tradeoff, description, holds-when, and cost beneath the choice and placed option demos above the radio group
