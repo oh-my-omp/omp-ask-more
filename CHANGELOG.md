@@ -8,7 +8,7 @@
 
 ### Added
 
-- Added a Tern plugin, shipped in the package, whose stylesheet puts each option's tradeoff, description, holds-when and cost line on its own line under that option's name in Tern's omp view
+- Added a Tern plugin, shipped in the package, linked into Tern's plugins directory on load and reloaded when its version changes, whose stylesheet puts each option's tradeoff, description, holds-when and cost line on its own line under that option's name in Tern's omp view
 - Added frame-by-frame and file demos to questions, rendering frames in order with captions and files as images or `file://` links
 - Added a localized file-not-found notice for unreadable or missing demo files
 - Added restoration of the model's option labels in answers, notes, and returned details

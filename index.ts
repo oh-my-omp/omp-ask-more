@@ -20,6 +20,7 @@ import { answeredResult, labelMap, rejectedResult } from "./src/result.ts";
 import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "./src/schema.ts";
 import { readReadabilityJudge, SettingsError, settingsErrorText } from "./src/settings.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
+import { ensureTernPlugin, ternNotice } from "./src/tern-setup.ts";
 
 function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 	const session = AgentRegistry.global()
@@ -110,6 +111,12 @@ export default function askMore(pi: ExtensionAPI): void {
 		concurrency: "exclusive";
 	};
 	pi.registerTool(tool);
+	const tern = ensureTernPlugin();
+	pi.on("session_start", async (_event, ctx) => {
+		if (ctx.agent.kind !== "main") return;
+		const notice = ternNotice(await tern);
+		if (notice !== null) ctx.ui.notify(notice.text, notice.level);
+	});
 	pi.on("context", (event) => {
 		if (!pi.getActiveTools().includes("ask")) return undefined;
 		const messages = withSkillAskRule(event.messages);
