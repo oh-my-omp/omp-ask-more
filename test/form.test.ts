@@ -23,7 +23,7 @@ const retry: AskQuestion = {
 		risks: ["Retries hide an outage"],
 	},
 	options: [
-		{ label: "Exponential backoff", tradeoff: "safe, needs a migration", cost: "one table" },
+		{ label: "Exponential backoff", tradeoff: "safe, needs a migration", cost: "one `retry_keys` table" },
 		{ label: "Fixed 3 tries & give up <fast>", tradeoff: "no migration, writes twice", holds_when: "a double write is harmless" },
 	],
 	recommended: 1,
@@ -110,11 +110,20 @@ describe("compileForm", () => {
 	it("draws each option's tradeoff and notes on the lines under that option's row", () => {
 		const field = choice(compiledHtml(), "retry");
 		expect(field.options.map((option) => ({ value: option.value, label: spansText(option.label) }))).toEqual([
-			{ value: "Exponential backoff", label: "Exponential backoff\nTradeoff: safe, needs a migration\nCost: one table" },
+			{ value: "Exponential backoff", label: "Exponential backoff\nTradeoff: safe, needs a migration\nCost: one `retry_keys` table" },
 			{
 				value: "Fixed 3 tries & give up <fast>",
 				label: "Fixed 3 tries & give up <fast> (recommended)\nTradeoff: no migration, writes twice\nHolds when: a double write is harmless",
 			},
+		]);
+	});
+
+	it("keeps each line under an option's name in one emphasized span, which Tern's stylesheet sets on its own line", () => {
+		const field = choice(compiledHtml(), "retry");
+		const lines = field.options.map((option) => option.label.filter((span) => span.style === "em").map((span) => span.text));
+		expect(lines).toEqual([
+			["Tradeoff: safe, needs a migration", "Cost: one `retry_keys` table"],
+			["Tradeoff: no migration, writes twice", "Holds when: a double write is harmless"],
 		]);
 	});
 
@@ -131,12 +140,12 @@ describe("compileForm", () => {
 		const blocks = await demoBlocks({
 			...cache,
 			options: [
-				{ ...cache.options[0]!, demo: { kind: "file", path: "retry.mp4" } },
+				{ ...cache.options[0]!, demo: { kind: "file", path: "retry.mp4", caption: "two writes" } },
 				{ ...cache.options[1]!, demo: { kind: "file", path: "gone.webm" } },
 			],
 		});
 		const texts = blocks.flatMap((block) => (block.kind === "text" ? [spansText(block.spans)] : []));
-		expect(texts).toContain(pathToFileURL(join(work, "retry.mp4")).href);
+		expect(texts).toContain(`${pathToFileURL(join(work, "retry.mp4")).href} — two writes`);
 		expect(texts).toContain("gone.webm · file not found");
 		expect(blocks.some((block) => block.kind === "field")).toBe(true);
 	});

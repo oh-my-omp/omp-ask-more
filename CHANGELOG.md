@@ -8,12 +8,15 @@
 
 ### Added
 
+- Added a Tern plugin, shipped in the package, whose stylesheet puts each option's tradeoff, description, holds-when and cost line on its own line under that option's name in Tern's omp view
 - Added frame-by-frame and file demos to questions, rendering frames in order with captions and files as images or `file://` links
 - Added a localized file-not-found notice for unreadable or missing demo files
 - Added restoration of the model's option labels in answers, notes, and returned details
 
 ### Changed
 
+- Shown option tradeoff, description, holds-when and cost lines as plain text, so backticks in them appear as written rather than as code
+- Shown a file demo's caption on the line with its `file://` URL
 - Moved each option's tradeoff, description, holds-when, and cost beneath the choice and placed option demos above the radio group
 - Accepted any demo file path instead of only image extensions
 

@@ -1,7 +1,10 @@
 // No radio is preselected: the host submits the form's current values when its timeout ends, so a
 // preselected recommendation would come back looking like the user's choice.
 // An option's tradeoff and notes sit inside its radio's <label>, so they draw under that option's
-// row. A <label> keeps only an image's alt text, so option demos go above the radio group instead.
+// row. Each such line is one <em> of plain text: Tern's own omp view joins a label's lines, and the
+// plugin's Tern stylesheet (tern/ask-more.css) puts each <em> of an option label on its own line, so
+// an inline <code> would split a line there. A <label> keeps only an image's alt text, so option
+// demos go above the radio group instead.
 import { resolveMermaidAscii } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
@@ -88,12 +91,13 @@ function framesHtml(frames: readonly DemoFrame[]): string {
 }
 
 function demoHtml(demo: ResolvedDemo, title: string): string {
-	const head = `<p><strong>${escapeHtml(title)}</strong>${demo.caption === undefined ? "" : ` ${inline(demo.caption)}`}</p>`;
+	const caption = demo.caption === undefined ? "" : ` ${inline(demo.caption)}`;
+	const head = `<p><strong>${escapeHtml(title)}</strong>${caption}</p>`;
 	switch (demo.kind) {
 		case "image":
 			return `${head}<img src="${escapeHtml(demo.path)}" alt="${escapeHtml(title)}">`;
 		case "link":
-			return `${head}<p>${escapeHtml(demo.url)}</p>`;
+			return `<p><strong>${escapeHtml(title)}</strong></p><p>${escapeHtml(demo.url)}${demo.caption === undefined ? "" : ` —${caption}`}</p>`;
 		case "unreadable":
 			return `${head}<p><code>${escapeHtml(demo.path)}</code> · ${escapeHtml(demo.error)}</p>`;
 		case "frames":
@@ -105,13 +109,14 @@ function optionLabel(question: AskQuestion, index: number): string {
 	const option = question.options[index];
 	if (option === undefined) return "";
 	const recommended = index === question.recommended ? ` (${escapeHtml(tr("recommended", "推荐"))})` : "";
-	return [
-		`<strong>${escapeHtml(option.label)}</strong>${recommended}`,
-		`${escapeHtml(tr("Tradeoff", "取舍"))}: ${inline(option.tradeoff)}`,
-		...(option.description === undefined ? [] : [inline(option.description)]),
-		...(option.holds_when === undefined ? [] : [`${escapeHtml(tr("Holds when", "成立条件"))}: ${inline(option.holds_when)}`]),
-		...(option.cost === undefined ? [] : [`${escapeHtml(tr("Cost", "成本"))}: ${inline(option.cost)}`]),
-	].join("<br>");
+	const lines = [
+		`${tr("Tradeoff", "取舍")}: ${option.tradeoff}`,
+		...(option.description === undefined ? [] : [option.description]),
+		...(option.holds_when === undefined ? [] : [`${tr("Holds when", "成立条件")}: ${option.holds_when}`]),
+		...(option.cost === undefined ? [] : [`${tr("Cost", "成本")}: ${option.cost}`]),
+	];
+	const name = `<strong>${escapeHtml(option.label)}</strong>${recommended}`;
+	return [name, ...lines.map((line) => `<em>${escapeHtml(line)}</em>`)].join("<br>");
 }
 
 function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence[], demos: QuestionDemos): string {

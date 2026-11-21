@@ -11,3 +11,5 @@ permissions:
 jobs:
   release:
     uses: oh-my-omp/.github/.github/workflows/omomp-release.yml@main
+    with:
+      version-files: tern/plugin.toml

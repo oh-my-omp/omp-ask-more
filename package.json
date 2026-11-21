@@ -12,6 +12,7 @@
 		"index.ts",
 		"src",
 		"omomp-shared",
+		"tern",
 		"CHANGELOG.md"
 	],
 	"omomp": {
