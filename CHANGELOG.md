@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 ### Breaking Changes
 
 - Required `kind` on every `demos[]` entry: `file` with `path`, or `frames` with `frames[{body, caption?}]`
