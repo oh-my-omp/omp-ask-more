@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Required `kind` on every `demos[]` entry: `file` with `path`, or `frames` with `frames[{body, caption?}]`
+
+### Added
+
+- Added frame-by-frame and file demos to questions, rendering frames in order with captions and files as images or `file://` links
+- Added a localized file-not-found notice for unreadable or missing demo files
+- Added restoration of the model's option labels in answers, notes, and returned details
+
+### Changed
+
+- Moved each option's tradeoff, description, holds-when, and cost beneath the choice and placed option demos above the radio group
+- Accepted any demo file path instead of only image extensions
+
 ## [0.2.0] - 2026-11-20
 
 ### Breaking Changes

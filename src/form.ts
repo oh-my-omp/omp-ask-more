@@ -1,10 +1,12 @@
 // No radio is preselected: the host submits the form's current values when its timeout ends, so a
 // preselected recommendation would come back looking like the user's choice.
-import { isAbsolute, resolve } from "node:path";
+// An option's tradeoff and notes sit inside its radio's <label>, so they draw under that option's
+// row. A <label> keeps only an image's alt text, so option demos go above the radio group instead.
 import { resolveMermaidAscii } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
-import type { AskQuestion, Demo } from "./schema.ts";
+import type { QuestionDemos, ResolvedDemo } from "./demo.ts";
+import type { AskQuestion, DemoFrame } from "./schema.ts";
 
 export function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -53,26 +55,66 @@ function diagramHtml(source: string): string {
 	return `<p><strong>${escapeHtml(tr("Diagram", "图"))}</strong></p><pre>${escapeHtml(art)}</pre>`;
 }
 
-function demoHtml(demo: Demo, cwd: string, alt: string): string {
-	const src = isAbsolute(demo.path) ? demo.path : resolve(cwd, demo.path);
-	const caption = demo.caption === undefined ? "" : `<p>${inline(demo.caption)}</p>`;
-	return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">${caption}`;
+const FENCE = /^```([^\n`]*)\n([\s\S]*?)\n```[ \t]*$/gm;
+
+function markdownHtml(markdown: string): string {
+	const prose = (text: string) =>
+		text
+			.split(/\n\s*\n/)
+			.map((paragraph) => paragraph.trim())
+			.filter((paragraph) => paragraph.length > 0)
+			.map((paragraph) => `<p>${inline(paragraph).replace(/\n/g, "<br>")}</p>`);
+	const blocks: string[] = [];
+	let at = 0;
+	for (const match of markdown.matchAll(FENCE)) {
+		blocks.push(...prose(markdown.slice(at, match.index)));
+		const [, info = "", body = ""] = match;
+		const art = info.trim().toLowerCase() === "mermaid" ? (resolveMermaidAscii(body) ?? body) : body;
+		blocks.push(`<pre>${escapeHtml(art)}</pre>`);
+		at = match.index + match[0].length;
+	}
+	blocks.push(...prose(markdown.slice(at)));
+	return blocks.join("");
 }
 
-function optionLine(question: AskQuestion, index: number): string {
+function framesHtml(frames: readonly DemoFrame[]): string {
+	return frames
+		.map((frame, index) => {
+			const position = tr(`Frame ${index + 1}/${frames.length}`, `第 ${index + 1}/${frames.length} 帧`);
+			const caption = frame.caption === undefined ? "" : ` — ${inline(frame.caption)}`;
+			return `<p><em>${escapeHtml(position)}</em>${caption}</p>${markdownHtml(frame.body)}`;
+		})
+		.join("");
+}
+
+function demoHtml(demo: ResolvedDemo, title: string): string {
+	const head = `<p><strong>${escapeHtml(title)}</strong>${demo.caption === undefined ? "" : ` ${inline(demo.caption)}`}</p>`;
+	switch (demo.kind) {
+		case "image":
+			return `${head}<img src="${escapeHtml(demo.path)}" alt="${escapeHtml(title)}">`;
+		case "link":
+			return `${head}<p>${escapeHtml(demo.url)}</p>`;
+		case "unreadable":
+			return `${head}<p><code>${escapeHtml(demo.path)}</code> · ${escapeHtml(demo.error)}</p>`;
+		case "frames":
+			return `${head}${framesHtml(demo.frames)}`;
+	}
+}
+
+function optionLabel(question: AskQuestion, index: number): string {
 	const option = question.options[index];
 	if (option === undefined) return "";
 	const recommended = index === question.recommended ? ` (${escapeHtml(tr("recommended", "推荐"))})` : "";
-	const parts = [
-		`<strong>${escapeHtml(option.label)}</strong>${recommended}: ${inline(option.tradeoff)}`,
+	return [
+		`<strong>${escapeHtml(option.label)}</strong>${recommended}`,
+		`${escapeHtml(tr("Tradeoff", "取舍"))}: ${inline(option.tradeoff)}`,
 		...(option.description === undefined ? [] : [inline(option.description)]),
 		...(option.holds_when === undefined ? [] : [`${escapeHtml(tr("Holds when", "成立条件"))}: ${inline(option.holds_when)}`]),
 		...(option.cost === undefined ? [] : [`${escapeHtml(tr("Cost", "成本"))}: ${inline(option.cost)}`]),
-	];
-	return `<li>${parts.join(" · ")}</li>`;
+	].join("<br>");
 }
 
-function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence[], cwd: string): string {
+function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence[], demos: QuestionDemos): string {
 	const { brief } = question;
 	const name = escapeHtml(question.id);
 	const blocks: string[] = [];
@@ -85,21 +127,23 @@ function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence
 			`<p><strong>${escapeHtml(tr("Risks", "风险"))}</strong></p><ul>${brief.risks.map((risk) => `<li>${inline(risk)}</li>`).join("")}</ul>`,
 		);
 	}
-	if (brief.demo !== undefined) blocks.push(demoHtml(brief.demo, cwd, tr("Demo", "演示")));
-	blocks.push(
-		`<p><strong>${escapeHtml(tr("Options", "选项"))}</strong></p><ul>${question.options.map((_, index) => optionLine(question, index)).join("")}</ul>`,
-	);
-	for (const option of question.options) {
-		if (option.demo !== undefined) blocks.push(demoHtml(option.demo, cwd, `${option.label}: ${tr("demo", "演示")}`));
+	if (demos.brief !== undefined) blocks.push(demoHtml(demos.brief, tr("Demo", "演示")));
+	for (const [index, option] of question.options.entries()) {
+		const demo = demos.options[index];
+		if (demo !== undefined) blocks.push(demoHtml(demo, `${option.label}: ${tr("demo", "演示")}`));
 	}
 	blocks.push(`<p>${inline(question.question)}</p>`);
-	for (const option of question.options) {
-		const label = escapeHtml(option.label);
-		blocks.push(`<label><input type="radio" name="${name}" value="${label}"> ${label}</label>`);
+	for (const [index, option] of question.options.entries()) {
+		blocks.push(`<label><input type="radio" name="${name}" value="${escapeHtml(option.label)}">${optionLabel(question, index)}</label>`);
 	}
 	return `<fieldset>${blocks.join("\n")}</fieldset>`;
 }
 
-export function compileForm(questions: readonly AskQuestion[], evidence: readonly (readonly ResolvedEvidence[])[], cwd: string): string {
-	return `<form>\n${questions.map((question, index) => questionHtml(question, evidence[index] ?? [], cwd)).join("\n")}\n</form>`;
+export function compileForm(
+	questions: readonly AskQuestion[],
+	evidence: readonly (readonly ResolvedEvidence[])[],
+	demos: readonly QuestionDemos[],
+): string {
+	const sections = questions.map((question, index) => questionHtml(question, evidence[index] ?? [], demos[index] ?? { options: [] }));
+	return `<form>\n${sections.join("\n")}\n</form>`;
 }

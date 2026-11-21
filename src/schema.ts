@@ -5,8 +5,6 @@ import { z } from "@oh-my-pi/pi-coding-agent";
 
 const RESERVED_LABEL = /^\s*other\b/i;
 
-export const DEMO_IMAGE_EXTENSIONS = [".gif", ".png", ".apng", ".webp"] as const;
-
 export const fileEvidenceSchema = z.object({
 	kind: z.literal("file"),
 	path: z.string().min(1).describe("a non-empty path to a file or directory, relative to the working directory unless absolute"),
@@ -42,10 +40,24 @@ export const textEvidenceSchema = z.object({
 
 export const evidenceSchema = z.union([fileEvidenceSchema, textEvidenceSchema]);
 
-export const demoSchema = z.object({
-	path: z.string().min(1).describe("a non-empty path to an image or animation file, relative to the working directory unless absolute"),
+export const demoFrameSchema = z.object({
+	body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, a fenced text drawing"),
+	caption: z.string().min(1).describe("one line under this frame").optional(),
+});
+
+export const fileDemoSchema = z.object({
+	kind: z.literal("file"),
+	path: z.string().min(1).describe("a non-empty path to any file, relative to the working directory unless absolute"),
 	caption: z.string().min(1).describe("one line saying what to watch").optional(),
 });
+
+export const framesDemoSchema = z.object({
+	kind: z.literal("frames"),
+	frames: z.array(demoFrameSchema).min(1).describe("an array of frames shown in order"),
+	caption: z.string().min(1).describe("one line saying what to watch").optional(),
+});
+
+export const demoSchema = z.union([fileDemoSchema, framesDemoSchema]);
 
 export const briefSchema = z.object({
 	where: z.string().min(1).describe("non-empty text saying what exists now: paths, symbols, the observation that forces the decision"),
@@ -56,7 +68,7 @@ export const briefSchema = z.object({
 		.describe("an array of evidence tagged by kind: file lines ask-more reads itself, or text you quote")
 		.optional(),
 	diagram: z.string().min(1).describe("Mermaid source of a flowchart, sequence diagram or state diagram").optional(),
-	demo: demoSchema.describe("an image of how things behave now").optional(),
+	demo: demoSchema.describe("a demo of how things behave now").optional(),
 	risks: z.array(z.string().min(1)).describe("one risk per line: what could go wrong with the decision itself").optional(),
 });
 
@@ -69,7 +81,7 @@ export const optionSchema = z.object({
 	tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 	holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 	cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
-	demo: demoSchema.describe("an image of the result of picking this option").optional(),
+	demo: demoSchema.describe("a demo of the result of picking this option").optional(),
 });
 
 export const questionSchema = z.object({
@@ -167,6 +179,13 @@ export const evidenceParamSchema = z
 	})
 	.describe("one evidence entry, attached to a question by its id");
 
+export const demoFrameParamSchema = z
+	.object({
+		body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, a fenced text drawing"),
+		caption: z.string().min(1).describe("one line under this frame").optional(),
+	})
+	.describe("one frame of a frames demo");
+
 export const demoParamSchema = z
 	.object({
 		question: z.string().min(1).describe("the id of the question this demo belongs to, from the questions of the same call"),
@@ -175,13 +194,18 @@ export const demoParamSchema = z
 			.min(1)
 			.describe("the label of the option this demo illustrates; omit it for the question's own demo, and give at most one demo per option")
 			.optional(),
+		kind: z
+			.enum(["frames", "file"])
+			.describe("frames: Markdown frames you write, shown in order; file: any file you show, such as an image, a video, a recording"),
 		path: z
 			.string()
 			.min(1)
-			.describe("a non-empty path to a .gif, .png, .apng or .webp file, relative to the working directory unless absolute"),
+			.describe("a non-empty path to the file, relative to the working directory unless absolute; only with kind file")
+			.optional(),
+		frames: z.array(demoFrameParamSchema).describe("an array of frames shown in order; only with kind frames").optional(),
 		caption: z.string().min(1).describe("one line saying what to watch").optional(),
 	})
-	.describe("one image demo, attached to a question by its id and, for an option's demo, to the option's label");
+	.describe("one demo, attached to a question by its id and, for an option's demo, to the option's label");
 
 export const parametersSchema = z.object({
 	questions: z
@@ -202,6 +226,7 @@ export type EvidenceRef = z.infer<typeof evidenceSchema>;
 export type FileEvidence = z.infer<typeof fileEvidenceSchema>;
 export type TextEvidence = z.infer<typeof textEvidenceSchema>;
 export type Demo = z.infer<typeof demoSchema>;
+export type DemoFrame = z.infer<typeof demoFrameSchema>;
 export type Brief = z.infer<typeof briefSchema>;
 export type AskOption = z.infer<typeof optionSchema>;
 export type AskQuestion = z.infer<typeof questionSchema>;
@@ -246,6 +271,27 @@ function parseEvidenceParam(entry: EvidenceParam, at: string): { value?: Evidenc
 		value: { kind: "text", source: entry.source, text: entry.text, ...(entry.lang === undefined ? {} : { lang: entry.lang }), ...note },
 		problems,
 	};
+}
+
+function parseDemoParam(entry: DemoParam, at: string): { value?: Demo; problems: string[] } {
+	const caption = entry.caption === undefined ? {} : { caption: entry.caption };
+	switch (entry.kind) {
+		case "file": {
+			const problems =
+				entry.frames === undefined || entry.frames.length === 0 ? [] : [`${at}.frames: only with kind frames; this demo has kind file`];
+			if (entry.path === undefined) return { problems: [...problems, `${at}.path: required with kind file`] };
+			return { value: { kind: "file", path: entry.path, ...caption }, problems };
+		}
+		case "frames": {
+			const problems = entry.path === undefined ? [] : [`${at}.path: only with kind file; this demo has kind frames`];
+			if (entry.frames === undefined) return { problems: [...problems, `${at}.frames: required with kind frames`] };
+			const frames = entry.frames.map((frame) => ({
+				body: frame.body,
+				...(frame.caption === undefined ? {} : { caption: frame.caption }),
+			}));
+			return { value: { kind: "frames", frames, ...caption }, problems };
+		}
+	}
 }
 
 function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
@@ -295,7 +341,10 @@ export function parseParams(params: AskParamsWire): Validated {
 
 	for (const [index, entry] of (params.demos ?? []).entries()) {
 		const at = `demos[${index}]`;
-		const demo: Demo = { path: entry.path, ...(entry.caption === undefined ? {} : { caption: entry.caption }) };
+		const parsed = parseDemoParam(entry, at);
+		problems.push(...parsed.problems);
+		if (parsed.value === undefined) continue;
+		const demo = parsed.value;
 		const question = byId.get(entry.question.trim());
 		if (question === undefined) {
 			problems.push(`${at}.question: "${entry.question}" is not the id of any question in this call`);
@@ -407,16 +456,12 @@ function validateTextEvidence(ref: TextEvidence, at: string): string[] {
 	return problems;
 }
 
-export function extensionOf(path: string): string {
-	const name = path.slice(path.lastIndexOf("/") + 1);
-	const dot = name.lastIndexOf(".");
-	return dot <= 0 ? "" : name.slice(dot).toLowerCase();
-}
-
 function validateDemo(demo: Demo, at: string): string[] {
-	const path = demo.path.trim();
-	const known: readonly string[] = DEMO_IMAGE_EXTENSIONS;
-	if (path.length === 0) return [`${at}.path: empty`];
-	if (!known.includes(extensionOf(path))) return [`${at}.path: "${demo.path}" is not one of ${known.join(", ")}`];
-	return [];
+	switch (demo.kind) {
+		case "file":
+			return demo.path.trim().length === 0 ? [`${at}.path: empty`] : [];
+		case "frames":
+			if (demo.frames.length === 0) return [`${at}.frames: empty; give at least one frame`];
+			return demo.frames.flatMap((frame, index) => (frame.body.trim().length === 0 ? [`${at}.frames[${index}].body: empty`] : []));
+	}
 }
