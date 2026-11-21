@@ -1,6 +1,5 @@
 import type { JsonValue, Judge, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { writeDeviceDispatch } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { AskQuestion } from "./schema.ts";
 
@@ -256,16 +255,10 @@ export async function gateUnlessRetry(branch: readonly BranchEntry[], judge: () 
 
 export type BranchEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
 
-function isAskResult(toolName: string, result: unknown): boolean {
-	if (toolName === "ask") return true;
-	const dispatch = writeDeviceDispatch(toolName, result);
-	return dispatch?.tool === "ask" && dispatch.mode === "execute";
-}
-
 export function lastAskRejected(branch: readonly BranchEntry[]): boolean {
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const entry = branch[index];
-		if (entry?.type !== "message" || entry.message.role !== "toolResult" || !isAskResult(entry.message.toolName, entry.message)) continue;
+		if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") continue;
 		return entry.message.isError && entry.message.content.some((part) => part.type === "text" && part.text.includes(REJECTION_MARK));
 	}
 	return false;
