@@ -1,5 +1,6 @@
 // Links the package's Tern plugin (`tern/`) into Tern, so Tern's own omp view loads the stylesheet that puts
-// each line under an option's name on its own line. omp runs the extension factory while installing and rolls
+// each line under an option's name on its own line, and the file demos of an open form play beside it.
+// omp runs the extension factory while installing and rolls
 // the install back when it throws, and the ask works without Tern, so nothing here throws: every outcome is a
 // state the session reports.
 import { realpath } from "node:fs/promises";

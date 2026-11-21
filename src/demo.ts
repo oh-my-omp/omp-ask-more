@@ -1,6 +1,7 @@
 // A file demo is drawn as a picture only when the host's form can load it as one: the same size cap
-// and the same leading-bytes test as `loadMedia`. Every other file goes in as a file:// link the
-// terminal can pick up.
+// and the same leading-bytes test as `loadMedia`. Every other file goes in as its file:// URL in text:
+// omp's classic terminal shows that line, and the Tern package (`tern/window.luau`) reads it to play
+// the file beside the form.
 import { open, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";

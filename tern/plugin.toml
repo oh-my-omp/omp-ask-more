@@ -2,6 +2,11 @@ schema = 1
 id = "omp-ask-more"
 name = "Ask More"
 version = "0.2.0"
-description = "Puts each tradeoff line of an ask option on its own line in Tern's omp view."
+description = "Puts each tradeoff line of an ask option on its own line in Tern's omp view, and plays the ask form's file demos beside it."
+host = "host.luau"
 window = "window.luau"
 styles = ["ask-more.css"]
+
+[[blocks]]
+id = "demo"
+title = "Ask demos"
