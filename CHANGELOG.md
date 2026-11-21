@@ -20,6 +20,10 @@
 - Moved each option's tradeoff, description, holds-when, and cost beneath the choice and placed option demos above the radio group
 - Accepted any demo file path instead of only image extensions
 
+### Fixed
+
+- Fixed the plugin failing to load on omp 19.1.0, which removed `xd://` tool devices and the export the readability check used to recognize an `ask` sent through one; omp then offered its own `ask` instead
+
 ## [0.2.0] - 2026-11-20
 
 ### Breaking Changes

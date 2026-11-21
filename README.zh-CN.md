@@ -24,7 +24,7 @@
 - **可读性检查**
   - 可读性检查 — 功能：解析宿主的 `judge` 角色链（`modelRoles.judge` 及其后备，链里没有原生判定模型时才用会话模型兜底），让它对每个问题的表单一节里的每个句子和每个编号或缩写（issue 编号、`§3`、提交哈希、`VM110` 这类词）回答是非题，同时最多 8 个判定、总时限 30 秒，费用记为 `ask-readability`。时机：每次 `ask` 调用、参数校验之后、任何界面打开之前；只在 `readability.judge` 开启且会话能解析出 judge 时进行。实例：`index.ts` 的 `sessionJudge`/`resolveJudge`；`src/readability.ts` 的句子问题 `actor`/`unshown`/`jargon`，`JUDGE_DEADLINE_MS = 30_000`。
   - `readabilityProblems` 拒绝 — 功能：只要有一个句子没说明谁或什么在做、只用名称或编号提到对话框不会显示的东西、或含有解释不了的行话，或有一个编号既非常识也没在对话框里说明，就拒绝整次调用——拒绝里引用每个不合格的句子并给出原因、列出每个不合格的编号。时机：表单打开之前。实例：`src/readability.ts` 的 `readabilityProblems` 写出 `question "retry-strategy" is hard to understand for a reader who sees only this dialog …`。
-  - 重试放行与判定失败 — 功能：上一次 `ask` 工具结果是这次拒绝时（包括经 `xd://ask` 设备 `write` 调用的，按拒绝标记识别）跳过判定放行；判断模型出错、超过时限或设置值无效时显示警告并放行；只有调用方自己的中止才取消这次 ask。时机：每次 `ask` 调用。实例：`src/readability.ts` 的 `gateUnlessRetry`/`lastAskRejected`，警告 `readability check skipped: ${detail}`。
+  - 重试放行与判定失败 — 功能：上一次 `ask` 工具结果是这次拒绝时（按拒绝标记识别）跳过判定放行；判断模型出错、超过时限或设置值无效时显示警告并放行；只有调用方自己的中止才取消这次 ask。时机：每次 `ask` 调用。实例：`src/readability.ts` 的 `gateUnlessRetry`/`lastAskRejected`，警告 `readability check skipped: ${detail}`。
 - **设置**
   - `readability.judge` 设置 — 功能：布尔型插件设置，默认 `true`，在 `package.json` 的 `omp.settings` 声明，每次 `ask` 调用经 `getPluginSettings` 读取；非布尔值警告 `readability.judge must be true or false` 并跳过检查。时机：每次 `ask` 调用可读性检查开始时读取。实例：`package.json` 的 `omp.settings`，`src/settings.ts` 的 `readReadabilityJudge`；用 `omp plugin config set omp-ask-more readability.judge false` 或项目级 `.omp/plugin-overrides.json` 设置。
 - **结果改写**
