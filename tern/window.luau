@@ -63,17 +63,20 @@ local function lastWithRole(tree: SurfaceTree, wanted: string): TspNode?
 	return found
 end
 
--- `file:///a/b%20c.mp4` → `/a/b c.mp4`, and on Windows `file:///D:/a.mp4` → `D:/a.mp4` (the
--- slash before a drive letter belongs to the URL, as Node's `fileURLToPath` drops it); nil for
--- anything that is not a file URL.
+-- `file:///a/b%20c.mp4` → `/a/b c.mp4`; on Windows `file:///D:/a.mp4` → `D:/a.mp4` (the slash
+-- before a drive letter belongs to the URL, as Node's `fileURLToPath` drops it) and a share's
+-- `file://nas/share/a.mp4` → `//nas/share/a.mp4`; nil for anything that is not a file URL.
 local function filePath(url: string): string?
-	local rest = string.match(url, "^file://(/.*)$")
-	if rest == nil then
+	local host, rest = string.match(url, "^file://([^/]*)(/.*)$")
+	if host == nil or rest == nil then
 		return nil
 	end
 	local path = string.gsub(rest, "%%(%x%x)", function(hex)
 		return string.char(tonumber(hex, 16) :: number)
 	end)
+	if host ~= "" then
+		return "//" .. host .. path
+	end
 	if string.match(path, "^/%a:/") ~= nil then
 		return string.sub(path, 2)
 	end
