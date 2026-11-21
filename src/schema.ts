@@ -1,7 +1,7 @@
 // omp's parameter check words a rejection as `<path> must be <the field's description> (was …)`,
 // so every description opens with the value it expects, and holds at most one " or ": with
 // more, the check rewrites the text as a list of alternatives.
-import { z } from "@oh-my-pi/pi-coding-agent";
+import { z } from "@oh-my-pi/omptype/zod";
 
 const RESERVED_LABEL = /^\s*other\b/i;
 
