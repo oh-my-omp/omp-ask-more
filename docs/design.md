@@ -52,7 +52,7 @@ The entry is the package-root `index.ts`, declared by `omp.extensions` in `packa
 
 ## Result
 
-The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces its first text block with one line per question in input order, the contract `xd://ask/results` describes, then the option notes, and gives the model's option label in place of the shown option text in both the text and `details` (`answers[].answer`, `notes[].option`). `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
+The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces its first text block with one line per question in input order, the contract `help://ask/results` describes, then the option notes, and gives the model's option label in place of the shown option text in both the text and `details` (`answers[].answer`, `notes[].option`). `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
 
 ## The rule in an invoked skill
 

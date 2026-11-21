@@ -56,7 +56,9 @@ it("ships complete body-only topic instructions behind the exact footer", () => 
 	expect(DESCRIPTION).toContain("Topics — read the one a call needs before making it:");
 	expect(Object.keys(topics)).toEqual(["routing", "rounds", "results"]);
 	for (const [name, body] of Object.entries(topics)) {
-		expect(DESCRIPTION).toContain(`xd://ask/${name}`);
+		expect(DESCRIPTION).toContain(`help://ask/${name}`);
+		expect(DESCRIPTION).not.toContain("xd://");
+		expect(body).not.toContain("xd://");
 		expect(body).not.toContain("tool://");
 		expect(body).not.toStartWith("---");
 	}
