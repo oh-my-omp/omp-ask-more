@@ -28,6 +28,20 @@ async function loadedVersion(cli: TernPluginCli): Promise<{ readonly version: st
 	return { version: listed.value.find((plugin) => plugin.id === TERN_PLUGIN_ID)?.version ?? null };
 }
 
+/**
+ * Links `wanted` as the plugin. `tern plugin link` refuses while Tern's plugin directory holds an installed copy of
+ * the same id, the state `tern plugin install …/tern` left before the package linked itself; that copy, of whatever
+ * version, is removed and the link made again. Returns why it could not link, or null once linked.
+ */
+async function relink(cli: TernPluginCli, wanted: string): Promise<string | null> {
+	const first = await cli.link(wanted);
+	if (first.ok) return null;
+	const removed = await cli.remove(TERN_PLUGIN_ID);
+	if (!removed.ok) return `tern plugin link: ${first.error.message}\ntern plugin remove: ${removed.error.message}`;
+	const second = await cli.link(wanted);
+	return second.ok ? null : `tern plugin link: ${second.error.message}`;
+}
+
 async function setup(): Promise<TernPluginState> {
 	const found = findTern();
 	if (found.kind === "not_installed") return { kind: "absent" };
@@ -41,8 +55,8 @@ async function setup(): Promise<TernPluginState> {
 	const pluginsDir = await cli.dir();
 	if (!pluginsDir.ok) return { kind: "failed", detail: `tern plugin dir: ${pluginsDir.error.message}` };
 	if ((await linkedDir(pluginsDir.value)) !== wanted) {
-		const linked = await cli.link(wanted);
-		if (!linked.ok) return { kind: "failed", detail: `tern plugin link: ${linked.error.message}` };
+		const linked = await relink(cli, wanted);
+		if (linked !== null) return { kind: "failed", detail: linked };
 	}
 
 	const before = await loadedVersion(cli);
