@@ -63,15 +63,21 @@ local function lastWithRole(tree: SurfaceTree, wanted: string): TspNode?
 	return found
 end
 
--- `file:///a/b%20c.mp4` → `/a/b c.mp4`; nil for anything that is not a file URL.
+-- `file:///a/b%20c.mp4` → `/a/b c.mp4`, and on Windows `file:///D:/a.mp4` → `D:/a.mp4` (the
+-- slash before a drive letter belongs to the URL, as Node's `fileURLToPath` drops it); nil for
+-- anything that is not a file URL.
 local function filePath(url: string): string?
 	local rest = string.match(url, "^file://(/.*)$")
 	if rest == nil then
 		return nil
 	end
-	return (string.gsub(rest, "%%(%x%x)", function(hex)
+	local path = string.gsub(rest, "%%(%x%x)", function(hex)
 		return string.char(tonumber(hex, 16) :: number)
-	end))
+	end)
+	if string.match(path, "^/%a:/") ~= nil then
+		return string.sub(path, 2)
+	end
+	return path
 end
 
 -- The file demos of the open question, each with the heading of the text node above its line.
@@ -110,15 +116,29 @@ local function closeBlock(cx: WindowCx, watch: Watch)
 	watch.block = nil
 end
 
-local function sync(cx: WindowCx, pane: number, watch: Watch)
-	local tree = cx.session:surface(pane, { nodes = 5000 })
-	local demos: { Demo } = {}
-	if type(tree) == "table" then
-		local open = lastWithRole(tree, "omp.ask.open")
-		if open ~= nil then
-			demos = demosIn(open)
+-- The question the form has open. The form is a top-level block of the surface's main region
+-- (`omp.ask.card`, after the transcript); a read of the whole surface spends its node budget on
+-- the transcript first and, in a long session, can leave the form out. So: the main region's
+-- top-level blocks alone (one node per block), then the last ask card's own subtree.
+local function openQuestion(cx: WindowCx, pane: number): TspNode?
+	local top = cx.session:surface(pane, { depth = 1, nodes = 5000 })
+	if type(top) ~= "table" or top.main == nil then
+		return nil
+	end
+	local blocks = top.main.c or {}
+	for index = #blocks, 1, -1 do
+		local block = blocks[index]
+		if role(block) == "omp.ask.card" then
+			local card = cx.session:surface(pane, { root = block.id, nodes = 5000 })
+			return if type(card) == "table" then lastWithRole(card, "omp.ask.open") else nil
 		end
 	end
+	return nil
+end
+
+local function sync(cx: WindowCx, pane: number, watch: Watch)
+	local open = openQuestion(cx, pane)
+	local demos: { Demo } = if open ~= nil then demosIn(open) else {}
 	local key = if #demos > 0 then tern.json.encode(demos) else ""
 	if key == watch.key then
 		return
@@ -142,8 +162,10 @@ local function stop(cx: WindowCx, pane: number)
 	closeBlock(cx, watch)
 end
 
+-- Agents are listed, and may report state, across every session; a window watches its own panes,
+-- the ones its blocks can open beside.
 local function start(cx: WindowCx, pane: number)
-	if watched[pane] ~= nil then
+	if watched[pane] ~= nil or cx.session:pane(pane) == nil then
 		return
 	end
 	local watch: Watch = { block = nil, key = "", timer = nil }

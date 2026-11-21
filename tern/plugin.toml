@@ -10,3 +10,4 @@ styles = ["ask-more.css"]
 [[blocks]]
 id = "demo"
 title = "Ask demos"
+palette = false

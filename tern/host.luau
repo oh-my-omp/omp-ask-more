@@ -2,9 +2,10 @@
 --
 -- The window half (`window.luau`) opens it with one launch argument, a JSON array of
 -- `{label, path, caption?}` in the order the form shows them; `label` is the heading the form
--- gives the demo ("Demo", or "<option>: demo"). Each demo is a card whose head is that heading and
--- caption, holding a TSP `media` node by path: Tern loads the file and shows a picture, an SVG, a
--- 3D model, a PDF, a video or audio with its controls, or a card for any other file. A card's role
+-- gives the demo ("Demo", or "<option>: demo"). Each demo is a card headed by that heading, holding
+-- its caption as text (a card's head is one line, cut at the block's width) and a TSP `media` node
+-- by path: Tern loads the file and shows a picture, an SVG, a 3D model, a PDF, a video or audio
+-- with its controls, or a card for any other file. A card's role
 -- `omp-ask-more.demo.<n>` (0-based) names the demo for styles and for tests driving the window.
 -- Nothing is saved: the block belongs to one open form, and the window half closes a leftover one.
 
@@ -32,12 +33,15 @@ local function parse(arg: string?): { Demo }
 	return demos
 end
 
-local function head(demo: Demo)
-	local spans = { tern.ui.span(demo.label, "strong") }
+local function card(demo: Demo, index: number)
+	local children = {}
 	if demo.caption ~= nil then
-		table.insert(spans, tern.ui.span("  " .. demo.caption, "muted"))
+		table.insert(children, tern.ui.text({ tern.ui.span(demo.caption, "muted") }))
 	end
-	return spans
+	table.insert(children, tern.ui.node("media", { path = demo.path }))
+	return tern.ui.card({ tern.ui.span(demo.label, "strong") }, children, {
+		role = "omp-ask-more.demo." .. (index - 1),
+	})
 end
 
 tern.block.define("demo", {
@@ -47,12 +51,7 @@ tern.block.define("demo", {
 	view = function(state: State, _cx)
 		local cards = {}
 		for index, demo in state.demos do
-			table.insert(
-				cards,
-				tern.ui.card(head(demo), { tern.ui.node("media", { path = demo.path }) }, {
-					role = "omp-ask-more.demo." .. (index - 1),
-				})
-			)
+			table.insert(cards, card(demo, index))
 		end
 		return { main = tern.ui.col(cards) }
 	end,
