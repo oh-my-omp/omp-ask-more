@@ -1,6 +1,6 @@
 {
 	"name": "omp-ask-more",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"private": true,
 	"type": "module",
 	"description": "One ask for every user decision: questions with a brief, evidence and per-option tradeoffs, compiled into the host ask's form",

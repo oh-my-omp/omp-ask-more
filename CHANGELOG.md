@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-22
+
 ### Changed
 
 - Migrated `ask` tool documentation topic pointers from `xd://ask/*` to `help://ask/*` for omp 19.1.0 compatibility
