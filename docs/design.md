@@ -52,7 +52,7 @@ The entry is the package-root `index.ts`, declared by `omp.extensions` in `packa
 
 ## Result
 
-The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces its first text block with one line per question in input order, the contract `help://ask/results` describes, then the option notes, and gives the model's option label in place of the shown option text in both the text and `details` (`answers[].answer`, `notes[].option`). `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
+The host's result keeps its `details` and the image blocks of pasted option notes; `src/result.ts#answeredResult` replaces its first text block with one line per question in input order (`id: label`, `id: "text"`, `id: (no answer)`, `id: (timed out: …)`), then the option notes, and gives the model's option label in place of the shown option text in both the text and `details` (`answers[].answer`, `notes[].option`). `details.timedOut` turns every blank line into "decide it yourself", which is sound only because nothing was preselected. A host error passes through unchanged, and so does a form closed by a message: the host's `ask` throws its own interruption notice carrying the answers given so far (`packages/coding-agent/src/tools/ask.ts`, `abortError`), which never reaches the plugin as a result.
 
 ## The rule in an invoked skill
 
@@ -68,9 +68,9 @@ The model's parameters are a batch of decisions in `questions[]`, a shape of the
 
 | Per question | Added |
 |---|---|
-| `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?`; not `multi`, since every question takes one answer | `brief {where, what, how, diagram?, risks?}`; per option `tradeoff`, `holds_when?`, `cost?`; beside the questions, `evidence[]` and `demos[]` (`kind` frames with `frames[{body, caption?}]`, or `kind` file with any `path`), each naming its question by `id` and, for an option's demo, its option by `label` |
+| `id`, `question`, `header?`, `options[{label, description?}]`, `recommended?`; not `multi`, since every question takes one answer | `brief {where, what, how, diagram?, risks?}`, inline `evidence_files[]`, `evidence_quotes[]`, `demo_frames[]` / `demo_file`; per option `tradeoff`, `holds_when?`, `cost?`, `demo_frames[]` / `demo_file` |
 
-The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth, no object nested deeper than a question's `brief` and `options`. An evidence entry and a demo are each a single object whose `kind` enum picks the form, the other kind's fields left out; `src/schema.ts#parseParams` maps the call into the internal discriminated union, attaching every evidence entry and demo to its target.
+The parameter definition follows the plugin rule's required shape: one root object, no union of objects at any depth; evidence and demos are inlined on each question and option (`evidence_files`, `evidence_quotes`, `demo_frames`, `demo_file`), and `src/schema.ts#parseParams` maps them into the internal discriminated unions.
 
 The shapes are chosen for strict mode, where the model has to produce every field: omp makes every optional field nullable and drops a null before validation (`packages/ai/src/utils/schema/normalize.ts`, `packages/ai/src/utils/validation.ts`). Each field a `kind` does not use stays optional, and required-with-kind is checked in `parseParams`, not the schema, because two optional fields under an "exactly one" rule once made strict models send both. Every optional string rejects `""`, so an empty placeholder is dropped the way a null is. Line numbers are integers, not a `"41-58"` string. `tryEnforceStrictSchema` must keep the schema strict (`test/schema.test.ts`); a shape it cannot express falls back to non-strict without notice.
 
@@ -108,8 +108,8 @@ src/settings.ts     the readability.judge plugin setting
 src/readability.ts  the readability check: per-question dialog, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/tern-setup.ts   links and reloads the package's Tern plugin when omp loads the extension
-src/description.ts  model-facing purpose, topic pointers and body loader; typed docTopics registered in index.ts
-src/topics/         shipped routing, rounds and results markdown bodies
+src/description.ts  model-facing purpose (<=200 chars), tool://ask/routing pointer and registration via registerToolTopics
+src/topics/         shipped routing.md body
 tern/               Tern plugin: the stylesheet putting each line under an option's name on its own line in Tern's omp view;
                     window.luau finding the open question's file demos, host.luau's demo block playing them beside the form
 omomp-shared/i18n.ts UI labels: live OMOMP_LANG, live LC_* / LANG; protocol fields stay English (copy of shared src/i18n.ts)

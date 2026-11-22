@@ -100,6 +100,56 @@ export const askParamsSchema = z.object({
 		.describe("an array of independent decisions, one tab each; a decision that depends on another answer goes in a later call"),
 });
 
+export const evidenceFileParamSchema = z
+	.object({
+		path: z.string().min(1).describe("a non-empty path to a file or directory, relative to the working directory unless absolute"),
+		start: z
+			.number()
+			.int()
+			.min(1)
+			.describe("a 1-based line number where the window starts; without it the file's first lines are shown")
+			.optional(),
+		end: z
+			.number()
+			.int()
+			.min(1)
+			.describe(
+				"a 1-based line number where the window ends, inclusive; needs start, and omitted means start alone. Cite non-adjacent windows separately",
+			)
+			.optional(),
+		note: z.string().min(1).describe("text saying why this evidence matters").optional(),
+	})
+	.describe("a file evidence entry read directly from disk by ask-more");
+
+export const evidenceQuoteParamSchema = z
+	.object({
+		source: z
+			.string()
+			.min(1)
+			.describe("one non-empty line naming where the text came from (command, URL, log, tool result); shown as your claim, not checked"),
+		text: z.string().min(1).describe("the non-empty text quoted as it appeared there"),
+		lang: z.string().min(1).describe("a highlight language for the text, such as bash, json, diff").optional(),
+		note: z.string().min(1).describe("text saying why this evidence matters").optional(),
+	})
+	.describe("a quoted text evidence entry");
+
+export const demoFrameParamSchema = z
+	.object({
+		body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, a fenced text drawing"),
+		caption: z.string().min(1).describe("one line under this frame").optional(),
+	})
+	.describe("one frame of a frames demo");
+
+export const demoFileParamSchema = z
+	.object({
+		path: z
+			.string()
+			.min(1)
+			.describe("a non-empty path to any file (image, video, recording), relative to the working directory unless absolute"),
+		caption: z.string().min(1).describe("one line saying what to watch").optional(),
+	})
+	.describe("a file demo; pictures render inline and other files play via their file URL");
+
 export const briefParamSchema = z
 	.object({
 		where: z.string().min(1).describe("non-empty text saying what exists now: paths, symbols, the observation that forces the decision"),
@@ -120,15 +170,18 @@ export const optionParamSchema = z
 		tradeoff: z.string().min(1).describe("one non-empty line: what the option buys and what it costs"),
 		holds_when: z.string().min(1).describe("text naming the condition under which this option is right").optional(),
 		cost: z.string().min(1).describe("text naming what changes: files, migrations, time").optional(),
+		demo_frames: z
+			.array(demoFrameParamSchema)
+			.min(1)
+			.describe("an array of Markdown frames illustrating this option in order; omit when using demo_file")
+			.optional(),
+		demo_file: demoFileParamSchema.describe("a file demo illustrating this option; omit when using demo_frames").optional(),
 	})
-	.describe("one option: its short title and the tradeoff, condition and cost the form shows beside it");
+	.describe("one option: its short title and the tradeoff, condition, cost and optional demo shown beside it");
 
 export const questionParamSchema = z
 	.object({
-		id: z
-			.string()
-			.min(1)
-			.describe("a non-empty string, unique within the call; the answer is reported under it, and an evidence entry or demo names it"),
+		id: z.string().min(1).describe("a non-empty string, unique within the call; the answer is reported under it"),
 		question: z.string().min(1).describe("non-empty text of one or two sentences; the brief carries the context"),
 		header: z.string().min(1).describe("a short section title").optional(),
 		options: z.array(optionParamSchema).min(2).max(5).describe("an array of 2 to 5 options, each a choice the user can pick"),
@@ -138,88 +191,24 @@ export const questionParamSchema = z
 			.describe("an integer: the 0-based index of the option you would pick; marked as recommended, never preselected")
 			.optional(),
 		brief: briefParamSchema,
+		evidence_files: z.array(evidenceFileParamSchema).describe("an array of file evidence entries read directly from disk").optional(),
+		evidence_quotes: z.array(evidenceQuoteParamSchema).describe("an array of quoted text evidence entries").optional(),
+		demo_frames: z
+			.array(demoFrameParamSchema)
+			.min(1)
+			.describe("an array of Markdown frames showing how things behave now; omit when using demo_file")
+			.optional(),
+		demo_file: demoFileParamSchema.describe("a file demo showing how things behave now; omit when using demo_frames").optional(),
 	})
-	.describe("one decision: its id, its question, its brief and its 2 to 5 options");
-
-export const evidenceParamSchema = z
-	.object({
-		question: z.string().min(1).describe("the id of the question this evidence belongs to, from the questions of the same call"),
-		kind: z
-			.enum(["text", "file"])
-			.describe("file: lines ask-more reads from the file itself; text: text you quote from a command, a page or a log"),
-		path: z
-			.string()
-			.min(1)
-			.describe("a non-empty path to a file or directory, relative to the working directory unless absolute; only with kind file")
-			.optional(),
-		start: z
-			.number()
-			.int()
-			.min(1)
-			.describe("a 1-based line number where the window starts; only with kind file, and without it the file's first lines are shown")
-			.optional(),
-		end: z
-			.number()
-			.int()
-			.min(1)
-			.describe(
-				"a 1-based line number where the window ends, inclusive; only with kind file, and it needs start. For lines that are not adjacent, cite each window as its own entry",
-			)
-			.optional(),
-		source: z
-			.string()
-			.min(1)
-			.describe(
-				"one non-empty line naming where the text was taken from: a command, a URL, a log, a tool result; only with kind text, and shown as your claim, not checked",
-			)
-			.optional(),
-		text: z.string().min(1).describe("the non-empty text quoted as it appeared there; only with kind text").optional(),
-		lang: z.string().min(1).describe("a highlight language for the text, such as bash, json, diff; only with kind text").optional(),
-		note: z.string().min(1).describe("text saying why this evidence matters").optional(),
-	})
-	.describe("one evidence entry, attached to a question by its id");
-
-export const demoFrameParamSchema = z
-	.object({
-		body: z.string().min(1).describe("non-empty Markdown: text, a ```mermaid diagram, a fenced text drawing"),
-		caption: z.string().min(1).describe("one line under this frame").optional(),
-	})
-	.describe("one frame of a frames demo");
-
-export const demoParamSchema = z
-	.object({
-		question: z.string().min(1).describe("the id of the question this demo belongs to, from the questions of the same call"),
-		option: z
-			.string()
-			.min(1)
-			.describe("the label of the option this demo illustrates; omit it for the question's own demo, and give at most one demo per option")
-			.optional(),
-		kind: z
-			.enum(["frames", "file"])
-			.describe("frames: Markdown frames you write, shown in order; file: any file you show, such as an image, a video, a recording"),
-		path: z
-			.string()
-			.min(1)
-			.describe("a non-empty path to the file, relative to the working directory unless absolute; only with kind file")
-			.optional(),
-		frames: z.array(demoFrameParamSchema).describe("an array of frames shown in order; only with kind frames").optional(),
-		caption: z.string().min(1).describe("one line saying what to watch").optional(),
-	})
-	.describe("one demo, attached to a question by its id and, for an option's demo, to the option's label");
+	.describe("one decision: its id, question, brief, optional inline evidence/demo and 2 to 5 options");
 
 export const parametersSchema = z.object({
 	questions: z
 		.array(questionParamSchema)
 		.min(1)
-		.describe("an array of independent decisions, one section each; a decision that depends on another answer goes in a later call"),
-	evidence: z
-		.array(evidenceParamSchema)
-		.describe("an array of evidence entries, each naming the question it belongs to with question")
-		.optional(),
-	demos: z
-		.array(demoParamSchema)
-		.describe("an array of demos, each naming the question it belongs to with question and an option with its label")
-		.optional(),
+		.describe(
+			"an array of independent decisions shown together in one form (one section each with brief, evidence, diagram, risks, demos, and options with no choice preselected; dependent questions go in a later call; a rejected call lists every problem to fix and retry)",
+		),
 });
 
 export type EvidenceRef = z.infer<typeof evidenceSchema>;
@@ -232,86 +221,88 @@ export type AskOption = z.infer<typeof optionSchema>;
 export type AskQuestion = z.infer<typeof questionSchema>;
 export type AskParams = z.infer<typeof askParamsSchema>;
 export type AskParamsWire = z.infer<typeof parametersSchema>;
-export type EvidenceParam = z.infer<typeof evidenceParamSchema>;
-export type DemoParam = z.infer<typeof demoParamSchema>;
+export type QuestionParam = z.infer<typeof questionParamSchema>;
+export type OptionParam = z.infer<typeof optionParamSchema>;
 
 export type Validated =
 	| { readonly ok: true; readonly questions: readonly AskQuestion[] }
 	| { readonly ok: false; readonly problems: readonly string[] };
 
-function parseEvidenceParam(entry: EvidenceParam, at: string): { value?: EvidenceRef; problems: string[] } {
-	const problems: string[] = [];
-	const note = entry.note === undefined ? {} : { note: entry.note };
-	if (entry.kind === "file") {
-		for (const field of ["source", "text", "lang"] as const) {
-			if (entry[field] !== undefined) problems.push(`${at}.${field}: only with kind text; this entry has kind file`);
-		}
-		if (entry.path === undefined) {
-			problems.push(`${at}.path: required with kind file`);
-			return { problems };
-		}
+function inlineDemo(
+	demoFrames: readonly z.infer<typeof demoFrameParamSchema>[] | undefined,
+	demoFile: z.infer<typeof demoFileParamSchema> | undefined,
+	at: string,
+	problems: string[],
+): Demo | undefined {
+	if (demoFrames !== undefined && demoFile !== undefined) {
+		problems.push(`${at}.demo_file: give either demo_frames or demo_file, not both`);
+		return undefined;
+	}
+	if (demoFrames !== undefined) {
 		return {
-			value: {
+			kind: "frames",
+			frames: demoFrames.map((frame) => ({
+				body: frame.body,
+				...(frame.caption === undefined ? {} : { caption: frame.caption }),
+			})),
+		};
+	}
+	if (demoFile !== undefined) {
+		return {
+			kind: "file",
+			path: demoFile.path,
+			...(demoFile.caption === undefined ? {} : { caption: demoFile.caption }),
+		};
+	}
+	return undefined;
+}
+
+function questionOf(param: QuestionParam, index: number, problems: string[]): AskQuestion {
+	const at = `questions[${index}]`;
+	const evidence: EvidenceRef[] = [
+		...(param.evidence_files ?? []).map(
+			(entry): FileEvidence => ({
 				kind: "file",
 				path: entry.path,
 				...(entry.start === undefined ? {} : { start: entry.start }),
 				...(entry.end === undefined ? {} : { end: entry.end }),
-				...note,
-			},
-			problems,
-		};
-	}
-	for (const field of ["path", "start", "end"] as const) {
-		if (entry[field] !== undefined) problems.push(`${at}.${field}: only with kind file; this entry has kind text`);
-	}
-	if (entry.source === undefined) problems.push(`${at}.source: required with kind text`);
-	if (entry.text === undefined) problems.push(`${at}.text: required with kind text`);
-	if (entry.source === undefined || entry.text === undefined) return { problems };
-	return {
-		value: { kind: "text", source: entry.source, text: entry.text, ...(entry.lang === undefined ? {} : { lang: entry.lang }), ...note },
-		problems,
-	};
-}
-
-function parseDemoParam(entry: DemoParam, at: string): { value?: Demo; problems: string[] } {
-	const caption = entry.caption === undefined ? {} : { caption: entry.caption };
-	switch (entry.kind) {
-		case "file": {
-			const problems =
-				entry.frames === undefined || entry.frames.length === 0 ? [] : [`${at}.frames: only with kind frames; this demo has kind file`];
-			if (entry.path === undefined) return { problems: [...problems, `${at}.path: required with kind file`] };
-			return { value: { kind: "file", path: entry.path, ...caption }, problems };
-		}
-		case "frames": {
-			const problems = entry.path === undefined ? [] : [`${at}.path: only with kind file; this demo has kind frames`];
-			if (entry.frames === undefined) return { problems: [...problems, `${at}.frames: required with kind frames`] };
-			const frames = entry.frames.map((frame) => ({
-				body: frame.body,
-				...(frame.caption === undefined ? {} : { caption: frame.caption }),
-			}));
-			return { value: { kind: "frames", frames, ...caption }, problems };
-		}
-	}
-}
-
-function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
+				...(entry.note === undefined ? {} : { note: entry.note }),
+			}),
+		),
+		...(param.evidence_quotes ?? []).map(
+			(entry): TextEvidence => ({
+				kind: "text",
+				source: entry.source,
+				text: entry.text,
+				...(entry.lang === undefined ? {} : { lang: entry.lang }),
+				...(entry.note === undefined ? {} : { note: entry.note }),
+			}),
+		),
+	];
+	const briefDemo = inlineDemo(param.demo_frames, param.demo_file, at, problems);
 	return {
 		id: param.id,
 		question: param.question,
 		...(param.header === undefined ? {} : { header: param.header }),
-		options: param.options.map((option) => ({
-			label: option.label,
-			...(option.description === undefined ? {} : { description: option.description }),
-			tradeoff: option.tradeoff,
-			...(option.holds_when === undefined ? {} : { holds_when: option.holds_when }),
-			...(option.cost === undefined ? {} : { cost: option.cost }),
-		})),
+		options: param.options.map((option, optionIndex): AskOption => {
+			const optionDemo = inlineDemo(option.demo_frames, option.demo_file, `${at}.options[${optionIndex}]`, problems);
+			return {
+				label: option.label,
+				...(option.description === undefined ? {} : { description: option.description }),
+				tradeoff: option.tradeoff,
+				...(option.holds_when === undefined ? {} : { holds_when: option.holds_when }),
+				...(option.cost === undefined ? {} : { cost: option.cost }),
+				...(optionDemo === undefined ? {} : { demo: optionDemo }),
+			};
+		}),
 		...(param.recommended === undefined ? {} : { recommended: param.recommended }),
 		brief: {
 			where: param.brief.where,
 			what: param.brief.what,
 			how: param.brief.how,
+			...(evidence.length === 0 ? {} : { evidence }),
 			...(param.brief.diagram === undefined ? {} : { diagram: param.brief.diagram }),
+			...(briefDemo === undefined ? {} : { demo: briefDemo }),
 			...(param.brief.risks === undefined ? {} : { risks: param.brief.risks }),
 		},
 	};
@@ -319,57 +310,7 @@ function questionOf(param: z.infer<typeof questionParamSchema>): AskQuestion {
 
 export function parseParams(params: AskParamsWire): Validated {
 	const problems: string[] = [];
-	const questions = params.questions.map(questionOf);
-	const byId = new Map<string, AskQuestion>();
-	for (const question of questions) {
-		const id = question.id.trim();
-		if (id.length > 0 && !byId.has(id)) byId.set(id, question);
-	}
-
-	for (const [index, entry] of (params.evidence ?? []).entries()) {
-		const at = `evidence[${index}]`;
-		const parsed = parseEvidenceParam(entry, at);
-		problems.push(...parsed.problems);
-		if (parsed.value === undefined) continue;
-		const question = byId.get(entry.question.trim());
-		if (question === undefined) {
-			problems.push(`${at}.question: "${entry.question}" is not the id of any question in this call`);
-			continue;
-		}
-		question.brief.evidence = [...(question.brief.evidence ?? []), parsed.value];
-	}
-
-	for (const [index, entry] of (params.demos ?? []).entries()) {
-		const at = `demos[${index}]`;
-		const parsed = parseDemoParam(entry, at);
-		problems.push(...parsed.problems);
-		if (parsed.value === undefined) continue;
-		const demo = parsed.value;
-		const question = byId.get(entry.question.trim());
-		if (question === undefined) {
-			problems.push(`${at}.question: "${entry.question}" is not the id of any question in this call`);
-			continue;
-		}
-		if (entry.option === undefined) {
-			if (question.brief.demo !== undefined) {
-				problems.push(`${at}.option: the brief of question "${entry.question}" already has a demo; one demo per brief`);
-				continue;
-			}
-			question.brief.demo = demo;
-			continue;
-		}
-		const option = question.options.find((candidate) => candidate.label === entry.option);
-		if (option === undefined) {
-			problems.push(`${at}.option: "${entry.option}" is not a label of an option of question "${entry.question}"`);
-			continue;
-		}
-		if (option.demo !== undefined) {
-			problems.push(`${at}.option: option "${entry.option}" of question "${entry.question}" already has a demo; one demo per option`);
-			continue;
-		}
-		option.demo = demo;
-	}
-
+	const questions = params.questions.map((question, index) => questionOf(question, index, problems));
 	const checked = validate({ questions });
 	if (problems.length === 0) return checked;
 	return { ok: false, problems: [...problems, ...(checked.ok ? [] : checked.problems)] };

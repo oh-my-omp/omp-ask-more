@@ -1,16 +1,23 @@
 import { readFileSync } from "node:fs";
+import { registerToolTopics, type ToolTopicDoc } from "../omomp-shared/internal-url.ts";
 
-export const DESCRIPTION = `Puts your questions to the user as one form, each with its brief, evidence and the tradeoff of every option, and blocks until they answer.
+export const DESCRIPTION =
+	"Ask the user decisions as one form with brief, evidence, and per-option tradeoffs, blocking until answered. Read `tool://ask/routing` before asking, confirming, or following a skill's questions.";
 
-Topics — read the one a call needs before making it:
-- \`help://ask/routing\` — before putting a question, choice or confirmation to the user, including questions required by a skill or workflow
-- \`help://ask/rounds\` — before composing a batch, sequencing dependent questions, or retrying a rejected call
-- \`help://ask/results\` — before interpreting answers, cancellations, custom answers or timeouts`;
+export function routingTopicBody(): string {
+	return readFileSync(new URL("./topics/routing.md", import.meta.url), "utf8");
+}
 
-export function docTopics(): Readonly<Record<string, string>> {
-	return {
-		routing: readFileSync(new URL("./topics/routing.md", import.meta.url), "utf8"),
-		rounds: readFileSync(new URL("./topics/rounds.md", import.meta.url), "utf8"),
-		results: readFileSync(new URL("./topics/results.md", import.meta.url), "utf8"),
-	};
+export const ASK_TOPICS: readonly ToolTopicDoc[] = [
+	{
+		tool: "ask",
+		topic: "routing",
+		title: "When and how to route questions through ask",
+		when: "before putting a question, choice or confirmation to the user, including questions required by a skill or workflow",
+		body: routingTopicBody,
+	},
+];
+
+export function registerAskTopics(): void {
+	registerToolTopics("omp-ask-more", ASK_TOPICS);
 }

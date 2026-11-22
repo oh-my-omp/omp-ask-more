@@ -5,15 +5,18 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "@oh-my-pi/pi-coding-agent/sdk";
 import { type Finding, judgeReadability, unreadableQuestions } from "../src/readability.ts";
-import { type AskQuestion, demoParamSchema, evidenceParamSchema, parseParams, questionParamSchema } from "../src/schema.ts";
+import { type AskQuestion, parseParams, questionParamSchema } from "../src/schema.ts";
+
+const legacyEvidenceSchema = z.object({ question: z.string() }).passthrough();
+const legacyDemoSchema = z.object({ question: z.string() }).passthrough();
 
 const corpusSchema = z.object({
 	calls: z.array(
 		z.object({
 			id: z.string().min(1),
 			questions: z.array(questionParamSchema).min(1),
-			evidence: z.array(evidenceParamSchema).optional(),
-			demos: z.array(demoParamSchema).optional(),
+			evidence: z.array(legacyEvidenceSchema).optional(),
+			demos: z.array(legacyDemoSchema).optional(),
 			labels: z.record(z.string(), z.enum(["readable", "hard"])).optional(),
 		}),
 	),
@@ -93,11 +96,7 @@ async function main(): Promise<void> {
 			for (let index = next++; index < calls.length; index = next++) {
 				const call = calls[index];
 				if (call === undefined) break;
-				const checked = parseParams({
-					questions: call.questions,
-					...(call.evidence === undefined ? {} : { evidence: call.evidence }),
-					...(call.demos === undefined ? {} : { demos: call.demos }),
-				});
+				const checked = parseParams({ questions: call.questions });
 				if (!checked.ok) {
 					failed.push(`${call.id}: ${checked.problems.join("; ")}`);
 					continue;

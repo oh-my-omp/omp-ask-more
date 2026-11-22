@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { DESCRIPTION, docTopics } from "../src/description.ts";
+import { clearToolTopics, listToolTopics, resolveToolTopic } from "../omomp-shared/internal-url.ts";
+import { DESCRIPTION, registerAskTopics, routingTopicBody } from "../src/description.ts";
 import { readReadabilityJudge, SettingsError, settingsErrorText } from "../src/settings.ts";
 
 let cwd: string;
@@ -15,6 +16,10 @@ beforeAll(async () => {
 afterAll(() => {
 	if (lang === undefined) delete process.env.OMOMP_LANG;
 	else process.env.OMOMP_LANG = lang;
+});
+
+afterEach(() => {
+	clearToolTopics("omp-ask-more");
 });
 
 async function override(settings: Record<string, unknown>): Promise<void> {
@@ -51,18 +56,23 @@ describe("native plugin settings", () => {
 	});
 });
 
-it("ships complete body-only topic instructions behind the exact footer", () => {
-	const topics = docTopics();
-	expect(DESCRIPTION).toContain("Topics — read the one a call needs before making it:");
-	expect(Object.keys(topics)).toEqual(["routing", "rounds", "results"]);
-	for (const [name, body] of Object.entries(topics)) {
-		expect(DESCRIPTION).toContain(`help://ask/${name}`);
-		expect(DESCRIPTION).not.toContain("xd://");
-		expect(body).not.toContain("xd://");
-		expect(body).not.toContain("tool://");
-		expect(body).not.toStartWith("---");
-	}
-	expect(topics.routing).toContain("Everything else the instruction requires still applies.");
-	expect(topics.rounds).toContain("fix them and call `ask` again");
-	expect(topics.results).toContain("decide it yourself");
+it("registers routing under tool://ask/routing and keeps description <= 200 chars", () => {
+	registerAskTopics();
+	expect(DESCRIPTION.length).toBeLessThanOrEqual(200);
+	expect(DESCRIPTION).toContain("tool://ask/routing");
+	expect(DESCRIPTION).not.toContain("xd://");
+	expect(DESCRIPTION).not.toContain("help://");
+
+	const topics = listToolTopics("ask");
+	expect(topics.map((doc) => doc.topic)).toEqual(["routing"]);
+
+	const resolved = resolveToolTopic("ask", "routing");
+	expect(resolved).toBeDefined();
+	const body = routingTopicBody();
+	expect(resolved?.content).toBe(body);
+	expect(body).not.toContain("xd://");
+	expect(body).not.toContain("help://");
+	expect(body).not.toStartWith("---");
+	expect(body).toContain("Everything else the instruction requires still applies.");
+	expect(body).toContain("evidence_files");
 });
