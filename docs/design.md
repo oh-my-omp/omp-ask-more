@@ -108,7 +108,7 @@ src/settings.ts     the readability.judge plugin setting
 src/readability.ts  the readability check: per-question dialog, sentences and terms, the yes/no questions, the rejecting rule, rejection text, deadline
 src/skill-prompt.ts the rule appended to a user-invoked skill prompt on its way to the model
 src/tern-setup.ts   links and reloads the package's Tern plugin when omp loads the extension
-src/description.ts  model-facing purpose (<=200 chars), tool://ask/routing pointer and registration via registerToolTopics
+src/description.ts  model-facing purpose (<=200 chars), help://ask/routing pointer, docTopics and registerToolTopics registration
 src/topics/         shipped routing.md body
 tern/               Tern plugin: the stylesheet putting each line under an option's name on its own line in Tern's omp view;
                     window.luau finding the open question's file demos, host.luau's demo block playing them beside the form

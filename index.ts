@@ -8,7 +8,7 @@ import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
 import { resolveDemos } from "./src/demo.ts";
-import { DESCRIPTION, registerAskTopics } from "./src/description.ts";
+import { DESCRIPTION, docTopics, registerAskTopics } from "./src/description.ts";
 import { compileForm } from "./src/form.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate } from "./src/readability.ts";
 import { answeredResult, labelMap, rejectedResult } from "./src/result.ts";
@@ -93,6 +93,7 @@ export default function askMore(pi: ExtensionAPI): void {
 		name: "ask",
 		label: tr("Ask", "询问"),
 		description: DESCRIPTION,
+		docTopics,
 		parameters: parametersSchema,
 		approval: "read",
 		concurrency: "exclusive",
@@ -102,6 +103,7 @@ export default function askMore(pi: ExtensionAPI): void {
 		renderResult: (result, options, theme) => askToolRenderer.renderResult(result, options, theme),
 		describeResult: (result, options) => askToolRenderer.describeResult(result, options),
 	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & {
+		docTopics(): Readonly<Record<string, string>>;
 		concurrency: "exclusive";
 	};
 	pi.registerTool(tool);

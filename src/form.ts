@@ -45,7 +45,7 @@ function evidenceHtml(entry: ResolvedEvidence): string {
 		case "file":
 			return `${head(`<code>${escapeHtml(`${entry.path}:${entry.start}-${entry.end}`)}</code>`)}<pre>${escapeHtml(numbered(entry.lines, entry.start))}</pre>`;
 		case "text":
-			return `${head(`${escapeHtml(entry.source)} · ${escapeHtml(tr("quoted by the model, not read by ask-more", "模型引用，ask-more 未读取核对"))}`)}<pre>${escapeHtml(entry.lines.join("\n"))}</pre>`;
+			return `${head(`${escapeHtml(entry.source)} · ${escapeHtml(tr("quoted directly, not read from disk", "直接引用，未从磁盘读取核对"))}`)}<pre>${escapeHtml(entry.lines.join("\n"))}</pre>`;
 		case "directory":
 			return head(`<code>${escapeHtml(entry.path)}</code> · ${escapeHtml(tr("a directory", "这是目录"))}`);
 		case "unreadable":

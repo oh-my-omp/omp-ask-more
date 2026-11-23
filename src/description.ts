@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { registerToolTopics, type ToolTopicDoc } from "../omomp-shared/internal-url.ts";
+import { registerToolTopics, type ToolTopicDoc, toDocTopics } from "../omomp-shared/internal-url.ts";
 
 export const DESCRIPTION =
-	"Ask the user decisions as one form with brief, evidence, and per-option tradeoffs, blocking until answered. Read `tool://ask/routing` before asking, confirming, or following a skill's questions.";
+	"Ask the user decisions in one interactive form with context, evidence, and option tradeoffs; blocks until they submit or cancel. Read `help://ask/routing` before asking.";
 
 export function routingTopicBody(): string {
 	return readFileSync(new URL("./topics/routing.md", import.meta.url), "utf8");
@@ -17,6 +17,8 @@ export const ASK_TOPICS: readonly ToolTopicDoc[] = [
 		body: routingTopicBody,
 	},
 ];
+
+export const docTopics: () => Readonly<Record<string, string>> = toDocTopics(ASK_TOPICS);
 
 export function registerAskTopics(): void {
 	registerToolTopics("omp-ask-more", ASK_TOPICS);

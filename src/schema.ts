@@ -65,7 +65,7 @@ export const briefSchema = z.object({
 	how: z.string().min(1).describe("non-empty text saying what happens after each answer, and which constraint decides it"),
 	evidence: z
 		.array(evidenceSchema)
-		.describe("an array of evidence tagged by kind: file lines ask-more reads itself, or text you quote")
+		.describe("an array of evidence tagged by kind: file lines read from disk, or text you quote")
 		.optional(),
 	diagram: z.string().min(1).describe("Mermaid source of a flowchart, sequence diagram or state diagram").optional(),
 	demo: demoSchema.describe("a demo of how things behave now").optional(),
@@ -119,7 +119,7 @@ export const evidenceFileParamSchema = z
 			.optional(),
 		note: z.string().min(1).describe("text saying why this evidence matters").optional(),
 	})
-	.describe("a file evidence entry read directly from disk by ask-more");
+	.describe("a file evidence entry read directly from disk");
 
 export const evidenceQuoteParamSchema = z
 	.object({

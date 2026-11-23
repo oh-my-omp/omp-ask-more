@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { clearToolTopics, listToolTopics, resolveToolTopic } from "../omomp-shared/internal-url.ts";
-import { DESCRIPTION, registerAskTopics, routingTopicBody } from "../src/description.ts";
+import { DESCRIPTION, docTopics, registerAskTopics, routingTopicBody } from "../src/description.ts";
 import { readReadabilityJudge, SettingsError, settingsErrorText } from "../src/settings.ts";
 
 let cwd: string;
@@ -56,12 +56,12 @@ describe("native plugin settings", () => {
 	});
 });
 
-it("registers routing under tool://ask/routing and keeps description <= 200 chars", () => {
+it("registers routing under help://ask/routing and docTopics, keeping description <= 200 chars", () => {
 	registerAskTopics();
 	expect(DESCRIPTION.length).toBeLessThanOrEqual(200);
-	expect(DESCRIPTION).toContain("tool://ask/routing");
+	expect(DESCRIPTION).toContain("help://ask/routing");
 	expect(DESCRIPTION).not.toContain("xd://");
-	expect(DESCRIPTION).not.toContain("help://");
+	expect(DESCRIPTION).not.toContain("tool://");
 
 	const topics = listToolTopics("ask");
 	expect(topics.map((doc) => doc.topic)).toEqual(["routing"]);
@@ -70,8 +70,9 @@ it("registers routing under tool://ask/routing and keeps description <= 200 char
 	expect(resolved).toBeDefined();
 	const body = routingTopicBody();
 	expect(resolved?.content).toBe(body);
+	expect(docTopics()).toEqual({ routing: body });
 	expect(body).not.toContain("xd://");
-	expect(body).not.toContain("help://");
+	expect(body).not.toContain("tool://");
 	expect(body).not.toStartWith("---");
 	expect(body).toContain("Everything else the instruction requires still applies.");
 	expect(body).toContain("evidence_files");
