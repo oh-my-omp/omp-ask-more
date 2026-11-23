@@ -21,5 +21,5 @@ export const ASK_TOPICS: readonly ToolTopicDoc[] = [
 export const docTopics: () => Readonly<Record<string, string>> = toDocTopics(ASK_TOPICS);
 
 export function registerAskTopics(): void {
-	registerToolTopics("omp-ask-more", ASK_TOPICS);
+	registerToolTopics("omp-ask-ng", ASK_TOPICS);
 }

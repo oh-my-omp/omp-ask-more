@@ -5,7 +5,7 @@ import { findTern, readPluginManifest, type TernPluginCli } from "../omomp-share
 import { errorText } from "./errors.ts";
 
 const TERN_PLUGIN_DIR = resolve(import.meta.dir, "../tern");
-const TERN_PLUGIN_ID = "omp-ask-more";
+const TERN_PLUGIN_ID = "omp-ask-ng";
 
 export type TernPluginState =
 	| { readonly kind: "absent" }
@@ -58,7 +58,7 @@ async function setup(): Promise<TernPluginState> {
 	const after = await loadedVersion(cli);
 	if ("version" in after && after.version === version) return { kind: "reloaded", from: before.version, to: version };
 	const detail = [
-		"detail" in after ? after.detail : `Tern runs ${after.version ?? "no omp-ask-more plugin"}, the package has ${version}`,
+		"detail" in after ? after.detail : `Tern runs ${after.version ?? "no omp-ask-ng plugin"}, the package has ${version}`,
 		reload.ok ? "" : `tern plugin reload: ${reload.error.message}`,
 	]
 		.filter(Boolean)
@@ -81,16 +81,16 @@ export function ternNotice(state: TernPluginState): { readonly text: string; rea
 		case "reloaded":
 			return {
 				text: tr(
-					`omp-ask-more: Tern plugin loaded ${state.to}${state.from === null ? "" : ` (was ${state.from})`}`,
-					`omp-ask-more: Tern 插件已加载 ${state.to}${state.from === null ? "" : `（原为 ${state.from}）`}`,
+					`omp-ask-ng: Tern plugin loaded ${state.to}${state.from === null ? "" : ` (was ${state.from})`}`,
+					`omp-ask-ng: Tern 插件已加载 ${state.to}${state.from === null ? "" : `（原为 ${state.from}）`}`,
 				),
 				level: "info",
 			};
 		case "failed":
 			return {
 				text: tr(
-					`omp-ask-more: Tern's omp view shows an option's tradeoff lines run together, because its Tern plugin did not load:\n${state.detail}`,
-					`omp-ask-more: Tern 插件没有加载，Tern 的 omp 视图会把选项的取舍各行连成一段：\n${state.detail}`,
+					`omp-ask-ng: Tern's omp view shows an option's tradeoff lines run together, because its Tern plugin did not load:\n${state.detail}`,
+					`omp-ask-ng: Tern 插件没有加载，Tern 的 omp 视图会把选项的取舍各行连成一段：\n${state.detail}`,
 				),
 				level: "warning",
 			};

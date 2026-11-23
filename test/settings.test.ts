@@ -9,7 +9,7 @@ let cwd: string;
 const lang = process.env.OMOMP_LANG;
 
 beforeAll(async () => {
-	cwd = await mkdtemp("/tmp/omp-ask-more-settings-");
+	cwd = await mkdtemp("/tmp/omp-ask-ng-settings-");
 	await mkdir(join(cwd, ".omp"));
 });
 
@@ -19,11 +19,11 @@ afterAll(() => {
 });
 
 afterEach(() => {
-	clearToolTopics("omp-ask-more");
+	clearToolTopics("omp-ask-ng");
 });
 
 async function override(settings: Record<string, unknown>): Promise<void> {
-	await Bun.write(join(cwd, ".omp/plugin-overrides.json"), JSON.stringify({ settings: { "omp-ask-more": settings } }));
+	await Bun.write(join(cwd, ".omp/plugin-overrides.json"), JSON.stringify({ settings: { "omp-ask-ng": settings } }));
 }
 
 describe("native plugin settings", () => {
@@ -40,7 +40,7 @@ describe("native plugin settings", () => {
 		await mkdir(join(cwd, ".claude"));
 		await Bun.write(
 			join(cwd, ".claude/plugin-overrides.json"),
-			JSON.stringify({ settings: { "omp-ask-more": { "readability.judge": false } } }),
+			JSON.stringify({ settings: { "omp-ask-ng": { "readability.judge": false } } }),
 		);
 		await override({ "readability.judge": true });
 		expect(await readReadabilityJudge({ cwd })).toBe(true);

@@ -59,7 +59,7 @@ const lang = process.env.OMOMP_LANG;
 let work = "";
 beforeAll(async () => {
 	process.env.OMOMP_LANG = "en";
-	work = await mkdtemp(join(tmpdir(), "ask-more-form-"));
+	work = await mkdtemp(join(tmpdir(), "ask-ng-form-"));
 	await writeFile(join(work, "ttl.gif"), GIF);
 	await writeFile(join(work, "retry.mp4"), new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32]));
 });

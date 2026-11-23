@@ -6,7 +6,7 @@
 -- its caption as text (a card's head is one line, cut at the block's width) and a TSP `media` node
 -- by path: Tern loads the file and shows a picture, an SVG, a 3D model, a PDF, a video or audio
 -- with its controls, or a card for any other file. A card's role
--- `omp-ask-more.demo.<n>` (0-based) names the demo for styles and for tests driving the window.
+-- `omp-ask-ng.demo.<n>` (0-based) names the demo for styles and for tests driving the window.
 -- Nothing is saved: the block belongs to one open form, and the window half closes a leftover one.
 
 type Demo = { label: string, path: string, caption: string? }
@@ -40,7 +40,7 @@ local function card(demo: Demo, index: number)
 	end
 	table.insert(children, tern.ui.node("media", { path = demo.path }))
 	return tern.ui.card({ tern.ui.span(demo.label, "strong") }, children, {
-		role = "omp-ask-more.demo." .. (index - 1),
+		role = "omp-ask-ng.demo." .. (index - 1),
 	})
 end
 

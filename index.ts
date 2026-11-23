@@ -40,7 +40,7 @@ function sessionJudge(ctx: ExtensionContext): NoulJudge | undefined {
 
 function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], signal: AbortSignal | undefined): Promise<Gate> {
 	return gateUnlessRetry(ctx.sessionManager.getBranch(), async () => {
-		const warn = (message: string) => ctx.ui.notify?.(`ask-more: ${message}`, "warning");
+		const warn = (message: string) => ctx.ui.notify?.(`ask-ng: ${message}`, "warning");
 		let enabled: boolean;
 		try {
 			enabled = await readReadabilityJudge(ctx);
@@ -85,7 +85,7 @@ async function ask(
 	return answeredResult(questions, labelMap(html), result);
 }
 
-export default function askMore(pi: ExtensionAPI): void {
+export default function askNg(pi: ExtensionAPI): void {
 	registerAskTopics();
 	const tool = {
 		name: "ask",

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed the plugin from `omp-ask-more` to `omp-ask-ng`: install with `omp plugin install https://github.com/oh-my-omp/omp-ask-ng#release`, the package name and plugin settings namespace are `omp-ask-ng` (`omp plugin config set omp-ask-ng …`, `settings["omp-ask-ng"]` in `.omp/plugin-overrides.json`), and the Tern plugin id is `omp-ask-ng`; session data written by earlier versions still loads
+
 ## [0.3.1] - 2026-11-22
 
 ### Changed

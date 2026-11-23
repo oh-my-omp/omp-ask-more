@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp-ask-more",
+      "name": "omp-ask-ng",
       "devDependencies": {
         "@biomejs/biome": "latest",
         "@oh-my-pi/omptype": "latest",

@@ -3,7 +3,7 @@ import { getPluginSettings } from "@oh-my-pi/pi-coding-agent/extensibility/plugi
 import { tr } from "../omomp-shared/i18n.ts";
 import manifest from "../package.json";
 
-const PLUGIN = "omp-ask-more";
+const PLUGIN = "omp-ask-ng";
 
 export class SettingsError extends Error {
 	constructor() {

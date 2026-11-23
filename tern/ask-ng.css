@@ -1,4 +1,4 @@
-/* An ask-more option label is its name, then one <em> per tradeoff, description, holds-when and
+/* An ask-ng option label is its name, then one <em> per tradeoff, description, holds-when and
  * cost line. Tern's omp view joins a label's lines into one wrapped run; each <em> as a block puts
  * every line under the option's name, as omp's classic terminal draws them. */
 .sf-list[data-role='omp.ask.options']

@@ -7,7 +7,7 @@ import { resolveEvidence } from "../src/brief.ts";
 import type { FileEvidence } from "../src/schema.ts";
 
 describe("resolveEvidence", () => {
-	const dir = mkdtempSync(join(tmpdir(), "ask-more-brief-"));
+	const dir = mkdtempSync(join(tmpdir(), "ask-ng-brief-"));
 	writeFileSync(join(dir, "five.ts"), ["one", "two", "three", "four", "five"].join("\n"));
 	writeFileSync(join(dir, "crlf.txt"), "a\r\nb\r\nc\r\n");
 	const numbered = Array.from({ length: 9000 }, (_, index) => `line ${index + 1} ${"x".repeat(60)}`);

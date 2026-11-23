@@ -10,7 +10,7 @@
 -- none; when the pane stops waiting, or ends, the block closes. A block the user closed stays
 -- closed until the demos change.
 
-local KIND = "omp-ask-more.demo"
+local KIND = "omp-ask-ng.demo"
 local POLL_MS = 500
 local CAPTION = " — "
 
