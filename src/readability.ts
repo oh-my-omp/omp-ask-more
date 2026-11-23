@@ -1,6 +1,7 @@
 import type { JsonValue, Judge, JudgmentRequest, NoulQuestion } from "@oh-my-pi/pi-ai";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { tr } from "../omomp-shared/i18n.ts";
+import { errorText } from "./errors.ts";
 import type { AskQuestion } from "./schema.ts";
 
 export type NoulJudge = Pick<Judge, "judge">;
@@ -131,22 +132,22 @@ export async function judgeReadability(
 ): Promise<readonly Finding[]> {
 	const stop = new AbortController();
 	const options = { signal: AbortSignal.any([signal, stop.signal]) };
-	const sentenceJobs: { readonly at: number; readonly sentence: string }[] = [];
-	const termJobs: { readonly at: number; readonly term: string }[] = [];
-	const shown = questions.map((question, at) => {
+	const sentenceJobs: { readonly at: number; readonly shown: JsonObject; readonly sentence: string }[] = [];
+	const termJobs: { readonly at: number; readonly shown: JsonObject; readonly term: string }[] = [];
+	questions.forEach((question, at) => {
+		const shown = dialog(question);
 		const text = shownText(question);
-		for (const sentence of sentencesOf(text.prose)) sentenceJobs.push({ at, sentence });
-		for (const term of candidateTerms(text.all)) termJobs.push({ at, term });
-		return dialog(question);
+		for (const sentence of sentencesOf(text.prose)) sentenceJobs.push({ at, shown, sentence });
+		for (const term of candidateTerms(text.all)) termJobs.push({ at, shown, term });
 	});
 	try {
 		const [sentences, terms] = await Promise.all([
-			inPool(sentenceJobs, CONCURRENCY, async ({ at, sentence }): Promise<SentenceFinding> => {
-				const { answers } = await judge.judge(sentenceRequest(shown[at] ?? {}, sentence), options);
+			inPool(sentenceJobs, CONCURRENCY, async ({ shown, sentence }): Promise<SentenceFinding> => {
+				const { answers } = await judge.judge(sentenceRequest(shown, sentence), options);
 				return { sentence, actor: answer(answers, "actor"), unshown: answer(answers, "unshown"), jargon: answer(answers, "jargon") };
 			}),
-			inPool(termJobs, CONCURRENCY, async ({ at, term }): Promise<TermFinding> => {
-				const { answers } = await judge.judge(termRequest(shown[at] ?? {}, term), options);
+			inPool(termJobs, CONCURRENCY, async ({ shown, term }): Promise<TermFinding> => {
+				const { answers } = await judge.judge(termRequest(shown, term), options);
 				return { term, known: answer(answers, "known"), said: answer(answers, "said") };
 			}),
 		]);
@@ -239,11 +240,7 @@ export async function readabilityGate(
 		return failing.length === 0 ? { kind: "pass" } : { kind: "reject", problems: readabilityProblems(failing) };
 	} catch (error) {
 		if (signal?.aborted) return { kind: "cancelled" };
-		const detail = deadline.aborted
-			? tr(`no answer within ${deadlineMs / 1000}s`, `${deadlineMs / 1000} 秒内没有结果`)
-			: error instanceof Error
-				? error.message
-				: String(error);
+		const detail = deadline.aborted ? tr(`no answer within ${deadlineMs / 1000}s`, `${deadlineMs / 1000} 秒内没有结果`) : errorText(error);
 		warn(tr(`readability check skipped: ${detail}`, `已跳过可读性检查：${detail}`));
 		return { kind: "pass" };
 	}

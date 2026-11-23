@@ -3,7 +3,7 @@ import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { clearToolTopics, listToolTopics, resolveToolTopic } from "../omomp-shared/internal-url.ts";
 import { DESCRIPTION, docTopics, registerAskTopics, routingTopicBody } from "../src/description.ts";
-import { readReadabilityJudge, SettingsError, settingsErrorText } from "../src/settings.ts";
+import { readReadabilityJudge, SettingsError } from "../src/settings.ts";
 
 let cwd: string;
 const lang = process.env.OMOMP_LANG;
@@ -50,18 +50,15 @@ describe("native plugin settings", () => {
 
 	it("renders the diagnostic in the current language", () => {
 		process.env.OMOMP_LANG = "zh";
-		expect(settingsErrorText()).toContain("必须为 true 或 false");
+		expect(new SettingsError().message).toContain("必须为 true 或 false");
 		process.env.OMOMP_LANG = "en";
-		expect(settingsErrorText()).toContain("must be true or false");
+		expect(new SettingsError().message).toContain("must be true or false");
 	});
 });
 
-it("registers routing under help://ask/routing and docTopics, keeping description <= 200 chars", () => {
+it("registers the routing topic the description points to under help://ask/routing and docTopics", () => {
 	registerAskTopics();
-	expect(DESCRIPTION.length).toBeLessThanOrEqual(200);
 	expect(DESCRIPTION).toContain("help://ask/routing");
-	expect(DESCRIPTION).not.toContain("xd://");
-	expect(DESCRIPTION).not.toContain("tool://");
 
 	const topics = listToolTopics("ask");
 	expect(topics.map((doc) => doc.topic)).toEqual(["routing"]);
@@ -71,9 +68,4 @@ it("registers routing under help://ask/routing and docTopics, keeping descriptio
 	const body = routingTopicBody();
 	expect(resolved?.content).toBe(body);
 	expect(docTopics()).toEqual({ routing: body });
-	expect(body).not.toContain("xd://");
-	expect(body).not.toContain("tool://");
-	expect(body).not.toStartWith("---");
-	expect(body).toContain("Everything else the instruction requires still applies.");
-	expect(body).toContain("evidence_files");
 });

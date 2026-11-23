@@ -9,11 +9,12 @@ import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
 import { resolveDemos } from "./src/demo.ts";
 import { DESCRIPTION, docTopics, registerAskTopics } from "./src/description.ts";
+import { errorText } from "./src/errors.ts";
 import { compileForm } from "./src/form.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate } from "./src/readability.ts";
 import { answeredResult, labelMap, rejectedResult } from "./src/result.ts";
 import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "./src/schema.ts";
-import { readReadabilityJudge, SettingsError, settingsErrorText } from "./src/settings.ts";
+import { readReadabilityJudge } from "./src/settings.ts";
 import { withSkillAskRule } from "./src/skill-prompt.ts";
 import { ensureTernPlugin, ternNotice } from "./src/tern-setup.ts";
 
@@ -44,7 +45,7 @@ function screen(ctx: ExtensionContext, questions: readonly AskQuestion[], signal
 		try {
 			enabled = await readReadabilityJudge(ctx);
 		} catch (error) {
-			warn(error instanceof SettingsError ? settingsErrorText() : error instanceof Error ? error.message : String(error));
+			warn(errorText(error));
 			return { kind: "pass" };
 		}
 		if (!enabled) return { kind: "pass" };
@@ -80,10 +81,7 @@ async function ask(
 		Promise.all(questions.map((question) => resolveDemos(question, ctx.cwd))),
 	]);
 	const html = compileForm(questions, evidence, demos);
-	const result = await invoke<AskToolDetails>(
-		{ html },
-		{ ...(signal === undefined ? {} : { signal }), ...(onUpdate === undefined ? {} : { onUpdate }) },
-	);
+	const result = await invoke<AskToolDetails>({ html }, { signal, onUpdate });
 	return answeredResult(questions, labelMap(html), result);
 }
 

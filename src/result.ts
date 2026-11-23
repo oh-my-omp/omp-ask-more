@@ -8,14 +8,12 @@ const NO_ANSWER = "(no answer)";
 const TIMED_OUT = "(timed out: the user did not answer; decide it yourself with your best judgment and say what you chose)";
 const OTHER_PREFIX = `${OTHER_LABEL}: `;
 
-/** Shown option text → the model's label, per question id. The shown text carries the tradeoff lines. */
 export type LabelMap = ReadonlyMap<string, ReadonlyMap<string, string>>;
 
 function shown(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
 }
 
-/** The host answers with an option's whole label folded onto one line; read that text from the form itself. */
 export function labelMap(html: string): LabelMap {
 	const fields = new Map<string, Map<string, string>>();
 	for (const field of parseHtmlForm(html).fields) {

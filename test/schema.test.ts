@@ -1,28 +1,35 @@
 import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
-import { type AskParams, type AskParamsWire, demoSchema, evidenceSchema, parametersSchema, parseParams, validate } from "../src/schema.ts";
+import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "../src/schema.ts";
 
-function wire(overrides: Partial<AskParamsWire["questions"][number]> = {}): AskParamsWire {
+type QuestionWire = AskParamsWire["questions"][number];
+
+function question(overrides: Partial<QuestionWire> = {}): QuestionWire {
 	return {
-		questions: [
-			{
-				id: "retry",
-				question: "重试应该怎么做？",
-				brief: { where: "src/retry.ts:41-58", what: "选重试策略", how: "A 要迁移，B 不动签名" },
-				options: [
-					{ label: "指数退避", tradeoff: "安全，但要迁移", cost: "1 张表" },
-					{ label: "固定 3 次", tradeoff: "不迁移，但重复写继续", holds_when: "重复写无害" },
-				],
-				...overrides,
-			},
+		id: "retry",
+		question: "重试应该怎么做？",
+		brief: { where: "src/retry.ts:41-58", what: "选重试策略", how: "A 要迁移，B 不动签名" },
+		options: [
+			{ label: "指数退避", tradeoff: "安全，但要迁移", cost: "1 张表" },
+			{ label: "固定 3 次", tradeoff: "不迁移，但重复写继续", holds_when: "重复写无害" },
 		],
+		...overrides,
 	};
 }
 
-function parsed(overrides: Partial<AskParamsWire["questions"][number]> = {}): AskParams {
+function wire(overrides: Partial<QuestionWire> = {}): AskParamsWire {
+	return { questions: [question(overrides)] };
+}
+
+function parsed(overrides: Partial<QuestionWire> = {}): { questions: readonly AskQuestion[] } {
 	const checked = parseParams(wire(overrides));
 	if (!checked.ok) throw new Error(checked.problems.join("\n"));
-	return { questions: [...checked.questions] };
+	return { questions: checked.questions };
+}
+
+function problems(params: AskParamsWire): readonly string[] {
+	const checked = parseParams(params);
+	return checked.ok ? [] : checked.problems;
 }
 
 describe("parseParams", () => {
@@ -109,122 +116,96 @@ describe("parseParams", () => {
 	});
 });
 
-describe("validate", () => {
+describe("parseParams validation", () => {
 	it("accepts a complete question", () => {
-		expect(validate(parsed())).toEqual({ ok: true, questions: parsed().questions });
+		expect(problems(wire())).toEqual([]);
 	});
 
 	it("validates every question and names the one that is wrong", () => {
-		const params = parsed();
-		const second = structuredClone(params.questions[0]!);
-		second.id = "budget";
-		second.options[1]!.tradeoff = "";
-		params.questions.push(second);
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok)
-			expect(checked.problems).toEqual(["questions[1].options[1].tradeoff: empty; say what the option buys and what it costs"]);
+		const second = question({
+			id: "budget",
+			options: [
+				{ label: "指数退避", tradeoff: "安全，但要迁移" },
+				{ label: "固定 3 次", tradeoff: "  " },
+			],
+		});
+		expect(problems({ questions: [question(), second] })).toEqual([
+			"questions[1].options[1].tradeoff: empty; say what the option buys and what it costs",
+		]);
 	});
 
 	it("rejects two questions with the same id", () => {
-		const params = parsed();
-		params.questions.push(structuredClone(params.questions[0]!));
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(['questions[1].id: duplicate "retry"; every question needs its own id']);
+		expect(problems({ questions: [question(), question()] })).toEqual([
+			'questions[1].id: duplicate "retry"; every question needs its own id',
+		]);
 	});
 
 	it("rejects an empty brief section", () => {
-		const params = parsed();
-		params.questions[0]!.brief.where = "   ";
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(["questions[0].brief.where: empty"]);
-	});
-
-	it("rejects an option without a tradeoff and names it", () => {
-		const params = parsed();
-		params.questions[0]!.options[1]!.tradeoff = "";
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("questions[0].options[1].tradeoff");
+		expect(problems(wire({ brief: { where: "   ", what: "选重试策略", how: "A 要迁移" } }))).toEqual(["questions[0].brief.where: empty"]);
 	});
 
 	it("rejects a label the form takes for the user's own answer", () => {
+		const labelled = (label: string) =>
+			wire({
+				options: [
+					{ label, tradeoff: "t" },
+					{ label: "固定 3 次", tradeoff: "t" },
+				],
+			});
 		for (const label of ["Other", "other approach", "Other…"]) {
-			const params = parsed();
-			params.questions[0]!.options[0]!.label = label;
-			const checked = validate(params);
-			expect(checked.ok).toBe(false);
-			if (!checked.ok) expect(checked.problems.join("\n")).toContain("starts with Other");
+			expect(problems(labelled(label)).join("\n")).toContain("starts with Other");
 		}
-		const params = parsed();
-		params.questions[0]!.options[0]!.label = "Otherwise retry";
-		expect(validate(params).ok).toBe(true);
+		expect(problems(labelled("Otherwise retry"))).toEqual([]);
 	});
 
 	it("rejects a recommended index outside the options", () => {
-		const params = parsed();
-		params.questions[0]!.recommended = 9;
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems.join("\n")).toContain("recommended");
+		expect(problems(wire({ recommended: 9 }))).toEqual(["questions[0].recommended: 9 is not an index into 2 options"]);
+		expect(problems(wire({ recommended: -1 }))).toEqual(["questions[0].recommended: -1 is not an index into 2 options"]);
 	});
 
 	it("accepts any number of evidence references and windows of any length", () => {
-		const params = parsed();
-		params.questions[0]!.brief.evidence = [
-			...Array.from({ length: 8 }, (_, index) => evidenceSchema.parse({ kind: "file", path: `src/f${index}.ts` })),
-			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", start: 1, end: 3000 }),
+		const evidence_files = [
+			...Array.from({ length: 8 }, (_, index) => ({ path: `src/f${index}.ts` })),
+			{ path: "src/retry.ts", start: 1, end: 3000 },
 		];
-		expect(validate(params).ok).toBe(true);
+		expect(problems(wire({ evidence_files }))).toEqual([]);
 	});
 
 	it("rejects an evidence end without a start, or before it", () => {
-		const params = parsed();
-		params.questions[0]!.brief.evidence = [
-			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", end: 58 }),
-			evidenceSchema.parse({ kind: "file", path: "src/retry.ts", start: 58, end: 41 }),
-		];
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) {
-			expect(checked.problems).toEqual([
-				"questions[0].brief.evidence[0].end: 58 without start; give start too, or leave both out for the file's first lines",
-				"questions[0].brief.evidence[1].end: 41 is before start 58",
-			]);
-		}
+		expect(
+			problems(
+				wire({
+					evidence_files: [
+						{ path: "src/retry.ts", end: 58 },
+						{ path: "src/retry.ts", start: 58, end: 41 },
+					],
+				}),
+			),
+		).toEqual([
+			"questions[0].brief.evidence[0].end: 58 without start; give start too, or leave both out for the file's first lines",
+			"questions[0].brief.evidence[1].end: 41 is before start 58",
+		]);
 	});
 
 	it("rejects quoted text without a one-line source, or without text", () => {
-		const params = parsed();
-		params.questions[0]!.brief.evidence = [
-			evidenceSchema.parse({ kind: "text", source: "bun test\n(run 2)", text: "3 pass" }),
-			evidenceSchema.parse({ kind: "text", source: "  ", text: "  " }),
-		];
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) {
-			expect(checked.problems).toEqual([
-				"questions[0].brief.evidence[0].source: more than one line; name where the text came from in one line and put the text in text",
-				"questions[0].brief.evidence[1].source: empty",
-				"questions[0].brief.evidence[1].text: empty",
-			]);
-		}
-	});
-
-	it("does not parse evidence without its kind, or carrying the other kind's fields", () => {
-		expect(evidenceSchema.safeParse({ path: "src/retry.ts", start: 1 }).success).toBe(false);
-		expect(evidenceSchema.safeParse({ kind: "text", path: "src/retry.ts" }).success).toBe(false);
-		expect(evidenceSchema.safeParse({ kind: "file", source: "bun test", text: "ok" }).success).toBe(false);
+		expect(
+			problems(
+				wire({
+					evidence_quotes: [
+						{ source: "bun test\n(run 2)", text: "3 pass" },
+						{ source: "  ", text: "  " },
+					],
+				}),
+			),
+		).toEqual([
+			"questions[0].brief.evidence[0].source: more than one line; name where the text came from in one line and put the text in text",
+			"questions[0].brief.evidence[1].source: empty",
+			"questions[0].brief.evidence[1].text: empty",
+		]);
 	});
 
 	it("rejects a frames demo whose frame is blank", () => {
-		const params = parsed();
-		params.questions[0]!.brief.demo = demoSchema.parse({ kind: "frames", frames: [{ body: "ok" }, { body: "  \n" }] });
-		const checked = validate(params);
-		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.problems).toEqual(["questions[0].brief.demo.frames[1].body: empty"]);
+		expect(problems(wire({ demo_frames: [{ body: "ok" }, { body: "  \n" }] }))).toEqual(["questions[0].brief.demo.frames[1].body: empty"]);
 	});
 });
 

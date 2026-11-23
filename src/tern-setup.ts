@@ -1,12 +1,8 @@
-// Links the package's Tern plugin (`tern/`) into Tern, so Tern's own omp view loads the stylesheet that puts
-// each line under an option's name on its own line, and the file demos of an open form play beside it.
-// omp runs the extension factory while installing and rolls
-// the install back when it throws, and the ask works without Tern, so nothing here throws: every outcome is a
-// state the session reports.
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tr } from "../omomp-shared/i18n.ts";
 import { findTern, readPluginManifest, type TernPluginCli } from "../omomp-shared/tern-plugin.ts";
+import { errorText } from "./errors.ts";
 
 const TERN_PLUGIN_DIR = resolve(import.meta.dir, "../tern");
 const TERN_PLUGIN_ID = "omp-ask-more";
@@ -29,11 +25,6 @@ async function loadedVersion(cli: TernPluginCli): Promise<{ readonly version: st
 	return { version: listed.value.find((plugin) => plugin.id === TERN_PLUGIN_ID)?.version ?? null };
 }
 
-/**
- * Links `wanted` as the plugin. `tern plugin link` refuses while Tern's plugin directory holds an installed copy of
- * the same id, the state `tern plugin install …/tern` left before the package linked itself; that copy, of whatever
- * version, is removed and the link made again. Returns why it could not link, or null once linked.
- */
 async function relink(cli: TernPluginCli, wanted: string): Promise<string | null> {
 	const first = await cli.link(wanted);
 	if (first.ok) return null;
@@ -77,16 +68,11 @@ async function setup(): Promise<TernPluginState> {
 
 let done: Promise<TernPluginState> | undefined;
 
-/** Links and loads the Tern plugin once per process; later calls share the first outcome. */
 export function ensureTernPlugin(): Promise<TernPluginState> {
-	done ??= setup().catch((error: unknown) => ({
-		kind: "failed" as const,
-		detail: error instanceof Error ? error.message : String(error),
-	}));
+	done ??= setup().catch((error: unknown) => ({ kind: "failed" as const, detail: errorText(error) }));
 	return done;
 }
 
-/** What the user is told about the Tern plugin at session start; nothing when Tern is absent or already current. */
 export function ternNotice(state: TernPluginState): { readonly text: string; readonly level: "info" | "warning" } | null {
 	switch (state.kind) {
 		case "absent":
@@ -108,9 +94,5 @@ export function ternNotice(state: TernPluginState): { readonly text: string; rea
 				),
 				level: "warning",
 			};
-		default: {
-			const unreachable: never = state;
-			return unreachable;
-		}
 	}
 }

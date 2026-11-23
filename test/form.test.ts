@@ -21,6 +21,7 @@ const retry: AskQuestion = {
 		what: "Which retry policy the client uses.",
 		how: "Backoff needs a migration; fixed retries keep writing twice.",
 		risks: ["Retries hide an outage"],
+		evidence: [],
 	},
 	options: [
 		{ label: "Exponential backoff", tradeoff: "safe, needs a migration", cost: "one `retry_keys` table" },
@@ -32,7 +33,12 @@ const retry: AskQuestion = {
 const cache: AskQuestion = {
 	id: "cache",
 	question: "Which cache policy should the client use?",
-	brief: { where: "The cache never expires.", what: "When entries leave the cache.", how: "TTL is simple; invalidation is exact." },
+	brief: {
+		where: "The cache never expires.",
+		what: "When entries leave the cache.",
+		how: "TTL is simple; invalidation is exact.",
+		evidence: [],
+	},
 	options: [
 		{ label: "TTL 60s", tradeoff: "simple, can serve stale data" },
 		{ label: "Invalidate on write", tradeoff: "exact, needs a hook" },
@@ -44,7 +50,6 @@ const evidence: ResolvedEvidence[] = [
 	{ kind: "text", source: "server log", lines: ["timeout after 30s"] },
 ];
 
-// A 1x1 GIF: the host's form loads it as a picture.
 const GIF = Uint8Array.from([
 	0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04, 0x01,
 	0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,

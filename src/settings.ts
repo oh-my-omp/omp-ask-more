@@ -7,12 +7,8 @@ const PLUGIN = "omp-ask-more";
 
 export class SettingsError extends Error {
 	constructor() {
-		super("Invalid ask-more plugin setting");
+		super(tr("readability.judge must be true or false", "readability.judge 必须为 true 或 false"));
 	}
-}
-
-export function settingsErrorText(): string {
-	return tr("readability.judge must be true or false", "readability.judge 必须为 true 或 false");
 }
 
 export async function readReadabilityJudge(ctx: Pick<ExtensionContext, "cwd">): Promise<boolean> {

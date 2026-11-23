@@ -1,17 +1,10 @@
-// No radio is preselected: the host submits the form's current values when its timeout ends, so a
-// preselected recommendation would come back looking like the user's choice.
-// An option's tradeoff and notes sit inside its radio's <label>, so they draw under that option's
-// row. Each such line is one <em> of plain text: Tern's own omp view joins a label's lines, and the
-// plugin's Tern stylesheet (tern/ask-more.css) puts each <em> of an option label on its own line, so
-// an inline <code> would split a line there. A <label> keeps only an image's alt text, so option
-// demos go above the radio group instead.
 import { resolveMermaidAscii } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
 import type { QuestionDemos, ResolvedDemo } from "./demo.ts";
-import type { AskQuestion, DemoFrame } from "./schema.ts";
+import type { AskOption, AskQuestion, DemoFrame } from "./schema.ts";
 
-export function escapeHtml(text: string): string {
+function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
@@ -91,31 +84,27 @@ function framesHtml(frames: readonly DemoFrame[]): string {
 }
 
 function demoHtml(demo: ResolvedDemo, title: string): string {
-	const caption = demo.caption === undefined ? "" : ` ${inline(demo.caption)}`;
-	const head = `<p><strong>${escapeHtml(title)}</strong>${caption}</p>`;
+	const head = (caption?: string) => `<p><strong>${escapeHtml(title)}</strong>${caption === undefined ? "" : ` ${inline(caption)}`}</p>`;
 	switch (demo.kind) {
 		case "image":
-			return `${head}<img src="${escapeHtml(demo.path)}" alt="${escapeHtml(title)}">`;
+			return `${head(demo.caption)}<img src="${escapeHtml(demo.path)}" alt="${escapeHtml(title)}">`;
 		case "link":
-			return `<p><strong>${escapeHtml(title)}</strong></p><p>${escapeHtml(demo.url)}${demo.caption === undefined ? "" : ` —${caption}`}</p>`;
+			return `${head()}<p>${escapeHtml(demo.url)}${demo.caption === undefined ? "" : ` — ${inline(demo.caption)}`}</p>`;
 		case "unreadable":
-			return `${head}<p><code>${escapeHtml(demo.path)}</code> · ${escapeHtml(demo.error)}</p>`;
+			return `${head(demo.caption)}<p><code>${escapeHtml(demo.path)}</code> · ${escapeHtml(demo.error)}</p>`;
 		case "frames":
-			return `${head}${framesHtml(demo.frames)}`;
+			return `${head()}${framesHtml(demo.frames)}`;
 	}
 }
 
-function optionLabel(question: AskQuestion, index: number): string {
-	const option = question.options[index];
-	if (option === undefined) return "";
-	const recommended = index === question.recommended ? ` (${escapeHtml(tr("recommended", "推荐"))})` : "";
+function optionLabel(option: AskOption, recommended: boolean): string {
 	const lines = [
 		`${tr("Tradeoff", "取舍")}: ${option.tradeoff}`,
 		...(option.description === undefined ? [] : [option.description]),
 		...(option.holds_when === undefined ? [] : [`${tr("Holds when", "成立条件")}: ${option.holds_when}`]),
 		...(option.cost === undefined ? [] : [`${tr("Cost", "成本")}: ${option.cost}`]),
 	];
-	const name = `<strong>${escapeHtml(option.label)}</strong>${recommended}`;
+	const name = `<strong>${escapeHtml(option.label)}</strong>${recommended ? ` (${escapeHtml(tr("recommended", "推荐"))})` : ""}`;
 	return [name, ...lines.map((line) => `<em>${escapeHtml(line)}</em>`)].join("<br>");
 }
 
@@ -139,7 +128,9 @@ function questionHtml(question: AskQuestion, evidence: readonly ResolvedEvidence
 	}
 	blocks.push(`<p>${inline(question.question)}</p>`);
 	for (const [index, option] of question.options.entries()) {
-		blocks.push(`<label><input type="radio" name="${name}" value="${escapeHtml(option.label)}">${optionLabel(question, index)}</label>`);
+		blocks.push(
+			`<label><input type="radio" name="${name}" value="${escapeHtml(option.label)}">${optionLabel(option, index === question.recommended)}</label>`,
+		);
 	}
 	return `<fieldset>${blocks.join("\n")}</fieldset>`;
 }

@@ -1,8 +1,9 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { tr } from "../omomp-shared/i18n.ts";
+import { fileErrorText } from "./errors.ts";
 import type { EvidenceRef, FileEvidence, TextEvidence } from "./schema.ts";
 
 const HEAD_LINES = 40;
@@ -22,11 +23,6 @@ export type ResolvedEvidence =
 
 function displayLine(line: string): string {
 	return line.replace(/\t/g, "  ").replace(/\s+$/u, "");
-}
-
-function noteOf(ref: EvidenceRef): { note?: string } {
-	const note = ref.note?.trim();
-	return note ? { note } : {};
 }
 
 function fileWindow(ref: FileEvidence): { start: number; end: number } {
@@ -54,20 +50,18 @@ async function readWindow(absolute: string, start: number, end: number): Promise
 }
 
 async function readFileRef(ref: FileEvidence, cwd: string): Promise<ResolvedEvidence> {
-	const note = noteOf(ref);
-	const absolute = isAbsolute(ref.path) ? ref.path : resolve(cwd, ref.path);
+	const note = ref.note?.trim() || undefined;
+	const absolute = resolve(cwd, ref.path);
 	try {
-		if ((await stat(absolute)).isDirectory()) return { kind: "directory", path: ref.path, ...note };
+		if ((await stat(absolute)).isDirectory()) return { kind: "directory", path: ref.path, note };
 		const window = fileWindow(ref);
 		const lines = await readWindow(absolute, window.start, window.end);
 		if (lines.length === 0) {
-			return { kind: "unreadable", path: ref.path, error: tr("line window is outside the file", "行段超出文件范围"), ...note };
+			return { kind: "unreadable", path: ref.path, error: tr("line window is outside the file", "行段超出文件范围"), note };
 		}
-		return { kind: "file", path: ref.path, start: window.start, end: window.start + lines.length - 1, lines, ...note };
+		return { kind: "file", path: ref.path, start: window.start, end: window.start + lines.length - 1, lines, note };
 	} catch (error) {
-		const missing = typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-		const reason = missing ? tr("file not found", "文件不存在") : error instanceof Error ? error.message : String(error);
-		return { kind: "unreadable", path: ref.path, error: reason, ...note };
+		return { kind: "unreadable", path: ref.path, error: fileErrorText(error), note };
 	}
 }
 
@@ -76,7 +70,7 @@ function quotedText(ref: TextEvidence): ResolvedEvidence {
 		.replace(/\r?\n$/, "")
 		.split(/\r?\n/)
 		.map(displayLine);
-	return { kind: "text", source: ref.source.trim(), ...(ref.lang ? { lang: ref.lang } : {}), lines, ...noteOf(ref) };
+	return { kind: "text", source: ref.source.trim(), lang: ref.lang, lines, note: ref.note?.trim() || undefined };
 }
 
 function resolveRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence> {
@@ -88,7 +82,6 @@ function resolveRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence> {
 	}
 }
 
-export async function resolveEvidence(refs: readonly EvidenceRef[] | undefined, cwd: string): Promise<readonly ResolvedEvidence[]> {
-	if (refs === undefined) return [];
+export function resolveEvidence(refs: readonly EvidenceRef[], cwd: string): Promise<readonly ResolvedEvidence[]> {
 	return Promise.all(refs.map((ref) => resolveRef(ref, cwd)));
 }

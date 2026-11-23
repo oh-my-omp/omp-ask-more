@@ -2,9 +2,15 @@ import { describe, expect, it } from "bun:test";
 import { type JudgmentRequest, type JudgmentResult, type Questions, tokenUsage } from "@oh-my-pi/pi-ai";
 import { type BranchEntry, candidateTerms, gateUnlessRetry, type NoulJudge, readabilityGate, sentencesOf } from "../src/readability.ts";
 import { rejectedResult } from "../src/result.ts";
-import { type AskQuestion, askParamsSchema } from "../src/schema.ts";
+import { type AskParamsWire, type AskQuestion, parseParams } from "../src/schema.ts";
 
-const questions: readonly AskQuestion[] = askParamsSchema.parse({
+function parsed(params: AskParamsWire): readonly AskQuestion[] {
+	const checked = parseParams(params);
+	if (!checked.ok) throw new Error(checked.problems.join("\n"));
+	return checked.questions;
+}
+
+const questions = parsed({
 	questions: [
 		{
 			id: "retry",
@@ -25,7 +31,7 @@ const questions: readonly AskQuestion[] = askParamsSchema.parse({
 			],
 		},
 	],
-}).questions;
+});
 
 interface Verdict {
 	readonly actor?: number;
@@ -117,7 +123,7 @@ describe("readability gate", () => {
 	});
 
 	it("rejects a code that is neither common knowledge nor explained, and passes one that is either", async () => {
-		const coded = askParamsSchema.parse({
+		const coded = parsed({
 			questions: [
 				{
 					id: "coded",
@@ -129,7 +135,7 @@ describe("readability gate", () => {
 					],
 				},
 			],
-		}).questions;
+		});
 		const gate = await readabilityGate(
 			scripted((subject) => (subject === "K6" ? { known: 0.1, said: 0.2 } : subject === "#592" ? { known: 0.1, said: 0.9 } : {})),
 			coded,

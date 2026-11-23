@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tr } from "../omomp-shared/i18n.ts";
 import { resolveEvidence } from "../src/brief.ts";
-import { evidenceSchema } from "../src/schema.ts";
+import type { FileEvidence } from "../src/schema.ts";
 
 describe("resolveEvidence", () => {
 	const dir = mkdtempSync(join(tmpdir(), "ask-more-brief-"));
@@ -12,7 +12,7 @@ describe("resolveEvidence", () => {
 	writeFileSync(join(dir, "crlf.txt"), "a\r\nb\r\nc\r\n");
 	const numbered = Array.from({ length: 9000 }, (_, index) => `line ${index + 1} ${"x".repeat(60)}`);
 	writeFileSync(join(dir, "large.txt"), `${numbered.join("\n")}\n`);
-	const file = (fields: Record<string, unknown>) => evidenceSchema.parse({ kind: "file", ...fields });
+	const file = (fields: Omit<FileEvidence, "kind">): FileEvidence => ({ kind: "file", ...fields });
 
 	it("reads one line for a start alone, and cuts a window at the end of the file", async () => {
 		const [single, cut] = await resolveEvidence([file({ path: "five.ts", start: 2 }), file({ path: "five.ts", start: 4, end: 40 })], dir);
@@ -47,15 +47,7 @@ describe("resolveEvidence", () => {
 
 	it("shows quoted text as its lines under the source the model names, without reading anything", async () => {
 		const [quoted] = await resolveEvidence(
-			[
-				evidenceSchema.parse({
-					kind: "text",
-					source: "  bun test  ",
-					text: "3 pass\n\t1 fail  \n",
-					lang: "text",
-					note: "after the change",
-				}),
-			],
+			[{ kind: "text", source: "  bun test  ", text: "3 pass\n\t1 fail  \n", lang: "text", note: "after the change" }],
 			join(dir, "missing"),
 		);
 		expect(quoted).toEqual({ kind: "text", source: "bun test", lang: "text", lines: ["3 pass", "  1 fail"], note: "after the change" });
