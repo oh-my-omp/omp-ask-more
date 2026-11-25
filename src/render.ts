@@ -1,6 +1,8 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent";
 import { type JSX, type JSXNode, jsx } from "@oh-my-pi/pi-tui";
+import { replaceTabs } from "@oh-my-pi/pi-tui/text/width";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
 
 type Answer = AskToolDetails["answers"][number];
 type Note = NonNullable<AskToolDetails["notes"]>[number];
@@ -12,12 +14,16 @@ function node<K extends keyof JSX.IntrinsicElements>(kind: K, props: JSX.Intrins
 	return jsx(kind, props);
 }
 
+function clean(text: string): string {
+	return replaceTabs(sanitizeText(text));
+}
+
 function oneLine(text: string): string {
-	return text.replace(/\s+/g, " ").trim();
+	return clean(text).replace(/\s+/g, " ").trim();
 }
 
 function answerSection(answer: Answer, notes: readonly Note[]): JSXNode {
-	const shown = answer.answer.trim();
+	const shown = clean(answer.answer).trim();
 	return node("section", {
 		children: [
 			node("text", { spans: [{ t: oneLine(answer.question) }], wrap: "word" }),
@@ -35,7 +41,7 @@ function answerSection(answer: Answer, notes: readonly Note[]): JSXNode {
 				node("text", {
 					spans: [
 						{ t: "✎ ", s: "dim" },
-						{ t: `${oneLine(note.option)}: ${oneLine(note.text)}`, s: "em" },
+						{ t: `${oneLine(note.option)}: ${clean(note.text)}`, s: "em" },
 					],
 					wrap: "word",
 				}),
@@ -47,10 +53,7 @@ function answerSection(answer: Answer, notes: readonly Note[]): JSXNode {
 export function renderAskResult(result: AgentToolResult<AskToolDetails>): JSXNode {
 	const details = result.details;
 	if (result.isError === true || details === undefined || details.answers.length === 0) {
-		const text = result.content
-			.flatMap((part) => (part.type === "text" ? [part.text] : []))
-			.join("\n")
-			.trim();
+		const text = clean(result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")).trim();
 		return node("text", { spans: [{ t: text, s: "dim" }], wrap: "word" });
 	}
 	const notes = details.notes ?? [];
