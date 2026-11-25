@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the plugin failing to load on omp 19.2, which moved the HTML form helpers, the skill prompt message type and the Mermaid renderer, and removed the ask result renderer the transcript card used; omp then offered its own `ask` instead. The card now draws each question, answer, option note and the timeout notice under the host's ask head, as one card for the call and its result
+
 ## [0.4.0] - 2026-11-23
 
 ### Breaking Changes

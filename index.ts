@@ -3,7 +3,6 @@ import type { AskToolDetails, ExtensionAPI, ExtensionContext, ToolDefinition } f
 import { journalJudgmentUsage, resolveJudge, sharedJudgmentCache } from "@oh-my-pi/pi-coding-agent/judgment";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session-handle";
-import { askToolRenderer } from "@oh-my-pi/pi-coding-agent/tools";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { tr } from "./omomp-shared/i18n.ts";
 import { resolveEvidence } from "./src/brief.ts";
@@ -12,6 +11,7 @@ import { DESCRIPTION, docTopics, registerAskTopics } from "./src/description.ts"
 import { errorText } from "./src/errors.ts";
 import { compileForm } from "./src/form.ts";
 import { type Gate, gateUnlessRetry, type NoulJudge, readabilityGate } from "./src/readability.ts";
+import { renderAskResult } from "./src/render.ts";
 import { answeredResult, labelMap, rejectedResult } from "./src/result.ts";
 import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "./src/schema.ts";
 import { readReadabilityJudge } from "./src/settings.ts";
@@ -98,11 +98,12 @@ export default function askNg(pi: ExtensionAPI): void {
 		strict: true,
 		loadMode: "essential",
 		execute: (_toolCallId, params, signal, onUpdate, ctx) => ask(ctx, params, signal, onUpdate),
-		renderResult: (result, options, theme) => askToolRenderer.renderResult(result, options, theme),
-		describeResult: (result, options) => askToolRenderer.describeResult(result, options),
+		renderResult: (result) => renderAskResult(result),
+		mergeCallAndResult: true,
 	} satisfies ToolDefinition<typeof parametersSchema, AskToolDetails> & {
 		docTopics(): Readonly<Record<string, string>>;
 		concurrency: "exclusive";
+		mergeCallAndResult: true;
 	};
 	pi.registerTool(tool);
 	const tern = ensureTernPlugin();
