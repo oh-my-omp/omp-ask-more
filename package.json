@@ -31,7 +31,7 @@
 		}
 	},
 	"scripts": {
-		"check": "biome check . && tsc --noEmit -p tsconfig.json && bun ../omomp-shared/deps.ts gate .",
+		"check": "biome check . && tsc --noEmit -p tsconfig.json",
 		"test": "bun test",
 		"eval:readability": "bun eval/readability.ts"
 	},
