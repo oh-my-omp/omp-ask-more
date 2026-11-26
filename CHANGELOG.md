@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `evidence_files` showing a picture or other non-text file as 40 numbered lines of raw bytes on the ask card: a picture now appears as the image itself under its path, and any other non-text file shows its path with `not a text file` and no lines
+
 ## [0.4.1] - 2026-11-26
 
 ### Fixed
