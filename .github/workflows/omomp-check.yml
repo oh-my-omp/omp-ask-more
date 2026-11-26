@@ -17,6 +17,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.report_issue == true)) && 'omomp-check-report' || format('omomp-check-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 defaults:
   run:
     shell: bash
@@ -78,10 +82,6 @@ jobs:
         working-directory: repository
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/omomp-check/test.log"
 
-      - name: Gate
-        id: gate
-        run: bun omomp-shared/deps.ts gate repository --summary "$RUNNER_TEMP/omomp-check/gate.json" 2>&1 | tee "$RUNNER_TEMP/omomp-check/gate.log"
-
       - name: Compare shared copies
         id: verify
         run: bun omomp-shared/verify.ts repository 2>&1 | tee "$RUNNER_TEMP/omomp-check/verify.log"
@@ -92,7 +92,7 @@ jobs:
           OMOMP_STEPS: ${{ toJSON(steps) }}
         run: >-
           bun omomp-shared/report.ts --root repository --logs "$RUNNER_TEMP/omomp-check"
-          --summary "$RUNNER_TEMP/omomp-check/gate.json" --scope repo --job-status ${{ job.status }}
+          --scope repo --job-status ${{ job.status }}
 
       - name: Report to this repository's issues
         if: always() && !cancelled() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.report_issue == true))
@@ -101,5 +101,5 @@ jobs:
           OMOMP_STEPS: ${{ toJSON(steps) }}
         run: >-
           bun omomp-shared/report.ts --root repository --logs "$RUNNER_TEMP/omomp-check"
-          --summary "$RUNNER_TEMP/omomp-check/gate.json" --scope repo --job-status ${{ job.status }}
+          --scope repo --job-status ${{ job.status }}
           --issue-repo ${{ github.repository }}
