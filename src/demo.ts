@@ -1,13 +1,9 @@
-import { open, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseImageMetadata } from "@oh-my-pi/pi-utils";
 import { fileErrorText } from "./errors.ts";
+import { sniffFile } from "./file-content.ts";
 import type { AskQuestion, Demo, DemoFrame } from "./schema.ts";
-
-const MAX_PICTURE_BYTES = 10 * 1024 * 1024;
-const SNIFF_BYTES = 4096;
-const RASTER_HEAD_BYTES = 64;
 
 export type ResolvedDemo =
 	| { readonly kind: "image"; readonly path: string; readonly caption?: string }
@@ -20,19 +16,6 @@ export interface QuestionDemos {
 	readonly options: readonly (ResolvedDemo | undefined)[];
 }
 
-async function isPicture(absolute: string): Promise<boolean> {
-	const handle = await open(absolute, "r");
-	try {
-		const head = new Uint8Array(SNIFF_BYTES);
-		const { bytesRead } = await handle.read(head, 0, SNIFF_BYTES, 0);
-		const bytes = head.subarray(0, bytesRead);
-		if (parseImageMetadata(bytes.subarray(0, RASTER_HEAD_BYTES))) return true;
-		return /<svg[\s>]/i.test(new TextDecoder().decode(bytes));
-	} finally {
-		await handle.close();
-	}
-}
-
 async function resolveDemo(demo: Demo, cwd: string): Promise<ResolvedDemo> {
 	switch (demo.kind) {
 		case "frames":
@@ -41,7 +24,7 @@ async function resolveDemo(demo: Demo, cwd: string): Promise<ResolvedDemo> {
 			const absolute = resolve(cwd, demo.path);
 			try {
 				const info = await stat(absolute);
-				if (info.isFile() && info.size <= MAX_PICTURE_BYTES && (await isPicture(absolute))) {
+				if (info.isFile() && (await sniffFile(absolute, info.size)) === "picture") {
 					return { kind: "image", path: absolute, caption: demo.caption };
 				}
 				return { kind: "link", url: pathToFileURL(absolute).href, caption: demo.caption };

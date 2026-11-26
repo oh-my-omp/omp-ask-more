@@ -132,6 +132,25 @@ describe("compileForm", () => {
 		]);
 	});
 
+	it("draws picture evidence as an image under its path, and other non-text evidence as a note with no lines", () => {
+		const html = compileForm(
+			[cache],
+			[
+				[
+					{ kind: "image", path: "shots/ttl.gif", src: "/work/shots/ttl.gif", note: "stale reads" },
+					{ kind: "binary", path: "bin/tool", note: "the build" },
+				],
+			],
+			[{ options: [] }],
+		);
+		const blocks = parseHtmlForm(html).sections.flatMap((section) => section.blocks);
+		expect(blocks).toContainEqual({ kind: "image", src: "/work/shots/ttl.gif", alt: "shots/ttl.gif" });
+		const texts = blocks.flatMap((block) => (block.kind === "text" ? [spansText(block.spans)] : []));
+		expect(texts).toContain("Evidence shots/ttl.gif — stale reads");
+		expect(texts).toContain("Evidence bin/tool · not a text file — the build");
+		expect(blocks.some((block) => block.kind === "pre")).toBe(false);
+	});
+
 	it("draws a picture demo as an image with its absolute path", async () => {
 		const blocks = await demoBlocks({
 			...cache,

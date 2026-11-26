@@ -39,6 +39,10 @@ function evidenceHtml(entry: ResolvedEvidence): string {
 			return `${head(`<code>${escapeHtml(`${entry.path}:${entry.start}-${entry.end}`)}</code>`)}<pre>${escapeHtml(numbered(entry.lines, entry.start))}</pre>`;
 		case "text":
 			return `${head(`${escapeHtml(entry.source)} · ${escapeHtml(tr("quoted directly, not read from disk", "直接引用，未从磁盘读取核对"))}`)}<pre>${escapeHtml(entry.lines.join("\n"))}</pre>`;
+		case "image":
+			return `${head(`<code>${escapeHtml(entry.path)}</code>`)}<img src="${escapeHtml(entry.src)}" alt="${escapeHtml(entry.path)}">`;
+		case "binary":
+			return head(`<code>${escapeHtml(entry.path)}</code> · ${escapeHtml(tr("not a text file", "不是文本文件"))}`);
 		case "directory":
 			return head(`<code>${escapeHtml(entry.path)}</code> · ${escapeHtml(tr("a directory", "这是目录"))}`);
 		case "unreadable":
