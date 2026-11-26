@@ -1,7 +1,7 @@
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AskToolDetails } from "@oh-my-pi/pi-coding-agent";
-import { OTHER_LABEL } from "@oh-my-pi/pi-tui/html-form/data";
-import { parseHtmlForm, spansText } from "@oh-my-pi/pi-tui/html-form/parse";
+import { OTHER_LABEL } from "@oh-my-pi/pi-coding-agent/tools/html-form/data";
+import { parseHtmlForm, spansText } from "@oh-my-pi/pi-coding-agent/tools/html-form/parse";
 import type { AskQuestion } from "./schema.ts";
 
 const NO_ANSWER = "(no answer)";

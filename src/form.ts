@@ -1,4 +1,4 @@
-import { resolveMermaidAscii } from "@oh-my-pi/pi-tui/theme/mermaid-cache";
+import { renderMermaidAsciiSafe } from "@oh-my-pi/pi-utils/mermaid-ascii";
 import { tr } from "../omomp-shared/i18n.ts";
 import type { ResolvedEvidence } from "./brief.ts";
 import type { QuestionDemos, ResolvedDemo } from "./demo.ts";
@@ -46,8 +46,13 @@ function evidenceHtml(entry: ResolvedEvidence): string {
 	}
 }
 
+function mermaidArt(source: string): string | null {
+	const normalized = source.replace(/\r\n?/g, "\n").trim();
+	return normalized === "" ? null : renderMermaidAsciiSafe(normalized, { colorMode: "none" });
+}
+
 function diagramHtml(source: string): string {
-	const art = resolveMermaidAscii(source) ?? source.trim();
+	const art = mermaidArt(source) ?? source.trim();
 	return `<p><strong>${escapeHtml(tr("Diagram", "图"))}</strong></p><pre>${escapeHtml(art)}</pre>`;
 }
 
@@ -65,7 +70,7 @@ function markdownHtml(markdown: string): string {
 	for (const match of markdown.matchAll(FENCE)) {
 		blocks.push(...prose(markdown.slice(at, match.index)));
 		const [, info = "", body = ""] = match;
-		const art = info.trim().toLowerCase() === "mermaid" ? (resolveMermaidAscii(body) ?? body) : body;
+		const art = info.trim().toLowerCase() === "mermaid" ? (mermaidArt(body) ?? body) : body;
 		blocks.push(`<pre>${escapeHtml(art)}</pre>`);
 		at = match.index + match[0].length;
 	}

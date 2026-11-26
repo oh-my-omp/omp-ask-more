@@ -1,11 +1,11 @@
 import { open, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { MAX_MEDIA_BYTES } from "@oh-my-pi/pi-tui/media";
 import { parseImageMetadata } from "@oh-my-pi/pi-utils";
 import { fileErrorText } from "./errors.ts";
 import type { AskQuestion, Demo, DemoFrame } from "./schema.ts";
 
+const MAX_PICTURE_BYTES = 10 * 1024 * 1024;
 const SNIFF_BYTES = 4096;
 const RASTER_HEAD_BYTES = 64;
 
@@ -41,7 +41,7 @@ async function resolveDemo(demo: Demo, cwd: string): Promise<ResolvedDemo> {
 			const absolute = resolve(cwd, demo.path);
 			try {
 				const info = await stat(absolute);
-				if (info.isFile() && info.size <= MAX_MEDIA_BYTES && (await isPicture(absolute))) {
+				if (info.isFile() && info.size <= MAX_PICTURE_BYTES && (await isPicture(absolute))) {
 					return { kind: "image", path: absolute, caption: demo.caption };
 				}
 				return { kind: "link", url: pathToFileURL(absolute).href, caption: demo.caption };
