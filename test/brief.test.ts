@@ -22,6 +22,11 @@ describe("resolveEvidence", () => {
 	);
 	writeFileSync(join(dir, "tool.bin"), Uint8Array.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]));
 	writeFileSync(join(dir, "wide.txt"), `${"x".repeat(4095)}中\nsecond\n`);
+	writeFileSync(join(dir, "cut.txt"), Uint8Array.from([0x61, 0x0a, 0xe4, 0xb8]));
+	writeFileSync(
+		join(dir, "bad-tail.txt"),
+		Uint8Array.from([...new TextEncoder().encode("x".repeat(4095)), 0xe4, 0x41, ...new TextEncoder().encode("\nmore text\n")]),
+	);
 
 	it("reads one line for a start alone, and cuts a window at the end of the file", async () => {
 		const [single, cut] = await resolveEvidence([file({ path: "five.ts", start: 2 }), file({ path: "five.ts", start: 4, end: 40 })], dir);
@@ -66,6 +71,12 @@ describe("resolveEvidence", () => {
 	it("reads a UTF-8 file whose first 4096 bytes end inside a character as text", async () => {
 		const [wide] = await resolveEvidence([file({ path: "wide.txt", start: 2 })], dir);
 		expect(wide).toEqual({ kind: "file", path: "wide.txt", start: 2, end: 2, lines: ["second"] });
+	});
+
+	it("treats a file ending inside a character, or with an invalid sequence across the first 4096 bytes, as binary", async () => {
+		const [cut, badTail] = await resolveEvidence([file({ path: "cut.txt" }), file({ path: "bad-tail.txt" })], dir);
+		expect(cut).toEqual({ kind: "binary", path: "cut.txt" });
+		expect(badTail).toEqual({ kind: "binary", path: "bad-tail.txt" });
 	});
 
 	it("shows quoted text as its lines under the source the model names, without reading anything", async () => {

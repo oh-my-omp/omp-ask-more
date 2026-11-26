@@ -3,14 +3,15 @@ import { parseImageMetadata } from "@oh-my-pi/pi-utils";
 
 const MAX_PICTURE_BYTES = 10 * 1024 * 1024;
 const SNIFF_BYTES = 4096;
+const UTF8_TAIL_BYTES = 3;
 const RASTER_HEAD_BYTES = 64;
 
 export type FileContent = "picture" | "text" | "binary";
 
-function isText(head: Uint8Array): boolean {
+function isText(head: Uint8Array, whole: boolean): boolean {
 	if (head.includes(0)) return false;
 	try {
-		new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: true });
+		new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: !whole });
 		return true;
 	} catch {
 		return false;
@@ -25,10 +26,10 @@ function isPicture(head: Uint8Array, text: boolean): boolean {
 export async function sniffFile(absolute: string, size: number): Promise<FileContent> {
 	const handle = await open(absolute, "r");
 	try {
-		const buffer = new Uint8Array(SNIFF_BYTES);
-		const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
+		const buffer = new Uint8Array(SNIFF_BYTES + UTF8_TAIL_BYTES);
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 		const head = buffer.subarray(0, bytesRead);
-		const text = isText(head);
+		const text = isText(head, bytesRead < buffer.length);
 		if (size <= MAX_PICTURE_BYTES && isPicture(head, text)) return "picture";
 		return text ? "text" : "binary";
 	} finally {
