@@ -7,3 +7,5 @@ You MUST put every question that needs the user's answer through `ask`: a decisi
 Everything else the instruction requires still applies.
 
 Do not ask for what your tools can find out or for choices that are yours to make: act and state what you chose.
+
+For `ask` arguments, blank optional strings, empty arrays or objects, and `null` behave like omitted fields. Required fields remain required. An empty item inside an array is rejected with its field path and index.
