@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { tr } from "../omomp-shared/i18n.ts";
 import { fileErrorText } from "./errors.ts";
+import { sniffFile } from "./file-content.ts";
 import type { EvidenceRef, FileEvidence, TextEvidence } from "./schema.ts";
 
 const HEAD_LINES = 40;
@@ -17,6 +18,8 @@ export type ResolvedEvidence =
 			readonly lines: readonly string[];
 			readonly note?: string;
 	  }
+	| { readonly kind: "image"; readonly path: string; readonly src: string; readonly note?: string }
+	| { readonly kind: "binary"; readonly path: string; readonly note?: string }
 	| { readonly kind: "directory"; readonly path: string; readonly note?: string }
 	| { readonly kind: "text"; readonly source: string; readonly lang?: string; readonly lines: readonly string[]; readonly note?: string }
 	| { readonly kind: "unreadable"; readonly path: string; readonly error: string; readonly note?: string };
@@ -53,7 +56,16 @@ async function readFileRef(ref: FileEvidence, cwd: string): Promise<ResolvedEvid
 	const note = ref.note?.trim();
 	const absolute = resolve(cwd, ref.path);
 	try {
-		if ((await stat(absolute)).isDirectory()) return { kind: "directory", path: ref.path, note };
+		const info = await stat(absolute);
+		if (info.isDirectory()) return { kind: "directory", path: ref.path, note };
+		switch (await sniffFile(absolute, info.size)) {
+			case "picture":
+				return { kind: "image", path: ref.path, src: absolute, note };
+			case "binary":
+				return { kind: "binary", path: ref.path, note };
+			case "text":
+				break;
+		}
 		const window = fileWindow(ref);
 		const lines = await readWindow(absolute, window.start, window.end);
 		if (lines.length === 0) {

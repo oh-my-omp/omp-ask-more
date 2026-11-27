@@ -13,6 +13,20 @@ describe("resolveEvidence", () => {
 	const numbered = Array.from({ length: 9000 }, (_, index) => `line ${index + 1} ${"x".repeat(60)}`);
 	writeFileSync(join(dir, "large.txt"), `${numbered.join("\n")}\n`);
 	const file = (fields: Omit<FileEvidence, "kind">): FileEvidence => ({ kind: "file", ...fields });
+	writeFileSync(
+		join(dir, "dot.gif"),
+		Uint8Array.from([
+			0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x21, 0xf9, 0x04,
+			0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b,
+		]),
+	);
+	writeFileSync(join(dir, "tool.bin"), Uint8Array.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]));
+	writeFileSync(join(dir, "wide.txt"), `${"x".repeat(4095)}中\nsecond\n`);
+	writeFileSync(join(dir, "cut.txt"), Uint8Array.from([0x61, 0x0a, 0xe4, 0xb8]));
+	writeFileSync(
+		join(dir, "bad-tail.txt"),
+		Uint8Array.from([...new TextEncoder().encode("x".repeat(4095)), 0xe4, 0x41, ...new TextEncoder().encode("\nmore text\n")]),
+	);
 
 	it("reads one line for a start alone, and cuts a window at the end of the file", async () => {
 		const [single, cut] = await resolveEvidence([file({ path: "five.ts", start: 2 }), file({ path: "five.ts", start: 4, end: 40 })], dir);
@@ -43,6 +57,26 @@ describe("resolveEvidence", () => {
 		const [head, crlf] = await resolveEvidence([file({ path: "large.txt" }), file({ path: "crlf.txt", start: 1, end: 3 })], dir);
 		expect(head).toEqual({ kind: "file", path: "large.txt", start: 1, end: 40, lines: numbered.slice(0, 40) });
 		expect(crlf).toEqual({ kind: "file", path: "crlf.txt", start: 1, end: 3, lines: ["a", "b", "c"] });
+	});
+
+	it("shows a picture as an image at its absolute path and any other non-text file as binary, reading no lines", async () => {
+		const [picture, binary] = await resolveEvidence(
+			[file({ path: "dot.gif", start: 1, end: 3, note: "the dot" }), file({ path: "tool.bin", note: "an executable" })],
+			dir,
+		);
+		expect(picture).toEqual({ kind: "image", path: "dot.gif", src: join(dir, "dot.gif"), note: "the dot" });
+		expect(binary).toEqual({ kind: "binary", path: "tool.bin", note: "an executable" });
+	});
+
+	it("reads a UTF-8 file whose first 4096 bytes end inside a character as text", async () => {
+		const [wide] = await resolveEvidence([file({ path: "wide.txt", start: 2 })], dir);
+		expect(wide).toEqual({ kind: "file", path: "wide.txt", start: 2, end: 2, lines: ["second"] });
+	});
+
+	it("treats a file ending inside a character, or with an invalid sequence across the first 4096 bytes, as binary", async () => {
+		const [cut, badTail] = await resolveEvidence([file({ path: "cut.txt" }), file({ path: "bad-tail.txt" })], dir);
+		expect(cut).toEqual({ kind: "binary", path: "cut.txt" });
+		expect(badTail).toEqual({ kind: "binary", path: "bad-tail.txt" });
 	});
 
 	it("shows quoted text as its lines under the source the model names, without reading anything", async () => {
