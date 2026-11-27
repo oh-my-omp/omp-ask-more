@@ -50,7 +50,7 @@ async function readWindow(absolute: string, start: number, end: number): Promise
 }
 
 async function readFileRef(ref: FileEvidence, cwd: string): Promise<ResolvedEvidence> {
-	const note = ref.note?.trim() || undefined;
+	const note = ref.note?.trim();
 	const absolute = resolve(cwd, ref.path);
 	try {
 		if ((await stat(absolute)).isDirectory()) return { kind: "directory", path: ref.path, note };
@@ -70,7 +70,7 @@ function quotedText(ref: TextEvidence): ResolvedEvidence {
 		.replace(/\r?\n$/, "")
 		.split(/\r?\n/)
 		.map(displayLine);
-	return { kind: "text", source: ref.source.trim(), lang: ref.lang, lines, note: ref.note?.trim() || undefined };
+	return { kind: "text", source: ref.source.trim(), lang: ref.lang, lines, note: ref.note?.trim() };
 }
 
 function resolveRef(ref: EvidenceRef, cwd: string): Promise<ResolvedEvidence> {

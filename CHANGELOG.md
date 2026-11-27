@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Treat blank optional `ask` arguments as omitted; keep blank required arguments refused and reject empty array items with their paths. Do not use empty values to provide required options or brief fields.
+
 ## [0.4.1] - 2026-11-26
 
 ### Fixed

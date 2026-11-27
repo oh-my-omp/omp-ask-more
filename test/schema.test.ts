@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { toolWireSchema, tryEnforceStrictSchema } from "@oh-my-pi/pi-ai/utils/schema";
+import { omompTool } from "../omomp-shared/tool-entry.ts";
 import { type AskParamsWire, type AskQuestion, parametersSchema, parseParams } from "../src/schema.ts";
 
 type QuestionWire = AskParamsWire["questions"][number];
@@ -121,16 +122,21 @@ describe("parseParams validation", () => {
 		expect(problems(wire())).toEqual([]);
 	});
 
-	it("validates every question and names the one that is wrong", () => {
+	it("leaves blank required-field rejection to the registration boundary", () => {
+		expect(problems(wire({ brief: { where: "   ", what: "选重试策略", how: "A 要迁移" } }))).toEqual([]);
+		expect(problems(wire({ demo_frames: [{ body: "ok" }, { body: "  \n" }] }))).toEqual([]);
+	});
+
+	it("validates every question and names the one with an invalid label", () => {
 		const second = question({
 			id: "budget",
 			options: [
 				{ label: "指数退避", tradeoff: "安全，但要迁移" },
-				{ label: "固定 3 次", tradeoff: "  " },
+				{ label: "Other strategy", tradeoff: "迁移成本有限" },
 			],
 		});
 		expect(problems({ questions: [question(), second] })).toEqual([
-			"questions[1].options[1].tradeoff: empty; say what the option buys and what it costs",
+			'questions[1].options[1].label: "Other strategy" starts with Other, which the form keeps for the user\'s own answer; give the option another label',
 		]);
 	});
 
@@ -138,10 +144,6 @@ describe("parseParams validation", () => {
 		expect(problems({ questions: [question(), question()] })).toEqual([
 			'questions[1].id: duplicate "retry"; every question needs its own id',
 		]);
-	});
-
-	it("rejects an empty brief section", () => {
-		expect(problems(wire({ brief: { where: "   ", what: "选重试策略", how: "A 要迁移" } }))).toEqual(["questions[0].brief.where: empty"]);
 	});
 
 	it("rejects a label the form takes for the user's own answer", () => {
@@ -187,25 +189,10 @@ describe("parseParams validation", () => {
 		]);
 	});
 
-	it("rejects quoted text without a one-line source, or without text", () => {
-		expect(
-			problems(
-				wire({
-					evidence_quotes: [
-						{ source: "bun test\n(run 2)", text: "3 pass" },
-						{ source: "  ", text: "  " },
-					],
-				}),
-			),
-		).toEqual([
+	it("rejects quoted text with a multi-line source", () => {
+		expect(problems(wire({ evidence_quotes: [{ source: "bun test\n(run 2)", text: "3 pass" }] }))).toEqual([
 			"questions[0].brief.evidence[0].source: more than one line; name where the text came from in one line and put the text in text",
-			"questions[0].brief.evidence[1].source: empty",
-			"questions[0].brief.evidence[1].text: empty",
 		]);
-	});
-
-	it("rejects a frames demo whose frame is blank", () => {
-		expect(problems(wire({ demo_frames: [{ body: "ok" }, { body: "  \n" }] }))).toEqual(["questions[0].brief.demo.frames[1].body: empty"]);
 	});
 });
 
@@ -215,5 +202,78 @@ describe("strict tool calling", () => {
 			typeof toolWireSchema
 		>[0]);
 		expect(tryEnforceStrictSchema(wireSchema as Record<string, unknown>).strict).toBe(true);
+	});
+});
+
+function boundaryCaller() {
+	let received: AskParamsWire | undefined;
+	const wrapped = omompTool({
+		name: "ask",
+		parameters: parametersSchema,
+		execute: (_toolCallId: string, params: AskParamsWire) => {
+			received = params;
+			return params;
+		},
+	});
+	return (args: unknown): AskParamsWire => {
+		received = undefined;
+		wrapped.execute("call-1", args as AskParamsWire);
+		if (received === undefined) throw new Error("execute did not run");
+		return received;
+	};
+}
+
+describe("omompTool registration boundary", () => {
+	it("treats blank optional fields, empty arrays, empty objects, and null as omitted while keeping recommended: 0", () => {
+		const call = boundaryCaller();
+		const normalized = call({
+			questions: [
+				{
+					id: "retry",
+					question: "重试应该怎么做？",
+					header: "   ",
+					recommended: 0,
+					brief: { where: "src/retry.ts:41-58", what: "选重试策略", how: "A 要迁移", diagram: "", risks: [] },
+					evidence_files: [],
+					evidence_quotes: null,
+					demo_frames: [],
+					demo_file: {},
+					options: [
+						{ label: "指数退避", tradeoff: "安全，但要迁移", description: "  ", holds_when: null, cost: "", demo_frames: [] },
+						{ label: "固定 3 次", tradeoff: "不迁移", demo_file: { path: "  " } },
+					],
+				},
+			],
+		});
+		expect(normalized).toEqual({
+			questions: [
+				{
+					id: "retry",
+					question: "重试应该怎么做？",
+					recommended: 0,
+					brief: { where: "src/retry.ts:41-58", what: "选重试策略", how: "A 要迁移" },
+					options: [
+						{ label: "指数退避", tradeoff: "安全，但要迁移" },
+						{ label: "固定 3 次", tradeoff: "不迁移" },
+					],
+				},
+			],
+		});
+		expect(parseParams(normalized).ok).toBe(true);
+	});
+
+	it("refuses blank required fields with host Validation failed for tool ask", () => {
+		const call = boundaryCaller();
+		expect(() => call(wire({ brief: { where: "   ", what: "选重试策略", how: "A 要迁移" } }))).toThrow(/Validation failed for tool "ask"/);
+	});
+
+	it("refuses empty array items with their field path and index", () => {
+		const call = boundaryCaller();
+		expect(() => call(wire({ demo_frames: [{ body: "ok" }, { body: "  \n" }] }))).toThrow(
+			/questions\[0\]\.demo_frames\[1\]: array element must not be empty/,
+		);
+		expect(() => call(wire({ brief: { where: "src/retry.ts", what: "选重试策略", how: "A 要迁移", risks: ["   "] } }))).toThrow(
+			/questions\[0\]\.brief\.risks\[0\]: array element must not be empty/,
+		);
 	});
 });
