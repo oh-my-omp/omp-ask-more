@@ -175,8 +175,7 @@ export function parseParams(params: AskParamsWire): Validated {
 		const at = `questions[${index}]`;
 		const question = questionOf(param, at, problems);
 		const id = question.id.trim();
-		if (id.length === 0) problems.push(`${at}.id: empty`);
-		else if (ids.has(id)) problems.push(`${at}.id: duplicate "${question.id}"; every question needs its own id`);
+		if (ids.has(id)) problems.push(`${at}.id: duplicate "${question.id}"; every question needs its own id`);
 		else ids.add(id);
 		problems.push(...questionProblems(question, at));
 		return question;
@@ -186,16 +185,11 @@ export function parseParams(params: AskParamsWire): Validated {
 
 function questionProblems(question: AskQuestion, at: string): string[] {
 	const problems: string[] = [];
-	if (question.question.trim().length === 0) problems.push(`${at}.question: empty`);
-	for (const field of ["where", "what", "how"] as const) {
-		if (question.brief[field].trim().length === 0) problems.push(`${at}.brief.${field}: empty`);
-	}
 	const seen = new Set<string>();
 	question.options.forEach((option, index) => {
 		const optionAt = `${at}.options[${index}]`;
 		const label = option.label.trim();
-		if (label.length === 0) problems.push(`${optionAt}.label: empty`);
-		else if (option.label !== option.label.replace(/\s+/g, " ").trim())
+		if (option.label !== option.label.replace(/\s+/g, " ").trim())
 			problems.push(`${optionAt}.label: one line with single spaces, so the form returns it unchanged`);
 		else if (RESERVED_LABEL.test(label))
 			problems.push(
@@ -203,10 +197,7 @@ function questionProblems(question: AskQuestion, at: string): string[] {
 			);
 		else if (seen.has(label)) problems.push(`${optionAt}.label: duplicate "${option.label}"`);
 		else seen.add(label);
-		if (option.tradeoff.trim().length === 0) problems.push(`${optionAt}.tradeoff: empty; say what the option buys and what it costs`);
-		if (option.demo !== undefined) problems.push(...demoProblems(option.demo, `${optionAt}.demo`));
 	});
-	if (question.brief.demo !== undefined) problems.push(...demoProblems(question.brief.demo, `${at}.brief.demo`));
 	question.brief.evidence.forEach((ref, index) => {
 		problems.push(...evidenceProblems(ref, `${at}.brief.evidence[${index}]`));
 	});
@@ -226,29 +217,16 @@ function evidenceProblems(ref: EvidenceRef, at: string): string[] {
 	}
 }
 
+function textEvidenceProblems(ref: TextEvidence, at: string): string[] {
+	const source = ref.source.trim();
+	return /[\r\n]/.test(source)
+		? [`${at}.source: more than one line; name where the text came from in one line and put the text in text`]
+		: [];
+}
+
 function fileEvidenceProblems(ref: FileEvidence, at: string): string[] {
-	if (ref.path.trim().length === 0) return [`${at}.path: empty`];
 	if (ref.end === undefined) return [];
 	if (ref.start === undefined) return [`${at}.end: ${ref.end} without start; give start too, or leave both out for the file's first lines`];
 	if (ref.end < ref.start) return [`${at}.end: ${ref.end} is before start ${ref.start}`];
 	return [];
-}
-
-function textEvidenceProblems(ref: TextEvidence, at: string): string[] {
-	const problems: string[] = [];
-	const source = ref.source.trim();
-	if (source.length === 0) problems.push(`${at}.source: empty`);
-	else if (/[\r\n]/.test(source))
-		problems.push(`${at}.source: more than one line; name where the text came from in one line and put the text in text`);
-	if (ref.text.trim().length === 0) problems.push(`${at}.text: empty`);
-	return problems;
-}
-
-function demoProblems(demo: Demo, at: string): string[] {
-	switch (demo.kind) {
-		case "file":
-			return demo.path.trim().length === 0 ? [`${at}.path: empty`] : [];
-		case "frames":
-			return demo.frames.flatMap((frame, index) => (frame.body.trim().length === 0 ? [`${at}.frames[${index}].body: empty`] : []));
-	}
 }

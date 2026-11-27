@@ -5,6 +5,7 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { isLocalAgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session-handle";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import { tr } from "./omomp-shared/i18n.ts";
+import { omompTool } from "./omomp-shared/tool-entry.ts";
 import { resolveEvidence } from "./src/brief.ts";
 import { resolveDemos } from "./src/demo.ts";
 import { DESCRIPTION, docTopics, registerAskTopics } from "./src/description.ts";
@@ -105,7 +106,7 @@ export default function askNg(pi: ExtensionAPI): void {
 		concurrency: "exclusive";
 		mergeCallAndResult: true;
 	};
-	pi.registerTool(tool);
+	pi.registerTool(omompTool(tool));
 	const tern = ensureTernPlugin();
 	pi.on("session_start", async (_event, ctx) => {
 		if (ctx.agent.kind !== "main") return;
